@@ -11,7 +11,11 @@ import {
   insertShipmentPaymentSchema,
 } from "@shared/schema";
 import bcrypt from "bcryptjs";
+ codex/modify-payments-listing-to-include-shipments
+import { getPaymentsWithShipments } from "./payments";
+=======
 import { logAuditEvent } from "./audit";
+main
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Setup authentication
@@ -464,14 +468,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Payments
   app.get("/api/payments", isAuthenticated, async (req, res) => {
     try {
-      const payments = await storage.getAllPayments();
-      // Include shipment info
-      const paymentsWithShipments = await Promise.all(
-        payments.map(async (payment) => {
-          const shipment = await storage.getShipment(payment.shipmentId);
-          return { ...payment, shipment };
-        })
-      );
+      const paymentsWithShipments = await getPaymentsWithShipments(storage);
       res.json(paymentsWithShipments);
     } catch (error) {
       res.status(500).json({ message: "Error fetching payments" });
