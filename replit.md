@@ -99,6 +99,10 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **December 2025**: Fixed shipment display issue - costs now calculate at every step, not just step 4
+  - POST /api/shipments now uses latest RMB→EGP exchange rate for preliminary purchase cost calculation
+  - PATCH /api/shipments/:id now always recalculates finalTotalCostEgp on any update
+  - Shipments created without completing all wizard steps now show accurate interim totals
 - Initial implementation of complete shipment management system
 - RTL Arabic UI with proper fonts and layout
 - 4-step shipment wizard with cost calculations
@@ -106,3 +110,18 @@ npm run db:push    # Push database schema changes
 - Supplier and exchange rate management
 - Inventory movement tracking
 - Role-based access control
+
+## Test Data
+Demo data has been created in the database:
+- **Suppliers**: 3 test suppliers (suppliers with IDs 1-3)
+- **Exchange Rates**: 6 rates (RMB→EGP and USD→RMB for Dec 8-10, 2025)
+- **Shipments**: 3 test shipments with different payment scenarios:
+  - SHP-001: Partially paid (21,762.50 EGP balance)
+  - SHP-002: Fully paid (0.00 EGP balance)
+  - SHP-003: Overpaid (-3,942.50 EGP balance)
+- **Payments**: 5 test payments across the shipments
+
+## Root User Access
+- Username: `root`
+- Password: `123123123`
+- Role: مدير (Admin)

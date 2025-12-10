@@ -155,7 +155,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Get latest exchange rate for preliminary purchase cost calculation
       const latestRmbRate = await storage.getLatestRate("RMB", "EGP");
-      const rmbToEgp = latestRmbRate ? parseFloat(latestRmbRate.rate) : 7.15;
+      const rmbToEgp = latestRmbRate ? parseFloat(latestRmbRate.rateValue) : 7.15;
       const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgp;
 
       // Calculate preliminary total including estimated purchase cost
