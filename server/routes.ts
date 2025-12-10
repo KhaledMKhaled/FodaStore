@@ -134,18 +134,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       }
 
-      // Calculate totals
+      // Calculate totals from items
       const allItems = await storage.getShipmentItems(shipment.id);
       const totalPurchaseCostRmb = allItems.reduce(
         (sum, item) => sum + parseFloat(item.totalPurchaseCostRmb || "0"),
         0
       );
 
+      const totalCustomsCostEgp = allItems.reduce((sum, item) => {
+        const ctn = item.cartonsCtn || 0;
+        const customsPerCarton = parseFloat(item.customsCostPerCartonEgp || "0");
+        return sum + ctn * customsPerCarton;
+      }, 0);
+
+      const totalTakhreegCostEgp = allItems.reduce((sum, item) => {
+        const ctn = item.cartonsCtn || 0;
+        const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp || "0");
+        return sum + ctn * takhreegPerCarton;
+      }, 0);
+
+      // Get latest exchange rate for preliminary purchase cost calculation
+      const latestRmbRate = await storage.getLatestRate("RMB", "EGP");
+      const rmbToEgp = latestRmbRate ? parseFloat(latestRmbRate.rate) : 7.15;
+      const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgp;
+
+      // Calculate preliminary total including estimated purchase cost
+      const finalTotalCostEgp = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
+
       await storage.updateShipment(shipment.id, {
         purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
+        purchaseCostEgp: purchaseCostEgp.toFixed(2),
+        customsCostEgp: totalCustomsCostEgp.toFixed(2),
+        takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
+        finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
+        balanceEgp: finalTotalCostEgp.toFixed(2),
       });
 
-      res.json(shipment);
+      const updatedShipment = await storage.getShipment(shipment.id);
+      res.json(updatedShipment);
     } catch (error) {
       console.error("Error creating shipment:", error);
       res.status(400).json({ message: "Invalid data" });
@@ -245,27 +271,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
-      // Calculate final total if at summary step
-      if (step === 4) {
-        const shipment = await storage.getShipment(shipmentId);
-        if (shipment) {
-          const purchaseCostEgp = parseFloat(shipment.purchaseCostEgp || "0");
-          const commissionCostEgp = parseFloat(shipment.commissionCostEgp || "0");
-          const shippingCostEgp = parseFloat(shipment.shippingCostEgp || "0");
-          const customsCostEgp = parseFloat(shipment.customsCostEgp || "0");
-          const takhreegCostEgp = parseFloat(shipment.takhreegCostEgp || "0");
+      // Always calculate final total (running total at any step)
+      const shipment = await storage.getShipment(shipmentId);
+      if (shipment) {
+        const purchaseCostEgp = parseFloat(shipment.purchaseCostEgp || "0");
+        const commissionCostEgp = parseFloat(shipment.commissionCostEgp || "0");
+        const shippingCostEgp = parseFloat(shipment.shippingCostEgp || "0");
+        const customsCostEgp = parseFloat(shipment.customsCostEgp || "0");
+        const takhreegCostEgp = parseFloat(shipment.takhreegCostEgp || "0");
 
-          const finalTotalCostEgp =
-            purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp;
+        const finalTotalCostEgp =
+          purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp;
 
-          const totalPaidEgp = parseFloat(shipment.totalPaidEgp || "0");
-          const balanceEgp = finalTotalCostEgp - totalPaidEgp;
+        const totalPaidEgp = parseFloat(shipment.totalPaidEgp || "0");
+        const balanceEgp = finalTotalCostEgp - totalPaidEgp;
 
-          await storage.updateShipment(shipmentId, {
-            finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
-            balanceEgp: balanceEgp.toFixed(2),
-          });
-        }
+        await storage.updateShipment(shipmentId, {
+          finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
+          balanceEgp: balanceEgp.toFixed(2),
+        });
       }
 
       const updatedShipment = await storage.getShipment(shipmentId);
