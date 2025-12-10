@@ -1,4 +1,4 @@
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, inArray } from "drizzle-orm";
 import { db } from "./db";
 import {
   users,
@@ -62,6 +62,7 @@ export interface IStorage {
   // Shipments
   getAllShipments(): Promise<Shipment[]>;
   getShipment(id: number): Promise<Shipment | undefined>;
+  getShipmentsByIds(ids: number[]): Promise<Shipment[]>;
   createShipment(data: InsertShipment): Promise<Shipment>;
   updateShipment(id: number, data: Partial<InsertShipment>): Promise<Shipment | undefined>;
   deleteShipment(id: number): Promise<boolean>;
@@ -233,6 +234,11 @@ export class DatabaseStorage implements IStorage {
   async getShipment(id: number): Promise<Shipment | undefined> {
     const [shipment] = await db.select().from(shipments).where(eq(shipments.id, id));
     return shipment;
+  }
+
+  async getShipmentsByIds(ids: number[]): Promise<Shipment[]> {
+    if (ids.length === 0) return [];
+    return db.select().from(shipments).where(inArray(shipments.id, ids));
   }
 
   async createShipment(data: InsertShipment): Promise<Shipment> {
