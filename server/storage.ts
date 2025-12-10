@@ -293,12 +293,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertShippingDetails(data: InsertShipmentShippingDetails): Promise<ShipmentShippingDetails> {
+    // Ensure date fields are properly handled (can be null, string, or Date)
+    const cleanedData = {
+      ...data,
+      shippingDate: data.shippingDate || null,
+    };
     const [details] = await db
       .insert(shipmentShippingDetails)
-      .values(data)
+      .values(cleanedData)
       .onConflictDoUpdate({
         target: shipmentShippingDetails.shipmentId,
-        set: { ...data, updatedAt: new Date() },
+        set: { ...cleanedData, updatedAt: new Date() },
       })
       .returning();
     return details;
@@ -314,12 +319,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertCustomsDetails(data: InsertShipmentCustomsDetails): Promise<ShipmentCustomsDetails> {
+    // Ensure date fields are properly handled (can be null, string, or Date)
+    const cleanedData = {
+      ...data,
+      customsInvoiceDate: data.customsInvoiceDate || null,
+    };
     const [details] = await db
       .insert(shipmentCustomsDetails)
-      .values(data)
+      .values(cleanedData)
       .onConflictDoUpdate({
         target: shipmentCustomsDetails.shipmentId,
-        set: { ...data, updatedAt: new Date() },
+        set: { ...cleanedData, updatedAt: new Date() },
       })
       .returning();
     return details;
@@ -373,6 +383,7 @@ export class DatabaseStorage implements IStorage {
     const shipment = await this.getShipment(data.shipmentId);
     if (shipment) {
       const finalCost = parseFloat(shipment.finalTotalCostEgp || "0");
+      // Balance can be negative (overpaid) - stored as actual difference
       const balance = finalCost - totalPaid;
 
       await this.updateShipment(data.shipmentId, {
@@ -415,16 +426,19 @@ export class DatabaseStorage implements IStorage {
       0
     );
 
+    // Calculate remaining and overpaid correctly
+    // remaining = max(0, cost - paid) per shipment
+    // overpaid = max(0, paid - cost) per shipment
     let totalBalanceEgp = 0;
     let totalOverpaidEgp = 0;
 
     allShipments.forEach((s) => {
-      const balance = parseFloat(s.balanceEgp || "0");
-      if (balance > 0) {
-        totalBalanceEgp += balance;
-      } else if (balance < 0) {
-        totalOverpaidEgp += Math.abs(balance);
-      }
+      const cost = parseFloat(s.finalTotalCostEgp || "0");
+      const paid = parseFloat(s.totalPaidEgp || "0");
+      const remaining = Math.max(0, cost - paid);
+      const overpaid = Math.max(0, paid - cost);
+      totalBalanceEgp += remaining;
+      totalOverpaidEgp += overpaid;
     });
 
     const pendingShipments = allShipments.filter(
@@ -464,16 +478,19 @@ export class DatabaseStorage implements IStorage {
       0
     );
 
+    // Calculate remaining and overpaid correctly
+    // remaining = max(0, cost - paid) per shipment
+    // overpaid = max(0, paid - cost) per shipment
     let totalBalanceEgp = 0;
     let totalOverpaidEgp = 0;
 
     allShipments.forEach((s) => {
-      const balance = parseFloat(s.balanceEgp || "0");
-      if (balance > 0) {
-        totalBalanceEgp += balance;
-      } else if (balance < 0) {
-        totalOverpaidEgp += Math.abs(balance);
-      }
+      const cost = parseFloat(s.finalTotalCostEgp || "0");
+      const paid = parseFloat(s.totalPaidEgp || "0");
+      const remaining = Math.max(0, cost - paid);
+      const overpaid = Math.max(0, paid - cost);
+      totalBalanceEgp += remaining;
+      totalOverpaidEgp += overpaid;
     });
 
     const lastPayment = allPayments.length > 0 ? allPayments[0] : null;

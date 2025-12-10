@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   Ship,
@@ -10,9 +10,11 @@ import {
   Edit,
   Trash2,
   ChevronDown,
+  Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -37,15 +39,59 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Shipment } from "@shared/schema";
 
 export default function Shipments() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [shipmentToDelete, setShipmentToDelete] = useState<Shipment | null>(null);
+  const { toast } = useToast();
 
   const { data: shipments, isLoading } = useQuery<Shipment[]>({
     queryKey: ["/api/shipments"],
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return apiRequest("DELETE", `/api/shipments/${id}`);
+    },
+    onSuccess: () => {
+      toast({ title: "تم حذف الشحنة بنجاح" });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      setDeleteDialogOpen(false);
+      setShipmentToDelete(null);
+    },
+    onError: () => {
+      toast({ title: "حدث خطأ أثناء حذف الشحنة", variant: "destructive" });
+    },
+  });
+
+  const handleDeleteClick = (shipment: Shipment) => {
+    setShipmentToDelete(shipment);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (shipmentToDelete) {
+      deleteMutation.mutate(shipmentToDelete.id);
+    }
+  };
 
   const formatCurrency = (value: string | number | null) => {
     const num = typeof value === "string" ? parseFloat(value) : value;
@@ -67,7 +113,25 @@ export default function Shipments() {
       shipment.shipmentCode.toLowerCase().includes(search.toLowerCase());
     const matchesStatus =
       statusFilter === "all" || shipment.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    
+    // Date range filter
+    let matchesDateRange = true;
+    if (dateFrom || dateTo) {
+      const purchaseDate = shipment.purchaseDate ? new Date(shipment.purchaseDate) : null;
+      if (purchaseDate) {
+        if (dateFrom) {
+          const fromDate = new Date(dateFrom);
+          if (purchaseDate < fromDate) matchesDateRange = false;
+        }
+        if (dateTo) {
+          const toDate = new Date(dateTo);
+          toDate.setHours(23, 59, 59, 999);
+          if (purchaseDate > toDate) matchesDateRange = false;
+        }
+      }
+    }
+    
+    return matchesSearch && matchesStatus && matchesDateRange;
   });
 
   return (
@@ -116,6 +180,41 @@ export default function Shipments() {
                   <SelectItem value="مستلمة بنجاح">مستلمة بنجاح</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-muted-foreground" />
+              <div className="flex items-center gap-2">
+                <Label className="text-sm text-muted-foreground whitespace-nowrap">من:</Label>
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="w-[140px]"
+                  data-testid="input-date-from"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-sm text-muted-foreground whitespace-nowrap">إلى:</Label>
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="w-[140px]"
+                  data-testid="input-date-to"
+                />
+              </div>
+              {(dateFrom || dateTo) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                >
+                  مسح التاريخ
+                </Button>
+              )}
             </div>
           </div>
         </CardContent>
@@ -197,7 +296,10 @@ export default function Shipments() {
                                 تعديل
                               </Link>
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive">
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => handleDeleteClick(shipment)}
+                            >
                               <Trash2 className="w-4 h-4 ml-2" />
                               حذف
                             </DropdownMenuItem>
@@ -214,6 +316,29 @@ export default function Shipments() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد حذف الشحنة</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من حذف الشحنة "{shipmentToDelete?.shipmentName}"؟
+              <br />
+              هذا الإجراء لا يمكن التراجع عنه.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? "جاري الحذف..." : "حذف"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

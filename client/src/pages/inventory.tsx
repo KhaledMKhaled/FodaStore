@@ -6,9 +6,12 @@ import {
   Calendar,
   DollarSign,
   TrendingUp,
+  Filter,
 } from "lucide-react";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,6 +34,9 @@ interface InventoryStats {
 
 export default function Inventory() {
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [shipmentCodeFilter, setShipmentCodeFilter] = useState("");
 
   const { data: stats, isLoading: loadingStats } = useQuery<InventoryStats>({
     queryKey: ["/api/inventory/stats"],
@@ -55,12 +61,35 @@ export default function Inventory() {
     return new Date(date).toLocaleDateString("ar-EG");
   };
 
-  const filteredMovements = movements?.filter(
-    (m) =>
+  const filteredMovements = movements?.filter((m) => {
+    const matchesSearch =
       !search ||
       m.shipmentItem?.productName?.toLowerCase().includes(search.toLowerCase()) ||
-      m.shipment?.shipmentCode?.toLowerCase().includes(search.toLowerCase())
-  );
+      m.shipment?.shipmentCode?.toLowerCase().includes(search.toLowerCase());
+
+    const matchesShipmentCode =
+      !shipmentCodeFilter ||
+      m.shipment?.shipmentCode?.toLowerCase().includes(shipmentCodeFilter.toLowerCase());
+
+    // Date range filter
+    let matchesDateRange = true;
+    if (dateFrom || dateTo) {
+      const movementDate = m.movementDate ? new Date(m.movementDate) : null;
+      if (movementDate) {
+        if (dateFrom) {
+          const fromDate = new Date(dateFrom);
+          if (movementDate < fromDate) matchesDateRange = false;
+        }
+        if (dateTo) {
+          const toDate = new Date(dateTo);
+          toDate.setHours(23, 59, 59, 999);
+          if (movementDate > toDate) matchesDateRange = false;
+        }
+      }
+    }
+
+    return matchesSearch && matchesShipmentCode && matchesDateRange;
+  });
 
   return (
     <div className="p-6 space-y-6">
@@ -104,18 +133,66 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Search */}
+      {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="relative max-w-md">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="بحث بالمنتج أو رقم الشحنة..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pr-10"
-              data-testid="input-search-inventory"
-            />
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="بحث بالمنتج..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pr-10"
+                data-testid="input-search-inventory"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Ship className="w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="رقم الشحنة..."
+                value={shipmentCodeFilter}
+                onChange={(e) => setShipmentCodeFilter(e.target.value)}
+                className="w-[150px]"
+                data-testid="input-shipment-code-filter"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-muted-foreground" />
+              <div className="flex items-center gap-2">
+                <Label className="text-sm text-muted-foreground whitespace-nowrap">من:</Label>
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="w-[140px]"
+                  data-testid="input-date-from"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-sm text-muted-foreground whitespace-nowrap">إلى:</Label>
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="w-[140px]"
+                  data-testid="input-date-to"
+                />
+              </div>
+              {(dateFrom || dateTo || shipmentCodeFilter) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                    setShipmentCodeFilter("");
+                  }}
+                >
+                  مسح الفلاتر
+                </Button>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

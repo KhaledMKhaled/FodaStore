@@ -183,6 +183,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const shipmentId = parseInt(req.params.id);
       const { step, shipmentData, items, shippingData } = req.body;
 
+      // Validate shipment exists
+      const existingShipment = await storage.getShipment(shipmentId);
+      if (!existingShipment) {
+        return res.status(404).json({ message: "الشحنة غير موجودة" });
+      }
+
       // Update shipment basic data
       if (shipmentData) {
         await storage.updateShipment(shipmentId, shipmentData);
@@ -286,9 +292,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const totalPaidEgp = parseFloat(shipment.totalPaidEgp || "0");
         const balanceEgp = finalTotalCostEgp - totalPaidEgp;
 
+        // Auto-update status based on step
+        let newStatus = shipment.status;
+        if (step === 2 && shippingData) {
+          // After shipping details are saved
+          newStatus = "جاهزة للاستلام";
+        } else if (step === 4) {
+          // Final step - shipment completed
+          newStatus = "مستلمة بنجاح";
+        }
+
         await storage.updateShipment(shipmentId, {
           finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
           balanceEgp: balanceEgp.toFixed(2),
+          status: newStatus,
         });
       }
 
@@ -296,7 +313,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(updatedShipment);
     } catch (error) {
       console.error("Error updating shipment:", error);
-      res.status(500).json({ message: "Error updating shipment" });
+      res.status(500).json({ message: "حدث خطأ أثناء حفظ بيانات الشحنة" });
     }
   });
 

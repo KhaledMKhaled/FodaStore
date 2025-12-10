@@ -108,13 +108,22 @@ export default function ExchangeRates() {
             إدارة أسعار تحويل العملات بين الرممبي والجنيه وباقي العملات
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-add-rate">
-              <Plus className="w-4 h-4 ml-2" />
-              إضافة سعر جديد
-            </Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/exchange-rates"] })}
+            data-testid="button-refresh-rates"
+          >
+            <RefreshCw className="w-4 h-4 ml-2" />
+            تحديث الأسعار
+          </Button>
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button data-testid="button-add-rate">
+                <Plus className="w-4 h-4 ml-2" />
+                إضافة سعر جديد
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>إضافة سعر صرف</DialogTitle>
@@ -212,6 +221,7 @@ export default function ExchangeRates() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Quick View Cards */}
@@ -310,6 +320,18 @@ function RateCard({
   toSymbol: string;
   rate?: ExchangeRate;
 }) {
+  const getTimeAgo = (dateStr: string | Date) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffInDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffInDays === 0) return "اليوم";
+    if (diffInDays === 1) return "أمس";
+    if (diffInDays < 7) return `منذ ${diffInDays} أيام`;
+    if (diffInDays < 30) return `منذ ${Math.floor(diffInDays / 7)} أسابيع`;
+    return new Date(dateStr).toLocaleDateString("ar-EG");
+  };
+
   return (
     <Card>
       <CardContent className="p-6">
@@ -330,9 +352,17 @@ function RateCard({
             <p className="text-sm text-muted-foreground mt-2">
               1 {fromSymbol} = {parseFloat(rate.rateValue).toFixed(4)} {toSymbol}
             </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              آخر تحديث: {new Date(rate.rateDate).toLocaleDateString("ar-EG")}
-            </p>
+            <div className="flex items-center gap-1 mt-2">
+              <Calendar className="w-3 h-3 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">
+                آخر تحديث: {getTimeAgo(rate.rateDate)}
+              </p>
+            </div>
+            {rate.createdAt && (
+              <p className="text-xs text-muted-foreground opacity-60">
+                تم الإدخال: {new Date(rate.createdAt).toLocaleString("ar-EG")}
+              </p>
+            )}
           </>
         ) : (
           <p className="text-muted-foreground">لا يوجد سعر مسجل</p>
