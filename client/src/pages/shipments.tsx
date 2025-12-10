@@ -44,7 +44,7 @@ export default function Shipments() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const { data: shipments, isLoading } = useQuery<Shipment[]>({
-    queryKey: ["/api/shipments", { search, status: statusFilter }],
+    queryKey: ["/api/shipments"],
   });
 
   const formatCurrency = (value: string | number | null) => {
