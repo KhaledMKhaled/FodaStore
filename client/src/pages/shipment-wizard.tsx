@@ -12,6 +12,9 @@ import {
   Save,
   ArrowLeft,
   ArrowRight,
+  Upload,
+  Image as ImageIcon,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -218,8 +221,41 @@ export default function ShipmentWizard() {
       totalPiecesCou: 0,
       purchasePricePerPiecePriRmb: "0",
       totalPurchaseCostRmb: "0",
+      imageUrl: "",
     };
   }
+
+  const [uploadingImage, setUploadingImage] = useState<number | null>(null);
+
+  const handleImageUpload = async (index: number, file: File) => {
+    setUploadingImage(index);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      
+      const response = await fetch("/api/upload/item-image", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        throw new Error("فشل رفع الصورة");
+      }
+      
+      const data = await response.json();
+      updateItem(index, "imageUrl", data.imageUrl);
+      toast({ title: "تم رفع الصورة بنجاح" });
+    } catch (error) {
+      toast({ title: "خطأ في رفع الصورة", variant: "destructive" });
+    } finally {
+      setUploadingImage(null);
+    }
+  };
+
+  const removeItemImage = (index: number) => {
+    updateItem(index, "imageUrl", "");
+  };
 
   const addItem = () => {
     setItems([...items, createEmptyItem()]);
@@ -351,6 +387,9 @@ export default function ShipmentWizard() {
               removeItem={removeItem}
               suppliers={suppliers || []}
               isNew={isNew}
+              handleImageUpload={handleImageUpload}
+              removeItemImage={removeItemImage}
+              uploadingImage={uploadingImage}
             />
           )}
 
@@ -498,6 +537,9 @@ function Step1Import({
   removeItem,
   suppliers,
   isNew,
+  handleImageUpload,
+  removeItemImage,
+  uploadingImage,
 }: {
   shipmentData: { shipmentCode: string; shipmentName: string; purchaseDate: string; status: string };
   setShipmentData: (data: typeof shipmentData) => void;
@@ -507,6 +549,9 @@ function Step1Import({
   removeItem: (index: number) => void;
   suppliers: Supplier[];
   isNew: boolean;
+  handleImageUpload: (index: number, file: File) => Promise<void>;
+  removeItemImage: (index: number) => void;
+  uploadingImage: number | null;
 }) {
   return (
     <div className="space-y-6">
@@ -681,7 +726,54 @@ function Step1Import({
                   />
                 </div>
               </div>
-              <div className="flex justify-end">
+              {/* Image Upload Section */}
+              <div className="flex items-center gap-4 pt-2 border-t">
+                <div className="flex items-center gap-3">
+                  <Label className="whitespace-nowrap">صورة البند:</Label>
+                  {item.imageUrl ? (
+                    <div className="relative group">
+                      <img
+                        src={item.imageUrl}
+                        alt={item.productName || "صورة البند"}
+                        className="w-16 h-16 object-cover rounded-md border"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeItemImage(index)}
+                        className="absolute -top-2 -left-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="cursor-pointer">
+                      <div className="flex items-center gap-2 px-3 py-2 border border-dashed rounded-md hover:bg-muted/50 transition-colors">
+                        {uploadingImage === index ? (
+                          <span className="text-sm text-muted-foreground">جاري الرفع...</span>
+                        ) : (
+                          <>
+                            <Upload className="w-4 h-4 text-muted-foreground" />
+                            <span className="text-sm text-muted-foreground">اختر صورة</span>
+                          </>
+                        )}
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            handleImageUpload(index, file);
+                          }
+                          e.target.value = "";
+                        }}
+                        disabled={uploadingImage !== null}
+                      />
+                    </label>
+                  )}
+                </div>
+                <div className="flex-1" />
                 <div className="bg-primary/10 px-4 py-2 rounded-md">
                   <span className="text-sm text-muted-foreground ml-2">
                     إجمالي البند:
@@ -930,8 +1022,15 @@ function Step3Customs({
                 className="p-4 border rounded-md bg-card"
                 data-testid={`customs-item-${index}`}
               >
-                <div className="flex items-center justify-between mb-4">
-                  <div>
+                <div className="flex items-center gap-4 mb-4">
+                  {item.imageUrl && (
+                    <img
+                      src={item.imageUrl}
+                      alt={item.productName || "صورة البند"}
+                      className="w-16 h-16 object-cover rounded-md border flex-shrink-0"
+                    />
+                  )}
+                  <div className="flex-1">
                     <span className="font-medium">{item.productName || `البند ${index + 1}`}</span>
                     <span className="text-sm text-muted-foreground mr-2">
                       ({ctn} كرتونة)
