@@ -8,11 +8,15 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+ codex/add-role-based-middleware-for-requests
+    "test": "tsx --test",
+=======
 codex/add-role-based-middleware-for-routes
     "test": "DATABASE_URL=postgres://placeholder:5432/test tsx test/authorization.test.ts",
 =======
     "test": "node --test --import tsx server/**/*.test.ts",
 main
+ main
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

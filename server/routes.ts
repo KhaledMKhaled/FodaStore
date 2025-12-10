@@ -1,11 +1,15 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
+ codex/add-role-based-middleware-for-requests
+import { setupAuth, isAuthenticated, requireRole } from "./auth";
+=======
  codex/add-audit-logging-for-write-operations
 import { setupAuth, isAuthenticated, isAdmin } from "./auth";
 import { logAuditEvent } from "./audit";
 =======
 import { setupAuth, isAuthenticated, requireRole } from "./auth";
+ main
  main
 import type { User } from "@shared/schema";
 import {
@@ -493,6 +497,12 @@ main
   });
 
   // Manual/automatic refresh - simulate external update
+ codex/add-role-based-middleware-for-requests
+  app.post(
+    "/api/exchange-rates/refresh",
+    requireRole(["مدير", "محاسب"]),
+    async (_req, res) => {
+=======
  codex/add-audit-logging-for-write-operations
   app.post("/api/exchange-rates/refresh", isAuthenticated, async (req, res) => {
 =======
@@ -501,6 +511,7 @@ main
 =======
   app.post("/api/exchange-rates/refresh", isAuthenticated, async (req, res) => {
 main
+ main
  main
     try {
       const today = new Date();
@@ -682,7 +693,11 @@ main
   });
 
   // Create new user (admin only)
+ codex/add-role-based-middleware-for-requests
+  app.post("/api/users", requireRole(["مدير", "محاسب"]), async (req, res) => {
+=======
   app.post("/api/users", requireRole(["مدير"]), async (req, res) => {
+ main
     try {
       const { username, password, firstName, lastName, role } = req.body;
       const actorId = (req.user as any)?.id;
@@ -786,7 +801,11 @@ main
     }
   });
 
+ codex/add-role-based-middleware-for-requests
+  app.patch("/api/users/:id/role", requireRole(["مدير", "محاسب"]), async (req, res) => {
+=======
   app.patch("/api/users/:id/role", requireRole(["مدير"]), async (req, res) => {
+ main
     try {
       const { role } = req.body;
       const user = await storage.updateUserRole(req.params.id, role);
@@ -818,7 +837,11 @@ main
   });
 
   // Delete user (admin only)
+ codex/add-role-based-middleware-for-requests
+  app.delete("/api/users/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
+=======
   app.delete("/api/users/:id", requireRole(["مدير"]), async (req, res) => {
+ main
     try {
       const { id } = req.params;
       const currentUser = req.user!;
