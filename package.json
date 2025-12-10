@@ -8,6 +8,7 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "test": "DATABASE_URL=postgres://placeholder:5432/test tsx test/authorization.test.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

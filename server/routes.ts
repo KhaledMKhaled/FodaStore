@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated, isAdmin } from "./auth";
+import { setupAuth, isAuthenticated, requireRole } from "./auth";
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
@@ -60,7 +60,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/suppliers", isAuthenticated, async (req, res) => {
+  app.post("/api/suppliers", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const data = insertSupplierSchema.parse(req.body);
       const supplier = await storage.createSupplier(data);
@@ -70,7 +70,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/suppliers/:id", isAuthenticated, async (req, res) => {
+  app.patch("/api/suppliers/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const supplier = await storage.updateSupplier(parseInt(req.params.id), req.body);
       if (!supplier) {
@@ -82,7 +82,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.delete("/api/suppliers/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/suppliers/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       await storage.deleteSupplier(parseInt(req.params.id));
       res.json({ success: true });
@@ -113,7 +113,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/shipments", isAuthenticated, async (req, res) => {
+  app.post("/api/shipments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const { items, ...shipmentData } = req.body;
       const userId = (req.user as any)?.id;
@@ -178,7 +178,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/shipments/:id", isAuthenticated, async (req, res) => {
+  app.patch("/api/shipments/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const shipmentId = parseInt(req.params.id);
       const { step, shipmentData, items, shippingData } = req.body;
@@ -318,7 +318,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.delete("/api/shipments/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/shipments/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       await storage.deleteShipment(parseInt(req.params.id));
       res.json({ success: true });
@@ -357,7 +357,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/exchange-rates", isAuthenticated, async (req, res) => {
+  app.post("/api/exchange-rates", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const data = insertExchangeRateSchema.parse(req.body);
       const rate = await storage.createExchangeRate(data);
@@ -368,7 +368,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Manual/automatic refresh - simulate external update
-  app.post("/api/exchange-rates/refresh", isAuthenticated, async (_req, res) => {
+  app.post("/api/exchange-rates/refresh", requireRole(["مدير", "محاسب"]), async (_req, res) => {
     try {
       const today = new Date();
       const todayStr = today.toISOString().split("T")[0];
@@ -429,7 +429,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/payments", isAuthenticated, async (req, res) => {
+  app.post("/api/payments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       // Convert paymentDate string to Date object and validate
       let paymentDate: Date | undefined;
@@ -502,7 +502,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Create new user (admin only)
-  app.post("/api/users", isAdmin, async (req, res) => {
+  app.post("/api/users", requireRole(["مدير"]), async (req, res) => {
     try {
       const { username, password, firstName, lastName, role } = req.body;
       
@@ -533,7 +533,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Update user (admin only, or self for password)
-  app.patch("/api/users/:id", isAuthenticated, async (req, res) => {
+  app.patch("/api/users/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const { id } = req.params;
       const { password, firstName, lastName, role } = req.body;
@@ -541,7 +541,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Only admin can update other users or roles
       if (currentUser.id !== id && currentUser.role !== "مدير") {
-        return res.status(403).json({ message: "غير مصرح" });
+        return res
+          .status(403)
+          .json({ message: "لا تملك صلاحية لتعديل مستخدمين آخرين" });
       }
 
       // Non-admins can only update their own password
@@ -569,7 +571,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/users/:id/role", isAdmin, async (req, res) => {
+  app.patch("/api/users/:id/role", requireRole(["مدير"]), async (req, res) => {
     try {
       const { role } = req.body;
       const user = await storage.updateUserRole(req.params.id, role);
@@ -584,7 +586,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Delete user (admin only)
-  app.delete("/api/users/:id", isAdmin, async (req, res) => {
+  app.delete("/api/users/:id", requireRole(["مدير"]), async (req, res) => {
     try {
       const { id } = req.params;
       const currentUser = req.user!;
