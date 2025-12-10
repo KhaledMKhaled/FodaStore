@@ -153,12 +153,20 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
   return next();
 };
 
-export const isAdmin: RequestHandler = async (req, res, next) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  if (req.user?.role !== "مدير") {
-    return res.status(403).json({ message: "غير مصرح" });
-  }
-  return next();
-};
+export function requireRole(allowedRoles: string[]): RequestHandler {
+  return (req, res, next) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "يجب تسجيل الدخول أولاً" });
+    }
+
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res
+        .status(403)
+        .json({ message: "لا تملك صلاحية لتنفيذ هذا الإجراء" });
+    }
+
+    return next();
+  };
+}
+
+export const isAdmin: RequestHandler = requireRole(["مدير"]);

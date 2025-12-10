@@ -1,17 +1,28 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
+ codex/add-audit-logging-for-write-operations
 import { setupAuth, isAuthenticated, isAdmin } from "./auth";
 import { logAuditEvent } from "./audit";
+=======
+import { setupAuth, isAuthenticated, requireRole } from "./auth";
+ main
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
-  insertShipmentSchema,
-  insertShipmentItemSchema,
   insertExchangeRateSchema,
   insertShipmentPaymentSchema,
 } from "@shared/schema";
 import bcrypt from "bcryptjs";
+codex/refactor-shipment-flow-into-service
+import { shipmentService, ShipmentServiceError } from "./services/shipments";
+=======
+ codex/modify-payments-listing-to-include-shipments
+import { getPaymentsWithShipments } from "./payments";
+=======
+import { logAuditEvent } from "./audit";
+main
+main
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Setup authentication
@@ -61,7 +72,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/suppliers", isAuthenticated, async (req, res) => {
+  app.post("/api/suppliers", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const data = insertSupplierSchema.parse(req.body);
       const supplier = await storage.createSupplier(data);
@@ -71,7 +82,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/suppliers/:id", isAuthenticated, async (req, res) => {
+  app.patch("/api/suppliers/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const supplier = await storage.updateSupplier(parseInt(req.params.id), req.body);
       if (!supplier) {
@@ -83,7 +94,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.delete("/api/suppliers/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/suppliers/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       await storage.deleteSupplier(parseInt(req.params.id));
       res.json({ success: true });
@@ -114,10 +125,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/shipments", isAuthenticated, async (req, res) => {
+  app.post("/api/shipments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
-      const { items, ...shipmentData } = req.body;
       const userId = (req.user as any)?.id;
+codex/refactor-shipment-flow-into-service
+      const shipment = await shipmentService.createShipment(req.body, userId);
+      res.json(shipment);
+=======
 
       // Create shipment
       const shipment = await storage.createShipment({
@@ -172,6 +186,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
 
       const updatedShipment = await storage.getShipment(shipment.id);
+ codex/add-audit-logging-for-write-operations
 
       logAuditEvent({
         userId,
@@ -181,18 +196,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         details: {
           shipment: updatedShipment,
           items,
+=======
+      void logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipment.id.toString(),
+        actionType: "CREATE",
+        details: {
+          status: updatedShipment?.status,
+          itemCount: allItems.length,
+ main
         },
       });
       res.json(updatedShipment);
+main
     } catch (error) {
+      if (error instanceof ShipmentServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
       console.error("Error creating shipment:", error);
-      res.status(400).json({ message: "Invalid data" });
+      res.status(500).json({ message: "حدث خطأ أثناء إنشاء الشحنة" });
     }
   });
 
-  app.patch("/api/shipments/:id", isAuthenticated, async (req, res) => {
+  app.patch("/api/shipments/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const shipmentId = parseInt(req.params.id);
+codex/refactor-shipment-flow-into-service
+      const updatedShipment = await shipmentService.updateShipment(shipmentId, req.body);
+=======
       const { step, shipmentData, items, shippingData } = req.body;
       const userId = (req.user as any)?.id;
 
@@ -201,6 +233,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!existingShipment) {
         return res.status(404).json({ message: "الشحنة غير موجودة" });
       }
+      const previousStatus = existingShipment.status;
 
       // Update shipment basic data
       if (shipmentData) {
@@ -324,6 +357,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       const updatedShipment = await storage.getShipment(shipmentId);
+ codex/add-audit-logging-for-write-operations
       logAuditEvent({
         userId,
         entityType: "SHIPMENT",
@@ -341,17 +375,43 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           details: { from: existingShipment.status, to: updatedShipment.status },
         });
       }
+=======
+      void logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipmentId.toString(),
+        actionType: "UPDATE",
+        details: {
+          step,
+          status: updatedShipment?.status,
+        },
+      });
+      if (updatedShipment && updatedShipment.status !== previousStatus) {
+        void logAuditEvent({
+          userId,
+          entityType: "SHIPMENT",
+          entityId: shipmentId.toString(),
+          actionType: "STATUS_CHANGE",
+          details: { from: previousStatus, to: updatedShipment.status },
+        });
+      }
+main
+ main
       res.json(updatedShipment);
     } catch (error) {
+      if (error instanceof ShipmentServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
       console.error("Error updating shipment:", error);
       res.status(500).json({ message: "حدث خطأ أثناء حفظ بيانات الشحنة" });
     }
   });
 
-  app.delete("/api/shipments/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/shipments/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const shipmentId = parseInt(req.params.id);
       await storage.deleteShipment(shipmentId);
+ codex/add-audit-logging-for-write-operations
       const userId = (req.user as any)?.id;
       logAuditEvent({
         userId,
@@ -359,6 +419,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         entityId: shipmentId,
         actionType: "DELETE",
         details: { shipmentId },
+=======
+      void logAuditEvent({
+        userId: (req.user as any)?.id,
+        entityType: "SHIPMENT",
+        entityId: shipmentId.toString(),
+        actionType: "DELETE",
+ main
       });
       res.json({ success: true });
     } catch (error) {
@@ -396,10 +463,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/exchange-rates", isAuthenticated, async (req, res) => {
+  app.post("/api/exchange-rates", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const data = insertExchangeRateSchema.parse(req.body);
+      const userId = (req.user as any)?.id;
       const rate = await storage.createExchangeRate(data);
+ codex/add-audit-logging-for-write-operations
       const userId = (req.user as any)?.id;
 
       logAuditEvent({
@@ -408,6 +477,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         entityId: rate.id,
         actionType: "CREATE",
         details: rate,
+=======
+      void logAuditEvent({
+        userId,
+        entityType: "EXCHANGE_RATE",
+        entityId: rate.id.toString(),
+        actionType: "CREATE",
+        details: { from: rate.fromCurrency, to: rate.toCurrency },
+ main
       });
       res.json(rate);
     } catch (error) {
@@ -416,7 +493,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Manual/automatic refresh - simulate external update
+ codex/add-audit-logging-for-write-operations
   app.post("/api/exchange-rates/refresh", isAuthenticated, async (req, res) => {
+=======
+ codex/add-role-based-middleware-for-routes
+  app.post("/api/exchange-rates/refresh", requireRole(["مدير", "محاسب"]), async (_req, res) => {
+=======
+  app.post("/api/exchange-rates/refresh", isAuthenticated, async (req, res) => {
+main
+ main
     try {
       const today = new Date();
       const todayStr = today.toISOString().split("T")[0];
@@ -441,6 +526,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }),
       ]);
 
+ codex/add-audit-logging-for-write-operations
       refreshed.forEach((rate) =>
         logAuditEvent({
           userId,
@@ -450,6 +536,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           details: rate,
         })
       );
+=======
+      refreshed.forEach((rate) => {
+        void logAuditEvent({
+          userId,
+          entityType: "EXCHANGE_RATE",
+          entityId: rate.id.toString(),
+          actionType: "CREATE",
+          details: { from: rate.fromCurrency, to: rate.toCurrency },
+        });
+      });
+ main
 
       res.json({
         message: "تم تحديث الأسعار",
@@ -465,14 +562,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Payments
   app.get("/api/payments", isAuthenticated, async (req, res) => {
     try {
-      const payments = await storage.getAllPayments();
-      // Include shipment info
-      const paymentsWithShipments = await Promise.all(
-        payments.map(async (payment) => {
-          const shipment = await storage.getShipment(payment.shipmentId);
-          return { ...payment, shipment };
-        })
-      );
+      const paymentsWithShipments = await getPaymentsWithShipments(storage);
       res.json(paymentsWithShipments);
     } catch (error) {
       res.status(500).json({ message: "Error fetching payments" });
@@ -488,7 +578,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/payments", isAuthenticated, async (req, res) => {
+  app.post("/api/payments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       // Convert paymentDate string to Date object and validate
       let paymentDate: Date | undefined;
@@ -508,6 +598,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ...data,
         createdByUserId: userId,
       });
+ codex/add-audit-logging-for-write-operations
 
       logAuditEvent({
         userId,
@@ -515,6 +606,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         entityId: payment.id,
         actionType: "CREATE",
         details: payment,
+=======
+      void logAuditEvent({
+        userId,
+        entityType: "PAYMENT",
+        entityId: payment.id.toString(),
+        actionType: "CREATE",
+        details: { shipmentId: payment.shipmentId },
+ main
       });
       res.json(payment);
     } catch (error) {
@@ -569,9 +668,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Create new user (admin only)
-  app.post("/api/users", isAdmin, async (req, res) => {
+  app.post("/api/users", requireRole(["مدير"]), async (req, res) => {
     try {
       const { username, password, firstName, lastName, role } = req.body;
+      const actorId = (req.user as any)?.id;
       
       if (!username || !password) {
         return res.status(400).json({ message: "اسم المستخدم وكلمة المرور مطلوبان" });
@@ -592,6 +692,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
 
       const { password: _, ...userWithoutPassword } = user;
+ codex/add-audit-logging-for-write-operations
       const currentUserId = (req.user as any)?.id;
       logAuditEvent({
         userId: currentUserId,
@@ -599,6 +700,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         entityId: user.id,
         actionType: "CREATE",
         details: userWithoutPassword,
+=======
+      void logAuditEvent({
+        userId: actorId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "CREATE",
+        details: { role: user.role },
+main
       });
       res.json(userWithoutPassword);
     } catch (error) {
@@ -608,15 +717,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Update user (admin only, or self for password)
-  app.patch("/api/users/:id", isAuthenticated, async (req, res) => {
+  app.patch("/api/users/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const { id } = req.params;
       const { password, firstName, lastName, role } = req.body;
       const currentUser = req.user!;
+      const actorId = (req.user as any)?.id;
 
       // Only admin can update other users or roles
       if (currentUser.id !== id && currentUser.role !== "مدير") {
-        return res.status(403).json({ message: "غير مصرح" });
+        return res
+          .status(403)
+          .json({ message: "لا تملك صلاحية لتعديل مستخدمين آخرين" });
       }
 
       // Non-admins can only update their own password
@@ -638,12 +750,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       const { password: _, ...userWithoutPassword } = user;
+ codex/add-audit-logging-for-write-operations
       logAuditEvent({
         userId: currentUser.id,
         entityType: "USER",
         entityId: user.id,
         actionType: "UPDATE",
         details: { updatedFields: Object.keys(updateData), user: userWithoutPassword },
+=======
+      void logAuditEvent({
+        userId: actorId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { updatedFields: Object.keys(updateData) },
+main
       });
       res.json(userWithoutPassword);
     } catch (error) {
@@ -651,7 +772,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/users/:id/role", isAdmin, async (req, res) => {
+  app.patch("/api/users/:id/role", requireRole(["مدير"]), async (req, res) => {
     try {
       const { role } = req.body;
       const user = await storage.updateUserRole(req.params.id, role);
@@ -659,6 +780,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ message: "User not found" });
       }
       const { password: _, ...userWithoutPassword } = user;
+ codex/add-audit-logging-for-write-operations
       const currentUserId = (req.user as any)?.id;
       logAuditEvent({
         userId: currentUserId,
@@ -666,6 +788,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         entityId: user.id,
         actionType: "UPDATE",
         details: { role, user: userWithoutPassword },
+=======
+      void logAuditEvent({
+        userId: (req.user as any)?.id,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { role: user.role },
+ main
       });
       res.json(userWithoutPassword);
     } catch (error) {
@@ -674,10 +804,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Delete user (admin only)
-  app.delete("/api/users/:id", isAdmin, async (req, res) => {
+  app.delete("/api/users/:id", requireRole(["مدير"]), async (req, res) => {
     try {
       const { id } = req.params;
       const currentUser = req.user!;
+      const actorId = (req.user as any)?.id;
 
       // Prevent deleting yourself
       if (currentUser.id === id) {
@@ -691,12 +822,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       await storage.deleteUser(id);
+ codex/add-audit-logging-for-write-operations
       logAuditEvent({
         userId: currentUser.id,
         entityType: "USER",
         entityId: id,
         actionType: "DELETE",
         details: { deletedUserId: id },
+=======
+      void logAuditEvent({
+        userId: actorId,
+        entityType: "USER",
+        entityId: id,
+        actionType: "DELETE",
+ main
       });
       res.json({ success: true });
     } catch (error) {
