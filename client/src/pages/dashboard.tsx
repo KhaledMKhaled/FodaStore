@@ -122,11 +122,20 @@ export default function Dashboard() {
                           {formatCurrency(shipment.finalTotalCostEgp || 0)} ج.م
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {parseFloat(shipment.balanceEgp || "0") > 0
-                            ? `متبقي: ${formatCurrency(shipment.balanceEgp || 0)}`
-                            : parseFloat(shipment.balanceEgp || "0") < 0
-                            ? `زيادة: ${formatCurrency(Math.abs(parseFloat(shipment.balanceEgp || "0")))}`
-                            : "مسددة"}
+                          {(() => {
+                            const cost = parseFloat(shipment.finalTotalCostEgp || "0");
+                            const paid = parseFloat(shipment.totalPaidEgp || "0");
+                            const remaining = Math.max(0, cost - paid);
+                            const overpaid = Math.max(0, paid - cost);
+
+                            if (overpaid > 0) {
+                              return `مبلغ زيادة: ${formatCurrency(overpaid)}`;
+                            }
+                            if (remaining > 0) {
+                              return `متبقي: ${formatCurrency(remaining)}`;
+                            }
+                            return "مسددة";
+                          })()}
                         </p>
                       </div>
                     </div>

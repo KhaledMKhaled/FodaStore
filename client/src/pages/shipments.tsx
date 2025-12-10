@@ -273,7 +273,10 @@ export default function Shipments() {
                         {formatCurrency(shipment.totalPaidEgp)}
                       </TableCell>
                       <TableCell>
-                        <BalanceBadge balance={shipment.balanceEgp} />
+                        <BalanceBadge
+                          cost={shipment.finalTotalCostEgp}
+                          paid={shipment.totalPaidEgp}
+                        />
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>
@@ -361,15 +364,25 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function BalanceBadge({ balance }: { balance: string | null }) {
-  const value = parseFloat(balance || "0");
+function BalanceBadge({
+  cost,
+  paid,
+}: {
+  cost: string | number | null;
+  paid: string | number | null;
+}) {
+  const costValue = typeof cost === "string" ? parseFloat(cost) : cost || 0;
+  const paidValue = typeof paid === "string" ? parseFloat(paid) : paid || 0;
+  const remaining = Math.max(0, costValue - paidValue);
+  const overpaid = Math.max(0, paidValue - costValue);
+
   const formatCurrency = (num: number) =>
     new Intl.NumberFormat("ar-EG", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(Math.abs(num));
+    }).format(num);
 
-  if (value === 0) {
+  if (remaining === 0 && overpaid === 0) {
     return (
       <Badge
         variant="outline"
@@ -380,13 +393,13 @@ function BalanceBadge({ balance }: { balance: string | null }) {
     );
   }
 
-  if (value < 0) {
+  if (overpaid > 0) {
     return (
       <Badge
         variant="outline"
         className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400"
       >
-        زيادة: {formatCurrency(value)} ج.م
+        مبلغ زيادة: {formatCurrency(overpaid)} ج.م
       </Badge>
     );
   }
@@ -396,7 +409,7 @@ function BalanceBadge({ balance }: { balance: string | null }) {
       variant="outline"
       className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
     >
-      متبقي: {formatCurrency(value)} ج.م
+      متبقي: {formatCurrency(remaining)} ج.م
     </Badge>
   );
 }

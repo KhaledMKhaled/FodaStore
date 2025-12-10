@@ -290,7 +290,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp;
 
         const totalPaidEgp = parseFloat(shipment.totalPaidEgp || "0");
-        const balanceEgp = finalTotalCostEgp - totalPaidEgp;
+        // Balance should never be negative; any overpayment is shown separately in the UI
+        const balanceEgp = Math.max(0, finalTotalCostEgp - totalPaidEgp);
 
         // Auto-update status based on step
         let newStatus = shipment.status;
@@ -363,6 +364,42 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(rate);
     } catch (error) {
       res.status(400).json({ message: "Invalid data" });
+    }
+  });
+
+  // Manual/automatic refresh - simulate external update
+  app.post("/api/exchange-rates/refresh", isAuthenticated, async (_req, res) => {
+    try {
+      const today = new Date();
+      const todayStr = today.toISOString().split("T")[0];
+      const latestRmb = await storage.getLatestRate("RMB", "EGP");
+      const latestUsd = await storage.getLatestRate("USD", "RMB");
+
+      const refreshed = await Promise.all([
+        storage.createExchangeRate({
+          rateDate: todayStr,
+          fromCurrency: "RMB",
+          toCurrency: "EGP",
+          rateValue: latestRmb?.rateValue || "7.0000",
+          source: "تحديث تلقائي",
+        }),
+        storage.createExchangeRate({
+          rateDate: todayStr,
+          fromCurrency: "USD",
+          toCurrency: "RMB",
+          rateValue: latestUsd?.rateValue || "7.2000",
+          source: "تحديث تلقائي",
+        }),
+      ]);
+
+      res.json({
+        message: "تم تحديث الأسعار",
+        lastUpdated: today,
+        rates: refreshed,
+      });
+    } catch (error) {
+      console.error("Error refreshing exchange rates", error);
+      res.status(500).json({ message: "تعذر تحديث أسعار الصرف" });
     }
   });
 

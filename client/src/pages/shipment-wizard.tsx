@@ -122,8 +122,45 @@ export default function ShipmentWizard() {
   }, [existingShipping]);
 
   // Save mutation
+  const validateStep = () => {
+    if (!shipmentData.shipmentCode.trim()) {
+      return "رقم الشحنة مطلوب";
+    }
+    if (!shipmentData.shipmentName.trim()) {
+      return "اسم الشحنة مطلوب";
+    }
+    if (!shipmentData.purchaseDate) {
+      return "تاريخ الشراء مطلوب";
+    }
+    if (!items || items.length === 0) {
+      return "أضف صنفًا واحدًا على الأقل قبل الحفظ";
+    }
+
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      if (!item.productName || !item.productName.trim()) {
+        return `اسم الصنف مطلوب (بند #${index + 1})`;
+      }
+      if (!item.cartonsCtn || item.cartonsCtn <= 0) {
+        return `عدد الكراتين مطلوب (بند #${index + 1})`;
+      }
+      if (!item.piecesPerCartonPcs || item.piecesPerCartonPcs <= 0) {
+        return `عدد القطع في الكرتونة مطلوب (بند #${index + 1})`;
+      }
+      if (!item.purchasePricePerPiecePriRmb || Number(item.purchasePricePerPiecePriRmb) <= 0) {
+        return `سعر القطعة بالرممبي مطلوب (بند #${index + 1})`;
+      }
+    }
+    return null;
+  };
+
   const saveMutation = useMutation({
     mutationFn: async (data: { step: number }): Promise<{ id?: number } | undefined> => {
+      const validationError = validateStep();
+      if (validationError) {
+        throw new Error(validationError);
+      }
+
       if (isNew && data.step === 1) {
         // Create new shipment
         const response = await apiRequest("POST", "/api/shipments", {
@@ -142,7 +179,7 @@ export default function ShipmentWizard() {
         return undefined;
       }
     },
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       toast({ title: "تم الحفظ بنجاح" });
       // Invalidate all related queries to ensure UI is updated
       // Note: id from useParams is a string, use it consistently
@@ -157,10 +194,17 @@ export default function ShipmentWizard() {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       if (isNew && result?.id) {
         navigate(`/shipments/${result.id}/edit`);
+      } else if (variables.step === 4) {
+        navigate("/shipments");
       }
     },
-    onError: () => {
-      toast({ title: "حدث خطأ", variant: "destructive" });
+    onError: (error) => {
+      let message = "حدث خطأ أثناء حفظ بيانات الشحنة";
+      if (error instanceof Error && error.message) {
+        const [, serverMessage] = error.message.split(":");
+        message = (serverMessage || error.message).trim();
+      }
+      toast({ title: message || "حدث خطأ", variant: "destructive" });
     },
   });
 
@@ -432,7 +476,6 @@ export default function ShipmentWizard() {
             <Button
               onClick={() => {
                 saveMutation.mutate({ step: 4 });
-                navigate("/shipments");
               }}
               data-testid="button-finish"
             >
