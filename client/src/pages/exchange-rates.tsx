@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   DollarSign,
@@ -7,6 +7,7 @@ import {
   TrendingUp,
   Calendar,
   RefreshCw,
+  Clock3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +71,26 @@ export default function ExchangeRates() {
     },
   });
 
+  const manualRefresh = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/exchange-rates/refresh", {});
+    },
+    onSuccess: () => {
+      toast({ title: "تم تحديث أسعار الصرف يدويًا" });
+      queryClient.invalidateQueries({ queryKey: ["/api/exchange-rates"] });
+    },
+    onError: () => {
+      toast({ title: "تعذر تحديث الأسعار", variant: "destructive" });
+    },
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      manualRefresh.mutate();
+    }, 60 * 60 * 1000); // تحديث كل ساعة
+    return () => clearInterval(interval);
+  }, []);
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
@@ -86,6 +107,13 @@ export default function ExchangeRates() {
   const formatDate = (date: string | Date) => {
     return new Date(date).toLocaleDateString("ar-EG");
   };
+
+  const lastUpdated = rates?.reduce<Date | null>((latest, rate) => {
+    const created = rate.createdAt ? new Date(rate.createdAt) : null;
+    if (!created) return latest;
+    if (!latest || created.getTime() > latest.getTime()) return created;
+    return latest;
+  }, null);
 
   // Get latest rates for quick view
   const latestRmbToEgp = rates?.find(
@@ -107,11 +135,19 @@ export default function ExchangeRates() {
           <p className="text-muted-foreground mt-1">
             إدارة أسعار تحويل العملات بين الرممبي والجنيه وباقي العملات
           </p>
+          {lastUpdated && (
+            <div className="mt-2 inline-flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock3 className="w-4 h-4" />
+              <span>
+                آخر تحديث: {new Date(lastUpdated).toLocaleString("ar-EG")}
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/exchange-rates"] })}
+            onClick={() => manualRefresh.mutate()}
             data-testid="button-refresh-rates"
           >
             <RefreshCw className="w-4 h-4 ml-2" />

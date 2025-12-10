@@ -380,16 +380,27 @@ export class DatabaseStorage implements IStorage {
       0
     );
 
+    // Ensure we persist the actual latest payment date (not the server time)
+    const latestPaymentDate =
+      allPayments.reduce<Date | null>((latest, payment) => {
+        const candidate = payment.paymentDate || payment.createdAt || null;
+        if (!candidate) return latest;
+        if (!latest || candidate.getTime() > latest.getTime()) {
+          return candidate;
+        }
+        return latest;
+      }, null) || data.paymentDate || new Date();
+
     const shipment = await this.getShipment(data.shipmentId);
     if (shipment) {
       const finalCost = parseFloat(shipment.finalTotalCostEgp || "0");
-      // Balance can be negative (overpaid) - stored as actual difference
-      const balance = finalCost - totalPaid;
+      // remaining should never be negative; keep overpaid separately (derived on the client)
+      const remaining = Math.max(0, finalCost - totalPaid);
 
       await this.updateShipment(data.shipmentId, {
         totalPaidEgp: totalPaid.toFixed(2),
-        balanceEgp: balance.toFixed(2),
-        lastPaymentDate: new Date(),
+        balanceEgp: remaining.toFixed(2),
+        lastPaymentDate: latestPaymentDate,
       });
     }
 
