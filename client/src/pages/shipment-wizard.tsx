@@ -144,7 +144,17 @@ export default function ShipmentWizard() {
     },
     onSuccess: (result) => {
       toast({ title: "تم الحفظ بنجاح" });
+      // Invalidate all related queries to ensure UI is updated
+      // Note: id from useParams is a string, use it consistently
       queryClient.invalidateQueries({ queryKey: ["/api/shipments"] });
+      const shipmentIdStr = isNew ? result?.id?.toString() : id;
+      if (shipmentIdStr) {
+        // Invalidate with string key (matching how useQuery uses id from useParams)
+        queryClient.invalidateQueries({ queryKey: ["/api/shipments", shipmentIdStr] });
+        queryClient.invalidateQueries({ queryKey: ["/api/shipments", shipmentIdStr, "items"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/shipments", shipmentIdStr, "shipping"] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       if (isNew && result?.id) {
         navigate(`/shipments/${result.id}/edit`);
       }

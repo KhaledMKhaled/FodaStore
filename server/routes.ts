@@ -377,7 +377,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/payments", isAuthenticated, async (req, res) => {
     try {
-      const data = insertShipmentPaymentSchema.parse(req.body);
+      // Convert paymentDate string to Date object and validate
+      let paymentDate: Date | undefined;
+      if (req.body.paymentDate) {
+        paymentDate = new Date(req.body.paymentDate);
+        if (Number.isNaN(paymentDate.getTime())) {
+          return res.status(400).json({ message: "تاريخ الدفع غير صالح" });
+        }
+      }
+      const bodyWithDate = {
+        ...req.body,
+        paymentDate,
+      };
+      const data = insertShipmentPaymentSchema.parse(bodyWithDate);
       const userId = (req.user as any)?.id;
       const payment = await storage.createPayment({
         ...data,
