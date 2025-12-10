@@ -1,7 +1,12 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
+ codex/add-audit-logging-for-write-operations
+import { setupAuth, isAuthenticated, isAdmin } from "./auth";
+import { logAuditEvent } from "./audit";
+=======
 import { setupAuth, isAuthenticated, requireRole } from "./auth";
+ main
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
@@ -181,6 +186,17 @@ codex/refactor-shipment-flow-into-service
       });
 
       const updatedShipment = await storage.getShipment(shipment.id);
+ codex/add-audit-logging-for-write-operations
+
+      logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipment.id,
+        actionType: "CREATE",
+        details: {
+          shipment: updatedShipment,
+          items,
+=======
       void logAuditEvent({
         userId,
         entityType: "SHIPMENT",
@@ -189,6 +205,7 @@ codex/refactor-shipment-flow-into-service
         details: {
           status: updatedShipment?.status,
           itemCount: allItems.length,
+ main
         },
       });
       res.json(updatedShipment);
@@ -340,6 +357,25 @@ codex/refactor-shipment-flow-into-service
       }
 
       const updatedShipment = await storage.getShipment(shipmentId);
+ codex/add-audit-logging-for-write-operations
+      logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipmentId,
+        actionType: "UPDATE",
+        details: { step, shipmentData, items, shippingData, updatedShipment },
+      });
+
+      if (existingShipment && updatedShipment && existingShipment.status !== updatedShipment.status) {
+        logAuditEvent({
+          userId,
+          entityType: "SHIPMENT",
+          entityId: shipmentId,
+          actionType: "STATUS_CHANGE",
+          details: { from: existingShipment.status, to: updatedShipment.status },
+        });
+      }
+=======
       void logAuditEvent({
         userId,
         entityType: "SHIPMENT",
@@ -360,6 +396,7 @@ codex/refactor-shipment-flow-into-service
         });
       }
 main
+ main
       res.json(updatedShipment);
     } catch (error) {
       if (error instanceof ShipmentServiceError) {
@@ -374,11 +411,21 @@ main
     try {
       const shipmentId = parseInt(req.params.id);
       await storage.deleteShipment(shipmentId);
+ codex/add-audit-logging-for-write-operations
+      const userId = (req.user as any)?.id;
+      logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipmentId,
+        actionType: "DELETE",
+        details: { shipmentId },
+=======
       void logAuditEvent({
         userId: (req.user as any)?.id,
         entityType: "SHIPMENT",
         entityId: shipmentId.toString(),
         actionType: "DELETE",
+ main
       });
       res.json({ success: true });
     } catch (error) {
@@ -421,12 +468,23 @@ main
       const data = insertExchangeRateSchema.parse(req.body);
       const userId = (req.user as any)?.id;
       const rate = await storage.createExchangeRate(data);
+ codex/add-audit-logging-for-write-operations
+      const userId = (req.user as any)?.id;
+
+      logAuditEvent({
+        userId,
+        entityType: "EXCHANGE_RATE",
+        entityId: rate.id,
+        actionType: "CREATE",
+        details: rate,
+=======
       void logAuditEvent({
         userId,
         entityType: "EXCHANGE_RATE",
         entityId: rate.id.toString(),
         actionType: "CREATE",
         details: { from: rate.fromCurrency, to: rate.toCurrency },
+ main
       });
       res.json(rate);
     } catch (error) {
@@ -435,11 +493,15 @@ main
   });
 
   // Manual/automatic refresh - simulate external update
+ codex/add-audit-logging-for-write-operations
+  app.post("/api/exchange-rates/refresh", isAuthenticated, async (req, res) => {
+=======
  codex/add-role-based-middleware-for-routes
   app.post("/api/exchange-rates/refresh", requireRole(["مدير", "محاسب"]), async (_req, res) => {
 =======
   app.post("/api/exchange-rates/refresh", isAuthenticated, async (req, res) => {
 main
+ main
     try {
       const today = new Date();
       const todayStr = today.toISOString().split("T")[0];
@@ -464,6 +526,17 @@ main
         }),
       ]);
 
+ codex/add-audit-logging-for-write-operations
+      refreshed.forEach((rate) =>
+        logAuditEvent({
+          userId,
+          entityType: "EXCHANGE_RATE",
+          entityId: rate.id,
+          actionType: "CREATE",
+          details: rate,
+        })
+      );
+=======
       refreshed.forEach((rate) => {
         void logAuditEvent({
           userId,
@@ -473,6 +546,7 @@ main
           details: { from: rate.fromCurrency, to: rate.toCurrency },
         });
       });
+ main
 
       res.json({
         message: "تم تحديث الأسعار",
@@ -524,12 +598,22 @@ main
         ...data,
         createdByUserId: userId,
       });
+ codex/add-audit-logging-for-write-operations
+
+      logAuditEvent({
+        userId,
+        entityType: "PAYMENT",
+        entityId: payment.id,
+        actionType: "CREATE",
+        details: payment,
+=======
       void logAuditEvent({
         userId,
         entityType: "PAYMENT",
         entityId: payment.id.toString(),
         actionType: "CREATE",
         details: { shipmentId: payment.shipmentId },
+ main
       });
       res.json(payment);
     } catch (error) {
@@ -608,12 +692,22 @@ main
       });
 
       const { password: _, ...userWithoutPassword } = user;
+ codex/add-audit-logging-for-write-operations
+      const currentUserId = (req.user as any)?.id;
+      logAuditEvent({
+        userId: currentUserId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "CREATE",
+        details: userWithoutPassword,
+=======
       void logAuditEvent({
         userId: actorId,
         entityType: "USER",
         entityId: user.id,
         actionType: "CREATE",
         details: { role: user.role },
+main
       });
       res.json(userWithoutPassword);
     } catch (error) {
@@ -656,12 +750,21 @@ main
       }
 
       const { password: _, ...userWithoutPassword } = user;
+ codex/add-audit-logging-for-write-operations
+      logAuditEvent({
+        userId: currentUser.id,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { updatedFields: Object.keys(updateData), user: userWithoutPassword },
+=======
       void logAuditEvent({
         userId: actorId,
         entityType: "USER",
         entityId: user.id,
         actionType: "UPDATE",
         details: { updatedFields: Object.keys(updateData) },
+main
       });
       res.json(userWithoutPassword);
     } catch (error) {
@@ -677,12 +780,22 @@ main
         return res.status(404).json({ message: "User not found" });
       }
       const { password: _, ...userWithoutPassword } = user;
+ codex/add-audit-logging-for-write-operations
+      const currentUserId = (req.user as any)?.id;
+      logAuditEvent({
+        userId: currentUserId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { role, user: userWithoutPassword },
+=======
       void logAuditEvent({
         userId: (req.user as any)?.id,
         entityType: "USER",
         entityId: user.id,
         actionType: "UPDATE",
         details: { role: user.role },
+ main
       });
       res.json(userWithoutPassword);
     } catch (error) {
@@ -709,11 +822,20 @@ main
       }
 
       await storage.deleteUser(id);
+ codex/add-audit-logging-for-write-operations
+      logAuditEvent({
+        userId: currentUser.id,
+        entityType: "USER",
+        entityId: id,
+        actionType: "DELETE",
+        details: { deletedUserId: id },
+=======
       void logAuditEvent({
         userId: actorId,
         entityType: "USER",
         entityId: id,
         actionType: "DELETE",
+ main
       });
       res.json({ success: true });
     } catch (error) {
@@ -743,6 +865,14 @@ main
 
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       await storage.updateUser(userId, { password: hashedPassword });
+
+      logAuditEvent({
+        userId,
+        entityType: "USER",
+        entityId: userId,
+        actionType: "UPDATE",
+        details: { action: "CHANGE_PASSWORD" },
+      });
 
       res.json({ success: true, message: "تم تغيير كلمة المرور بنجاح" });
     } catch (error) {

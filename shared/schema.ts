@@ -194,7 +194,11 @@ export const auditLogs = pgTable("audit_logs", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   userId: varchar("user_id").references(() => users.id),
   entityType: varchar("entity_type", { length: 50 }).notNull(),
+ codex/add-audit-logging-for-write-operations
+  entityId: varchar("entity_id", { length: 50 }).notNull(),
+=======
   entityId: varchar("entity_id", { length: 255 }).notNull(),
+ main
   actionType: varchar("action_type", { length: 50 }).notNull(), // CREATE, UPDATE, DELETE, STATUS_CHANGE
   timestamp: timestamp("timestamp").defaultNow().notNull(),
   details: jsonb("details"),
