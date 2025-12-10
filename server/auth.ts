@@ -153,6 +153,7 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
   return next();
 };
 
+ codex/add-role-based-middleware-for-requests
 export const isAdmin: RequestHandler = async (req, res, next) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ message: "Unauthorized" });
@@ -162,3 +163,35 @@ export const isAdmin: RequestHandler = async (req, res, next) => {
   }
   return next();
 };
+
+export const requireRole = (allowedRoles: string[]): RequestHandler => {
+  return (req, res, next) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ message: "ليست لديك صلاحية للقيام بهذا الإجراء" });
+=======
+export function requireRole(allowedRoles: string[]): RequestHandler {
+  return (req, res, next) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "يجب تسجيل الدخول أولاً" });
+    }
+
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res
+        .status(403)
+        .json({ message: "لا تملك صلاحية لتنفيذ هذا الإجراء" });
+ main
+    }
+
+    return next();
+  };
+ codex/add-role-based-middleware-for-requests
+};
+=======
+}
+
+export const isAdmin: RequestHandler = requireRole(["مدير"]);
+ main

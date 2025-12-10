@@ -1,7 +1,16 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
+ codex/add-role-based-middleware-for-requests
+import { setupAuth, isAuthenticated, requireRole } from "./auth";
+=======
+ codex/add-audit-logging-for-write-operations
 import { setupAuth, isAuthenticated, isAdmin } from "./auth";
+import { logAuditEvent } from "./audit";
+=======
+import { setupAuth, isAuthenticated, requireRole } from "./auth";
+ main
+ main
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
@@ -9,7 +18,19 @@ import {
   insertShipmentPaymentSchema,
 } from "@shared/schema";
 import bcrypt from "bcryptjs";
+ codex/wrap-shipment-creation-in-transaction
 import { createShipmentWithItems, updateShipmentWithItems } from "./shipmentService";
+=======
+codex/refactor-shipment-flow-into-service
+import { shipmentService, ShipmentServiceError } from "./services/shipments";
+=======
+ codex/modify-payments-listing-to-include-shipments
+import { getPaymentsWithShipments } from "./payments";
+=======
+import { logAuditEvent } from "./audit";
+main
+main
+ main
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Setup authentication
@@ -59,7 +80,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/suppliers", isAuthenticated, async (req, res) => {
+  app.post("/api/suppliers", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const data = insertSupplierSchema.parse(req.body);
       const supplier = await storage.createSupplier(data);
@@ -69,7 +90,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.patch("/api/suppliers/:id", isAuthenticated, async (req, res) => {
+  app.patch("/api/suppliers/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const supplier = await storage.updateSupplier(parseInt(req.params.id), req.body);
       if (!supplier) {
@@ -81,7 +102,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.delete("/api/suppliers/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/suppliers/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       await storage.deleteSupplier(parseInt(req.params.id));
       res.json({ success: true });
@@ -112,23 +133,296 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/shipments", isAuthenticated, async (req, res) => {
+  app.post("/api/shipments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const userId = (req.user as any)?.id;
+ codex/wrap-shipment-creation-in-transaction
       const shipment = await createShipmentWithItems(req.body, userId);
       res.json(shipment);
+=======
+codex/refactor-shipment-flow-into-service
+      const shipment = await shipmentService.createShipment(req.body, userId);
+      res.json(shipment);
+=======
+
+      // Create shipment
+      const shipment = await storage.createShipment({
+        ...shipmentData,
+        createdByUserId: userId,
+      });
+
+      // Create items if provided
+      if (items && Array.isArray(items)) {
+        for (const item of items) {
+          await storage.createShipmentItem({
+            ...item,
+            shipmentId: shipment.id,
+          });
+        }
+      }
+
+      // Calculate totals from items
+      const allItems = await storage.getShipmentItems(shipment.id);
+      const totalPurchaseCostRmb = allItems.reduce(
+        (sum, item) => sum + parseFloat(item.totalPurchaseCostRmb || "0"),
+        0
+      );
+
+      const totalCustomsCostEgp = allItems.reduce((sum, item) => {
+        const ctn = item.cartonsCtn || 0;
+        const customsPerCarton = parseFloat(item.customsCostPerCartonEgp || "0");
+        return sum + ctn * customsPerCarton;
+      }, 0);
+
+      const totalTakhreegCostEgp = allItems.reduce((sum, item) => {
+        const ctn = item.cartonsCtn || 0;
+        const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp || "0");
+        return sum + ctn * takhreegPerCarton;
+      }, 0);
+
+      // Get latest exchange rate for preliminary purchase cost calculation
+      const latestRmbRate = await storage.getLatestRate("RMB", "EGP");
+      const rmbToEgp = latestRmbRate ? parseFloat(latestRmbRate.rateValue) : 7.15;
+      const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgp;
+
+      // Calculate preliminary total including estimated purchase cost
+      const finalTotalCostEgp = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
+
+      await storage.updateShipment(shipment.id, {
+        purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
+        purchaseCostEgp: purchaseCostEgp.toFixed(2),
+        customsCostEgp: totalCustomsCostEgp.toFixed(2),
+        takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
+        finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
+        balanceEgp: finalTotalCostEgp.toFixed(2),
+      });
+
+      const updatedShipment = await storage.getShipment(shipment.id);
+ codex/add-audit-logging-for-write-operations
+
+      logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipment.id,
+        actionType: "CREATE",
+        details: {
+          shipment: updatedShipment,
+          items,
+=======
+      void logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipment.id.toString(),
+        actionType: "CREATE",
+        details: {
+          status: updatedShipment?.status,
+          itemCount: allItems.length,
+ main
+        },
+      });
+      res.json(updatedShipment);
+main
+ main
     } catch (error) {
+      if (error instanceof ShipmentServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
       console.error("Error creating shipment:", error);
+ codex/wrap-shipment-creation-in-transaction
       res.status(400).json({ message: (error as Error)?.message || "تعذر إنشاء الشحنة" });
+=======
+      res.status(500).json({ message: "حدث خطأ أثناء إنشاء الشحنة" });
+ main
     }
   });
 
-  app.patch("/api/shipments/:id", isAuthenticated, async (req, res) => {
+  app.patch("/api/shipments/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const shipmentId = parseInt(req.params.id);
+ codex/wrap-shipment-creation-in-transaction
       const updatedShipment = await updateShipmentWithItems(shipmentId, req.body);
+=======
+codex/refactor-shipment-flow-into-service
+      const updatedShipment = await shipmentService.updateShipment(shipmentId, req.body);
+=======
+      const { step, shipmentData, items, shippingData } = req.body;
+      const userId = (req.user as any)?.id;
+
+      // Validate shipment exists
+      const existingShipment = await storage.getShipment(shipmentId);
+      if (!existingShipment) {
+        return res.status(404).json({ message: "الشحنة غير موجودة" });
+      }
+      const previousStatus = existingShipment.status;
+
+      // Update shipment basic data
+      if (shipmentData) {
+        await storage.updateShipment(shipmentId, shipmentData);
+      }
+
+      // Update items
+      if (items && Array.isArray(items)) {
+        // Delete existing items and re-create
+        await storage.deleteShipmentItems(shipmentId);
+        for (const item of items) {
+          await storage.createShipmentItem({
+            ...item,
+            shipmentId,
+          });
+        }
+
+        // Recalculate totals
+        const allItems = await storage.getShipmentItems(shipmentId);
+        const totalPurchaseCostRmb = allItems.reduce(
+          (sum, item) => sum + parseFloat(item.totalPurchaseCostRmb || "0"),
+          0
+        );
+
+        const totalCustomsCostEgp = allItems.reduce((sum, item) => {
+          const ctn = item.cartonsCtn || 0;
+          const customsPerCarton = parseFloat(item.customsCostPerCartonEgp || "0");
+          return sum + ctn * customsPerCarton;
+        }, 0);
+
+        const totalTakhreegCostEgp = allItems.reduce((sum, item) => {
+          const ctn = item.cartonsCtn || 0;
+          const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp || "0");
+          return sum + ctn * takhreegPerCarton;
+        }, 0);
+
+        await storage.updateShipment(shipmentId, {
+          purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
+          customsCostEgp: totalCustomsCostEgp.toFixed(2),
+          takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
+        });
+      }
+
+      // Update shipping details
+      if (shippingData) {
+        const rmbToEgp = parseFloat(shippingData.rmbToEgpRate || "1");
+        const usdToRmb = parseFloat(shippingData.usdToRmbRate || "1");
+
+        const shipment = await storage.getShipment(shipmentId);
+        const totalPurchaseCostRmb = parseFloat(shipment?.purchaseCostRmb || "0");
+
+        const commissionRmb =
+          (totalPurchaseCostRmb * parseFloat(shippingData.commissionRatePercent || "0")) / 100;
+        const commissionEgp = commissionRmb * rmbToEgp;
+
+        const shippingCostUsd =
+          parseFloat(shippingData.shippingAreaSqm || "0") *
+          parseFloat(shippingData.shippingCostPerSqmUsdOriginal || "0");
+        const shippingCostRmb = shippingCostUsd * usdToRmb;
+        const shippingCostEgp = shippingCostRmb * rmbToEgp;
+
+        await storage.upsertShippingDetails({
+          shipmentId,
+          totalPurchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
+          commissionRatePercent: shippingData.commissionRatePercent,
+          commissionValueRmb: commissionRmb.toFixed(2),
+          commissionValueEgp: commissionEgp.toFixed(2),
+          shippingAreaSqm: shippingData.shippingAreaSqm,
+          shippingCostPerSqmUsdOriginal: shippingData.shippingCostPerSqmUsdOriginal,
+          totalShippingCostUsdOriginal: shippingCostUsd.toFixed(2),
+          totalShippingCostRmb: shippingCostRmb.toFixed(2),
+          totalShippingCostEgp: shippingCostEgp.toFixed(2),
+          shippingDate: shippingData.shippingDate,
+          rmbToEgpRateAtShipping: shippingData.rmbToEgpRate,
+          usdToRmbRateAtShipping: shippingData.usdToRmbRate,
+        });
+
+        // Update shipment costs
+        const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgp;
+
+        await storage.updateShipment(shipmentId, {
+          purchaseCostEgp: purchaseCostEgp.toFixed(2),
+          commissionCostRmb: commissionRmb.toFixed(2),
+          commissionCostEgp: commissionEgp.toFixed(2),
+          shippingCostRmb: shippingCostRmb.toFixed(2),
+          shippingCostEgp: shippingCostEgp.toFixed(2),
+        });
+      }
+
+      // Always calculate final total (running total at any step)
+      const shipment = await storage.getShipment(shipmentId);
+      if (shipment) {
+        const purchaseCostEgp = parseFloat(shipment.purchaseCostEgp || "0");
+        const commissionCostEgp = parseFloat(shipment.commissionCostEgp || "0");
+        const shippingCostEgp = parseFloat(shipment.shippingCostEgp || "0");
+        const customsCostEgp = parseFloat(shipment.customsCostEgp || "0");
+        const takhreegCostEgp = parseFloat(shipment.takhreegCostEgp || "0");
+
+        const finalTotalCostEgp =
+          purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp;
+
+        const totalPaidEgp = parseFloat(shipment.totalPaidEgp || "0");
+        // Balance should never be negative; any overpayment is shown separately in the UI
+        const balanceEgp = Math.max(0, finalTotalCostEgp - totalPaidEgp);
+
+        // Auto-update status based on step
+        let newStatus = shipment.status;
+        if (step === 2 && shippingData) {
+          // After shipping details are saved
+          newStatus = "جاهزة للاستلام";
+        } else if (step === 4) {
+          // Final step - shipment completed
+          newStatus = "مستلمة بنجاح";
+        }
+
+        await storage.updateShipment(shipmentId, {
+          finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
+          balanceEgp: balanceEgp.toFixed(2),
+          status: newStatus,
+        });
+      }
+
+      const updatedShipment = await storage.getShipment(shipmentId);
+ codex/add-audit-logging-for-write-operations
+      logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipmentId,
+        actionType: "UPDATE",
+        details: { step, shipmentData, items, shippingData, updatedShipment },
+      });
+
+      if (existingShipment && updatedShipment && existingShipment.status !== updatedShipment.status) {
+        logAuditEvent({
+          userId,
+          entityType: "SHIPMENT",
+          entityId: shipmentId,
+          actionType: "STATUS_CHANGE",
+          details: { from: existingShipment.status, to: updatedShipment.status },
+        });
+      }
+=======
+      void logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipmentId.toString(),
+        actionType: "UPDATE",
+        details: {
+          step,
+          status: updatedShipment?.status,
+        },
+      });
+      if (updatedShipment && updatedShipment.status !== previousStatus) {
+        void logAuditEvent({
+          userId,
+          entityType: "SHIPMENT",
+          entityId: shipmentId.toString(),
+          actionType: "STATUS_CHANGE",
+          details: { from: previousStatus, to: updatedShipment.status },
+        });
+      }
+main
+ main
+ main
       res.json(updatedShipment);
     } catch (error) {
+      if (error instanceof ShipmentServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
       console.error("Error updating shipment:", error);
       const message = (error as Error)?.message || "حدث خطأ أثناء حفظ بيانات الشحنة";
       const status = message === "الشحنة غير موجودة" ? 404 : 400;
@@ -136,9 +430,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.delete("/api/shipments/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/shipments/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
-      await storage.deleteShipment(parseInt(req.params.id));
+      const shipmentId = parseInt(req.params.id);
+      await storage.deleteShipment(shipmentId);
+ codex/add-audit-logging-for-write-operations
+      const userId = (req.user as any)?.id;
+      logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipmentId,
+        actionType: "DELETE",
+        details: { shipmentId },
+=======
+      void logAuditEvent({
+        userId: (req.user as any)?.id,
+        entityType: "SHIPMENT",
+        entityId: shipmentId.toString(),
+        actionType: "DELETE",
+ main
+      });
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ message: "Error deleting shipment" });
@@ -175,10 +486,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/exchange-rates", isAuthenticated, async (req, res) => {
+  app.post("/api/exchange-rates", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const data = insertExchangeRateSchema.parse(req.body);
+      const userId = (req.user as any)?.id;
       const rate = await storage.createExchangeRate(data);
+ codex/add-audit-logging-for-write-operations
+      const userId = (req.user as any)?.id;
+
+      logAuditEvent({
+        userId,
+        entityType: "EXCHANGE_RATE",
+        entityId: rate.id,
+        actionType: "CREATE",
+        details: rate,
+=======
+      void logAuditEvent({
+        userId,
+        entityType: "EXCHANGE_RATE",
+        entityId: rate.id.toString(),
+        actionType: "CREATE",
+        details: { from: rate.fromCurrency, to: rate.toCurrency },
+ main
+      });
       res.json(rate);
     } catch (error) {
       res.status(400).json({ message: "Invalid data" });
@@ -186,12 +516,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Manual/automatic refresh - simulate external update
-  app.post("/api/exchange-rates/refresh", isAuthenticated, async (_req, res) => {
+ codex/add-role-based-middleware-for-requests
+  app.post(
+    "/api/exchange-rates/refresh",
+    requireRole(["مدير", "محاسب"]),
+    async (_req, res) => {
+=======
+ codex/add-audit-logging-for-write-operations
+  app.post("/api/exchange-rates/refresh", isAuthenticated, async (req, res) => {
+=======
+ codex/add-role-based-middleware-for-routes
+  app.post("/api/exchange-rates/refresh", requireRole(["مدير", "محاسب"]), async (_req, res) => {
+=======
+  app.post("/api/exchange-rates/refresh", isAuthenticated, async (req, res) => {
+main
+ main
+ main
     try {
       const today = new Date();
       const todayStr = today.toISOString().split("T")[0];
       const latestRmb = await storage.getLatestRate("RMB", "EGP");
       const latestUsd = await storage.getLatestRate("USD", "RMB");
+      const userId = (req.user as any)?.id;
 
       const refreshed = await Promise.all([
         storage.createExchangeRate({
@@ -210,6 +556,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }),
       ]);
 
+ codex/add-audit-logging-for-write-operations
+      refreshed.forEach((rate) =>
+        logAuditEvent({
+          userId,
+          entityType: "EXCHANGE_RATE",
+          entityId: rate.id,
+          actionType: "CREATE",
+          details: rate,
+        })
+      );
+=======
+      refreshed.forEach((rate) => {
+        void logAuditEvent({
+          userId,
+          entityType: "EXCHANGE_RATE",
+          entityId: rate.id.toString(),
+          actionType: "CREATE",
+          details: { from: rate.fromCurrency, to: rate.toCurrency },
+        });
+      });
+ main
+
       res.json({
         message: "تم تحديث الأسعار",
         lastUpdated: today,
@@ -224,14 +592,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Payments
   app.get("/api/payments", isAuthenticated, async (req, res) => {
     try {
+ codex/optimize-shipment-retrieval-for-payments
       const payments = await storage.getAllPayments();
-      // Include shipment info
-      const paymentsWithShipments = await Promise.all(
-        payments.map(async (payment) => {
-          const shipment = await storage.getShipment(payment.shipmentId);
-          return { ...payment, shipment };
-        })
+      const shipmentIds = Array.from(
+        new Set(payments.map((payment) => payment.shipmentId))
       );
+      const shipments = await storage.getShipmentsByIds(shipmentIds);
+      const shipmentMap = new Map(shipments.map((shipment) => [shipment.id, shipment]));
+
+      const paymentsWithShipments = payments.map((payment) => ({
+        ...payment,
+        shipment: shipmentMap.get(payment.shipmentId),
+      }));
+=======
+      const paymentsWithShipments = await getPaymentsWithShipments(storage);
+ main
       res.json(paymentsWithShipments);
     } catch (error) {
       res.status(500).json({ message: "Error fetching payments" });
@@ -247,7 +622,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/payments", isAuthenticated, async (req, res) => {
+  app.post("/api/payments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       // Convert paymentDate string to Date object and validate
       let paymentDate: Date | undefined;
@@ -266,6 +641,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const payment = await storage.createPayment({
         ...data,
         createdByUserId: userId,
+      });
+ codex/add-audit-logging-for-write-operations
+
+      logAuditEvent({
+        userId,
+        entityType: "PAYMENT",
+        entityId: payment.id,
+        actionType: "CREATE",
+        details: payment,
+=======
+      void logAuditEvent({
+        userId,
+        entityType: "PAYMENT",
+        entityId: payment.id.toString(),
+        actionType: "CREATE",
+        details: { shipmentId: payment.shipmentId },
+ main
       });
       res.json(payment);
     } catch (error) {
@@ -320,9 +712,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Create new user (admin only)
-  app.post("/api/users", isAdmin, async (req, res) => {
+ codex/add-role-based-middleware-for-requests
+  app.post("/api/users", requireRole(["مدير", "محاسب"]), async (req, res) => {
+=======
+  app.post("/api/users", requireRole(["مدير"]), async (req, res) => {
+ main
     try {
       const { username, password, firstName, lastName, role } = req.body;
+      const actorId = (req.user as any)?.id;
       
       if (!username || !password) {
         return res.status(400).json({ message: "اسم المستخدم وكلمة المرور مطلوبان" });
@@ -343,6 +740,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
 
       const { password: _, ...userWithoutPassword } = user;
+ codex/add-audit-logging-for-write-operations
+      const currentUserId = (req.user as any)?.id;
+      logAuditEvent({
+        userId: currentUserId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "CREATE",
+        details: userWithoutPassword,
+=======
+      void logAuditEvent({
+        userId: actorId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "CREATE",
+        details: { role: user.role },
+main
+      });
       res.json(userWithoutPassword);
     } catch (error) {
       console.error("Error creating user:", error);
@@ -351,15 +765,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Update user (admin only, or self for password)
-  app.patch("/api/users/:id", isAuthenticated, async (req, res) => {
+  app.patch("/api/users/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const { id } = req.params;
       const { password, firstName, lastName, role } = req.body;
       const currentUser = req.user!;
+      const actorId = (req.user as any)?.id;
 
       // Only admin can update other users or roles
       if (currentUser.id !== id && currentUser.role !== "مدير") {
-        return res.status(403).json({ message: "غير مصرح" });
+        return res
+          .status(403)
+          .json({ message: "لا تملك صلاحية لتعديل مستخدمين آخرين" });
       }
 
       // Non-admins can only update their own password
@@ -381,13 +798,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       const { password: _, ...userWithoutPassword } = user;
+ codex/add-audit-logging-for-write-operations
+      logAuditEvent({
+        userId: currentUser.id,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { updatedFields: Object.keys(updateData), user: userWithoutPassword },
+=======
+      void logAuditEvent({
+        userId: actorId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { updatedFields: Object.keys(updateData) },
+main
+      });
       res.json(userWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Error updating user" });
     }
   });
 
-  app.patch("/api/users/:id/role", isAdmin, async (req, res) => {
+ codex/add-role-based-middleware-for-requests
+  app.patch("/api/users/:id/role", requireRole(["مدير", "محاسب"]), async (req, res) => {
+=======
+  app.patch("/api/users/:id/role", requireRole(["مدير"]), async (req, res) => {
+ main
     try {
       const { role } = req.body;
       const user = await storage.updateUserRole(req.params.id, role);
@@ -395,6 +832,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ message: "User not found" });
       }
       const { password: _, ...userWithoutPassword } = user;
+ codex/add-audit-logging-for-write-operations
+      const currentUserId = (req.user as any)?.id;
+      logAuditEvent({
+        userId: currentUserId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { role, user: userWithoutPassword },
+=======
+      void logAuditEvent({
+        userId: (req.user as any)?.id,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { role: user.role },
+ main
+      });
       res.json(userWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Error updating user role" });
@@ -402,10 +856,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Delete user (admin only)
-  app.delete("/api/users/:id", isAdmin, async (req, res) => {
+ codex/add-role-based-middleware-for-requests
+  app.delete("/api/users/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
+=======
+  app.delete("/api/users/:id", requireRole(["مدير"]), async (req, res) => {
+ main
     try {
       const { id } = req.params;
       const currentUser = req.user!;
+      const actorId = (req.user as any)?.id;
 
       // Prevent deleting yourself
       if (currentUser.id === id) {
@@ -419,6 +878,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       await storage.deleteUser(id);
+ codex/add-audit-logging-for-write-operations
+      logAuditEvent({
+        userId: currentUser.id,
+        entityType: "USER",
+        entityId: id,
+        actionType: "DELETE",
+        details: { deletedUserId: id },
+=======
+      void logAuditEvent({
+        userId: actorId,
+        entityType: "USER",
+        entityId: id,
+        actionType: "DELETE",
+ main
+      });
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ message: "Error deleting user" });
@@ -447,6 +921,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       await storage.updateUser(userId, { password: hashedPassword });
+
+      logAuditEvent({
+        userId,
+        entityType: "USER",
+        entityId: userId,
+        actionType: "UPDATE",
+        details: { action: "CHANGE_PASSWORD" },
+      });
 
       res.json({ success: true, message: "تم تغيير كلمة المرور بنجاح" });
     } catch (error) {
