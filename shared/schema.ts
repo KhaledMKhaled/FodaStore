@@ -297,16 +297,16 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
 
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users).omit({ createdAt: true, updatedAt: true });
-export const insertSupplierSchema = createInsertSchema(suppliers).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertProductSchema = createInsertSchema(products).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertShipmentSchema = createInsertSchema(shipments).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertShipmentItemSchema = createInsertSchema(shipmentItems).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertShipmentShippingDetailsSchema = createInsertSchema(shipmentShippingDetails).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertShipmentCustomsDetailsSchema = createInsertSchema(shipmentCustomsDetails).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertExchangeRateSchema = createInsertSchema(exchangeRates).omit({ id: true, createdAt: true });
-export const insertShipmentPaymentSchema = createInsertSchema(shipmentPayments).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertInventoryMovementSchema = createInsertSchema(inventoryMovements).omit({ id: true, createdAt: true });
-export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true });
+export const insertSupplierSchema = createInsertSchema(suppliers).omit({ createdAt: true, updatedAt: true });
+export const insertProductSchema = createInsertSchema(products).omit({ createdAt: true, updatedAt: true });
+export const insertShipmentSchema = createInsertSchema(shipments).omit({ createdAt: true, updatedAt: true });
+export const insertShipmentItemSchema = createInsertSchema(shipmentItems).omit({ createdAt: true, updatedAt: true });
+export const insertShipmentShippingDetailsSchema = createInsertSchema(shipmentShippingDetails).omit({ createdAt: true, updatedAt: true });
+export const insertShipmentCustomsDetailsSchema = createInsertSchema(shipmentCustomsDetails).omit({ createdAt: true, updatedAt: true });
+export const insertExchangeRateSchema = createInsertSchema(exchangeRates).omit({ createdAt: true });
+export const insertShipmentPaymentSchema = createInsertSchema(shipmentPayments).omit({ createdAt: true, updatedAt: true });
+export const insertInventoryMovementSchema = createInsertSchema(inventoryMovements).omit({ createdAt: true });
+export const insertAuditLogSchema = createInsertSchema(auditLogs);
 
 // Types
 export type UpsertUser = typeof users.$inferInsert;

@@ -123,14 +123,14 @@ export default function ShipmentWizard() {
 
   // Save mutation
   const saveMutation = useMutation({
-    mutationFn: async (data: { step: number }) => {
+    mutationFn: async (data: { step: number }): Promise<{ id?: number } | undefined> => {
       if (isNew && data.step === 1) {
         // Create new shipment
-        const shipment = await apiRequest("POST", "/api/shipments", {
+        const response = await apiRequest("POST", "/api/shipments", {
           ...shipmentData,
           items,
         });
-        return shipment;
+        return response.json();
       } else {
         // Update existing
         await apiRequest("PATCH", `/api/shipments/${id}`, {
@@ -139,6 +139,7 @@ export default function ShipmentWizard() {
           items,
           shippingData,
         });
+        return undefined;
       }
     },
     onSuccess: (result) => {
