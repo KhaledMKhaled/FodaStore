@@ -5,12 +5,11 @@ import { setupAuth, isAuthenticated, isAdmin } from "./auth";
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
-  insertShipmentSchema,
-  insertShipmentItemSchema,
   insertExchangeRateSchema,
   insertShipmentPaymentSchema,
 } from "@shared/schema";
 import bcrypt from "bcryptjs";
+import { createShipmentWithItems, updateShipmentWithItems } from "./shipmentService";
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Setup authentication
@@ -115,206 +114,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/shipments", isAuthenticated, async (req, res) => {
     try {
-      const { items, ...shipmentData } = req.body;
       const userId = (req.user as any)?.id;
-
-      // Create shipment
-      const shipment = await storage.createShipment({
-        ...shipmentData,
-        createdByUserId: userId,
-      });
-
-      // Create items if provided
-      if (items && Array.isArray(items)) {
-        for (const item of items) {
-          await storage.createShipmentItem({
-            ...item,
-            shipmentId: shipment.id,
-          });
-        }
-      }
-
-      // Calculate totals from items
-      const allItems = await storage.getShipmentItems(shipment.id);
-      const totalPurchaseCostRmb = allItems.reduce(
-        (sum, item) => sum + parseFloat(item.totalPurchaseCostRmb || "0"),
-        0
-      );
-
-      const totalCustomsCostEgp = allItems.reduce((sum, item) => {
-        const ctn = item.cartonsCtn || 0;
-        const customsPerCarton = parseFloat(item.customsCostPerCartonEgp || "0");
-        return sum + ctn * customsPerCarton;
-      }, 0);
-
-      const totalTakhreegCostEgp = allItems.reduce((sum, item) => {
-        const ctn = item.cartonsCtn || 0;
-        const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp || "0");
-        return sum + ctn * takhreegPerCarton;
-      }, 0);
-
-      // Get latest exchange rate for preliminary purchase cost calculation
-      const latestRmbRate = await storage.getLatestRate("RMB", "EGP");
-      const rmbToEgp = latestRmbRate ? parseFloat(latestRmbRate.rateValue) : 7.15;
-      const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgp;
-
-      // Calculate preliminary total including estimated purchase cost
-      const finalTotalCostEgp = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
-
-      await storage.updateShipment(shipment.id, {
-        purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
-        purchaseCostEgp: purchaseCostEgp.toFixed(2),
-        customsCostEgp: totalCustomsCostEgp.toFixed(2),
-        takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
-        finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
-        balanceEgp: finalTotalCostEgp.toFixed(2),
-      });
-
-      const updatedShipment = await storage.getShipment(shipment.id);
-      res.json(updatedShipment);
+      const shipment = await createShipmentWithItems(req.body, userId);
+      res.json(shipment);
     } catch (error) {
       console.error("Error creating shipment:", error);
-      res.status(400).json({ message: "Invalid data" });
+      res.status(400).json({ message: (error as Error)?.message || "تعذر إنشاء الشحنة" });
     }
   });
 
   app.patch("/api/shipments/:id", isAuthenticated, async (req, res) => {
     try {
       const shipmentId = parseInt(req.params.id);
-      const { step, shipmentData, items, shippingData } = req.body;
-
-      // Validate shipment exists
-      const existingShipment = await storage.getShipment(shipmentId);
-      if (!existingShipment) {
-        return res.status(404).json({ message: "الشحنة غير موجودة" });
-      }
-
-      // Update shipment basic data
-      if (shipmentData) {
-        await storage.updateShipment(shipmentId, shipmentData);
-      }
-
-      // Update items
-      if (items && Array.isArray(items)) {
-        // Delete existing items and re-create
-        await storage.deleteShipmentItems(shipmentId);
-        for (const item of items) {
-          await storage.createShipmentItem({
-            ...item,
-            shipmentId,
-          });
-        }
-
-        // Recalculate totals
-        const allItems = await storage.getShipmentItems(shipmentId);
-        const totalPurchaseCostRmb = allItems.reduce(
-          (sum, item) => sum + parseFloat(item.totalPurchaseCostRmb || "0"),
-          0
-        );
-
-        const totalCustomsCostEgp = allItems.reduce((sum, item) => {
-          const ctn = item.cartonsCtn || 0;
-          const customsPerCarton = parseFloat(item.customsCostPerCartonEgp || "0");
-          return sum + ctn * customsPerCarton;
-        }, 0);
-
-        const totalTakhreegCostEgp = allItems.reduce((sum, item) => {
-          const ctn = item.cartonsCtn || 0;
-          const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp || "0");
-          return sum + ctn * takhreegPerCarton;
-        }, 0);
-
-        await storage.updateShipment(shipmentId, {
-          purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
-          customsCostEgp: totalCustomsCostEgp.toFixed(2),
-          takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
-        });
-      }
-
-      // Update shipping details
-      if (shippingData) {
-        const rmbToEgp = parseFloat(shippingData.rmbToEgpRate || "1");
-        const usdToRmb = parseFloat(shippingData.usdToRmbRate || "1");
-
-        const shipment = await storage.getShipment(shipmentId);
-        const totalPurchaseCostRmb = parseFloat(shipment?.purchaseCostRmb || "0");
-
-        const commissionRmb =
-          (totalPurchaseCostRmb * parseFloat(shippingData.commissionRatePercent || "0")) / 100;
-        const commissionEgp = commissionRmb * rmbToEgp;
-
-        const shippingCostUsd =
-          parseFloat(shippingData.shippingAreaSqm || "0") *
-          parseFloat(shippingData.shippingCostPerSqmUsdOriginal || "0");
-        const shippingCostRmb = shippingCostUsd * usdToRmb;
-        const shippingCostEgp = shippingCostRmb * rmbToEgp;
-
-        await storage.upsertShippingDetails({
-          shipmentId,
-          totalPurchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
-          commissionRatePercent: shippingData.commissionRatePercent,
-          commissionValueRmb: commissionRmb.toFixed(2),
-          commissionValueEgp: commissionEgp.toFixed(2),
-          shippingAreaSqm: shippingData.shippingAreaSqm,
-          shippingCostPerSqmUsdOriginal: shippingData.shippingCostPerSqmUsdOriginal,
-          totalShippingCostUsdOriginal: shippingCostUsd.toFixed(2),
-          totalShippingCostRmb: shippingCostRmb.toFixed(2),
-          totalShippingCostEgp: shippingCostEgp.toFixed(2),
-          shippingDate: shippingData.shippingDate,
-          rmbToEgpRateAtShipping: shippingData.rmbToEgpRate,
-          usdToRmbRateAtShipping: shippingData.usdToRmbRate,
-        });
-
-        // Update shipment costs
-        const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgp;
-
-        await storage.updateShipment(shipmentId, {
-          purchaseCostEgp: purchaseCostEgp.toFixed(2),
-          commissionCostRmb: commissionRmb.toFixed(2),
-          commissionCostEgp: commissionEgp.toFixed(2),
-          shippingCostRmb: shippingCostRmb.toFixed(2),
-          shippingCostEgp: shippingCostEgp.toFixed(2),
-        });
-      }
-
-      // Always calculate final total (running total at any step)
-      const shipment = await storage.getShipment(shipmentId);
-      if (shipment) {
-        const purchaseCostEgp = parseFloat(shipment.purchaseCostEgp || "0");
-        const commissionCostEgp = parseFloat(shipment.commissionCostEgp || "0");
-        const shippingCostEgp = parseFloat(shipment.shippingCostEgp || "0");
-        const customsCostEgp = parseFloat(shipment.customsCostEgp || "0");
-        const takhreegCostEgp = parseFloat(shipment.takhreegCostEgp || "0");
-
-        const finalTotalCostEgp =
-          purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp;
-
-        const totalPaidEgp = parseFloat(shipment.totalPaidEgp || "0");
-        // Balance should never be negative; any overpayment is shown separately in the UI
-        const balanceEgp = Math.max(0, finalTotalCostEgp - totalPaidEgp);
-
-        // Auto-update status based on step
-        let newStatus = shipment.status;
-        if (step === 2 && shippingData) {
-          // After shipping details are saved
-          newStatus = "جاهزة للاستلام";
-        } else if (step === 4) {
-          // Final step - shipment completed
-          newStatus = "مستلمة بنجاح";
-        }
-
-        await storage.updateShipment(shipmentId, {
-          finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
-          balanceEgp: balanceEgp.toFixed(2),
-          status: newStatus,
-        });
-      }
-
-      const updatedShipment = await storage.getShipment(shipmentId);
+      const updatedShipment = await updateShipmentWithItems(shipmentId, req.body);
       res.json(updatedShipment);
     } catch (error) {
       console.error("Error updating shipment:", error);
-      res.status(500).json({ message: "حدث خطأ أثناء حفظ بيانات الشحنة" });
+      const message = (error as Error)?.message || "حدث خطأ أثناء حفظ بيانات الشحنة";
+      const status = message === "الشحنة غير موجودة" ? 404 : 400;
+      res.status(status).json({ message });
     }
   });
 
