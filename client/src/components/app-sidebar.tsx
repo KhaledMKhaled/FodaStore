@@ -25,10 +25,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 
 const menuItems = [
   {
@@ -161,39 +163,60 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-4 border-t border-sidebar-border">
-        <div className="flex items-center gap-3">
-          <Avatar className="w-10 h-10">
-            <AvatarImage src={user?.profileImageUrl || ""} className="object-cover" />
-            <AvatarFallback className="bg-primary/10 text-primary font-medium">
-              {user?.firstName?.[0] || user?.email?.[0]?.toUpperCase() || "م"}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 flex flex-col group-data-[collapsible=icon]:hidden">
-            <span className="font-medium text-sm">
-              {user?.firstName && user?.lastName
-                ? `${user.firstName} ${user.lastName}`
-                : user?.email || "مستخدم"}
-            </span>
-            <span className="text-xs text-muted-foreground">{user?.role || "مشاهد"}</span>
-          </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                asChild
-                className="group-data-[collapsible=icon]:hidden"
-                data-testid="button-logout"
-              >
-                <a href="/api/logout">
-                  <LogOut className="w-4 h-4" />
-                </a>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left">تسجيل الخروج</TooltipContent>
-          </Tooltip>
-        </div>
+        <SidebarUserFooter />
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+function SidebarUserFooter() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/logout");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      window.location.href = "/";
+    },
+  });
+
+  const handleLogout = () => {
+    logoutMutation.mutate();
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      <Avatar className="w-10 h-10">
+        <AvatarFallback className="bg-primary/10 text-primary font-medium">
+          {user?.firstName?.[0] || (user as any)?.username?.[0]?.toUpperCase() || "م"}
+        </AvatarFallback>
+      </Avatar>
+      <div className="flex-1 flex flex-col group-data-[collapsible=icon]:hidden">
+        <span className="font-medium text-sm">
+          {user?.firstName && user?.lastName
+            ? `${user.firstName} ${user.lastName}`
+            : (user as any)?.username || "مستخدم"}
+        </span>
+        <span className="text-xs text-muted-foreground">{user?.role || "مشاهد"}</span>
+      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleLogout}
+            className="group-data-[collapsible=icon]:hidden"
+            data-testid="button-logout"
+            disabled={logoutMutation.isPending}
+          >
+            <LogOut className="w-4 h-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="left">تسجيل الخروج</TooltipContent>
+      </Tooltip>
+    </div>
   );
 }

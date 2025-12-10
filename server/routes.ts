@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./auth";
+import { setupAuth, isAuthenticated, isAdmin } from "./auth";
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
@@ -10,6 +10,7 @@ import {
   insertExchangeRateSchema,
   insertShipmentPaymentSchema,
 } from "@shared/schema";
+import bcrypt from "bcryptjs";
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Setup authentication
@@ -17,11 +18,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Auth routes
   app.get("/api/auth/user", async (req, res) => {
-    if (req.isAuthenticated()) {
-      const userId = (req.user as any)?.claims?.sub;
-      if (userId) {
-        const user = await storage.getUser(userId);
-        return res.json(user);
+    if (req.isAuthenticated() && req.user) {
+      const user = await storage.getUser(req.user.id);
+      if (user) {
+        const { password, ...userWithoutPassword } = user;
+        return res.json(userWithoutPassword);
       }
     }
     res.status(401).json({ message: "Unauthorized" });
@@ -402,30 +403,146 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Users
   app.get("/api/users", isAuthenticated, async (req, res) => {
     try {
-      const users = await storage.getAllUsers();
-      res.json(users);
+      const allUsers = await storage.getAllUsers();
+      const usersWithoutPasswords = allUsers.map(({ password, ...user }) => user);
+      res.json(usersWithoutPasswords);
     } catch (error) {
       res.status(500).json({ message: "Error fetching users" });
     }
   });
 
-  app.patch("/api/users/:id/role", isAuthenticated, async (req, res) => {
+  // Create new user (admin only)
+  app.post("/api/users", isAdmin, async (req, res) => {
     try {
-      const { role } = req.body;
-      const currentUser = req.user as any;
+      const { username, password, firstName, lastName, role } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({ message: "اسم المستخدم وكلمة المرور مطلوبان" });
+      }
 
-      // Only admins can change roles
-      if (currentUser?.role !== "مدير") {
+      const existingUser = await storage.getUserByUsername(username);
+      if (existingUser) {
+        return res.status(400).json({ message: "اسم المستخدم موجود بالفعل" });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = await storage.createUser({
+        username,
+        password: hashedPassword,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        role: role || "مشاهد",
+      });
+
+      const { password: _, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      console.error("Error creating user:", error);
+      res.status(500).json({ message: "Error creating user" });
+    }
+  });
+
+  // Update user (admin only, or self for password)
+  app.patch("/api/users/:id", isAuthenticated, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { password, firstName, lastName, role } = req.body;
+      const currentUser = req.user!;
+
+      // Only admin can update other users or roles
+      if (currentUser.id !== id && currentUser.role !== "مدير") {
         return res.status(403).json({ message: "غير مصرح" });
       }
 
+      // Non-admins can only update their own password
+      if (currentUser.id === id && currentUser.role !== "مدير" && role) {
+        return res.status(403).json({ message: "غير مصرح بتغيير الدور" });
+      }
+
+      const updateData: any = {};
+      if (password) {
+        updateData.password = await bcrypt.hash(password, 10);
+      }
+      if (firstName !== undefined) updateData.firstName = firstName;
+      if (lastName !== undefined) updateData.lastName = lastName;
+      if (role !== undefined && currentUser.role === "مدير") updateData.role = role;
+
+      const user = await storage.updateUser(id, updateData);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const { password: _, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      res.status(500).json({ message: "Error updating user" });
+    }
+  });
+
+  app.patch("/api/users/:id/role", isAdmin, async (req, res) => {
+    try {
+      const { role } = req.body;
       const user = await storage.updateUserRole(req.params.id, role);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
-      res.json(user);
+      const { password: _, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Error updating user role" });
+    }
+  });
+
+  // Delete user (admin only)
+  app.delete("/api/users/:id", isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const currentUser = req.user!;
+
+      // Prevent deleting yourself
+      if (currentUser.id === id) {
+        return res.status(400).json({ message: "لا يمكن حذف حسابك الخاص" });
+      }
+
+      // Prevent deleting root user
+      const targetUser = await storage.getUser(id);
+      if (targetUser?.username === "root") {
+        return res.status(400).json({ message: "لا يمكن حذف حساب الجذر" });
+      }
+
+      await storage.deleteUser(id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Error deleting user" });
+    }
+  });
+
+  // Change own password
+  app.post("/api/auth/change-password", isAuthenticated, async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      const userId = req.user!.id;
+
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: "كلمة المرور الحالية والجديدة مطلوبتان" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const isValid = await bcrypt.compare(currentPassword, user.password);
+      if (!isValid) {
+        return res.status(401).json({ message: "كلمة المرور الحالية غير صحيحة" });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await storage.updateUser(userId, { password: hashedPassword });
+
+      res.json({ success: true, message: "تم تغيير كلمة المرور بنجاح" });
+    } catch (error) {
+      res.status(500).json({ message: "Error changing password" });
     }
   });
 }
