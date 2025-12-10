@@ -562,7 +562,21 @@ main
   // Payments
   app.get("/api/payments", isAuthenticated, async (req, res) => {
     try {
+ codex/optimize-shipment-retrieval-for-payments
+      const payments = await storage.getAllPayments();
+      const shipmentIds = Array.from(
+        new Set(payments.map((payment) => payment.shipmentId))
+      );
+      const shipments = await storage.getShipmentsByIds(shipmentIds);
+      const shipmentMap = new Map(shipments.map((shipment) => [shipment.id, shipment]));
+
+      const paymentsWithShipments = payments.map((payment) => ({
+        ...payment,
+        shipment: shipmentMap.get(payment.shipmentId),
+      }));
+=======
       const paymentsWithShipments = await getPaymentsWithShipments(storage);
+ main
       res.json(paymentsWithShipments);
     } catch (error) {
       res.status(500).json({ message: "Error fetching payments" });
