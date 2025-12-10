@@ -5,16 +5,18 @@ import { setupAuth, isAuthenticated, requireRole } from "./auth";
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
-  insertShipmentSchema,
-  insertShipmentItemSchema,
   insertExchangeRateSchema,
   insertShipmentPaymentSchema,
 } from "@shared/schema";
 import bcrypt from "bcryptjs";
+codex/refactor-shipment-flow-into-service
+import { shipmentService, ShipmentServiceError } from "./services/shipments";
+=======
  codex/modify-payments-listing-to-include-shipments
 import { getPaymentsWithShipments } from "./payments";
 =======
 import { logAuditEvent } from "./audit";
+main
 main
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
@@ -120,8 +122,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/shipments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
-      const { items, ...shipmentData } = req.body;
       const userId = (req.user as any)?.id;
+codex/refactor-shipment-flow-into-service
+      const shipment = await shipmentService.createShipment(req.body, userId);
+      res.json(shipment);
+=======
 
       // Create shipment
       const shipment = await storage.createShipment({
@@ -187,15 +192,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         },
       });
       res.json(updatedShipment);
+main
     } catch (error) {
+      if (error instanceof ShipmentServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
       console.error("Error creating shipment:", error);
-      res.status(400).json({ message: "Invalid data" });
+      res.status(500).json({ message: "حدث خطأ أثناء إنشاء الشحنة" });
     }
   });
 
   app.patch("/api/shipments/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const shipmentId = parseInt(req.params.id);
+codex/refactor-shipment-flow-into-service
+      const updatedShipment = await shipmentService.updateShipment(shipmentId, req.body);
+=======
       const { step, shipmentData, items, shippingData } = req.body;
       const userId = (req.user as any)?.id;
 
@@ -347,8 +359,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           details: { from: previousStatus, to: updatedShipment.status },
         });
       }
+main
       res.json(updatedShipment);
     } catch (error) {
+      if (error instanceof ShipmentServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
       console.error("Error updating shipment:", error);
       res.status(500).json({ message: "حدث خطأ أثناء حفظ بيانات الشحنة" });
     }
