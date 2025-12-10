@@ -18,6 +18,9 @@ import {
   insertShipmentPaymentSchema,
 } from "@shared/schema";
 import bcrypt from "bcryptjs";
+ codex/wrap-shipment-creation-in-transaction
+import { createShipmentWithItems, updateShipmentWithItems } from "./shipmentService";
+=======
 codex/refactor-shipment-flow-into-service
 import { shipmentService, ShipmentServiceError } from "./services/shipments";
 =======
@@ -27,6 +30,7 @@ import { getPaymentsWithShipments } from "./payments";
 import { logAuditEvent } from "./audit";
 main
 main
+ main
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Setup authentication
@@ -132,6 +136,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/shipments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const userId = (req.user as any)?.id;
+ codex/wrap-shipment-creation-in-transaction
+      const shipment = await createShipmentWithItems(req.body, userId);
+      res.json(shipment);
+=======
 codex/refactor-shipment-flow-into-service
       const shipment = await shipmentService.createShipment(req.body, userId);
       res.json(shipment);
@@ -214,18 +222,26 @@ codex/refactor-shipment-flow-into-service
       });
       res.json(updatedShipment);
 main
+ main
     } catch (error) {
       if (error instanceof ShipmentServiceError) {
         return res.status(error.status).json({ message: error.message });
       }
       console.error("Error creating shipment:", error);
+ codex/wrap-shipment-creation-in-transaction
+      res.status(400).json({ message: (error as Error)?.message || "تعذر إنشاء الشحنة" });
+=======
       res.status(500).json({ message: "حدث خطأ أثناء إنشاء الشحنة" });
+ main
     }
   });
 
   app.patch("/api/shipments/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const shipmentId = parseInt(req.params.id);
+ codex/wrap-shipment-creation-in-transaction
+      const updatedShipment = await updateShipmentWithItems(shipmentId, req.body);
+=======
 codex/refactor-shipment-flow-into-service
       const updatedShipment = await shipmentService.updateShipment(shipmentId, req.body);
 =======
@@ -401,13 +417,16 @@ codex/refactor-shipment-flow-into-service
       }
 main
  main
+ main
       res.json(updatedShipment);
     } catch (error) {
       if (error instanceof ShipmentServiceError) {
         return res.status(error.status).json({ message: error.message });
       }
       console.error("Error updating shipment:", error);
-      res.status(500).json({ message: "حدث خطأ أثناء حفظ بيانات الشحنة" });
+      const message = (error as Error)?.message || "حدث خطأ أثناء حفظ بيانات الشحنة";
+      const status = message === "الشحنة غير موجودة" ? 404 : 400;
+      res.status(status).json({ message });
     }
   });
 
