@@ -11,6 +11,7 @@ import {
   insertShipmentPaymentSchema,
 } from "@shared/schema";
 import bcrypt from "bcryptjs";
+import { logAuditEvent } from "./audit";
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Setup authentication
@@ -171,6 +172,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
 
       const updatedShipment = await storage.getShipment(shipment.id);
+      void logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipment.id.toString(),
+        actionType: "CREATE",
+        details: {
+          status: updatedShipment?.status,
+          itemCount: allItems.length,
+        },
+      });
       res.json(updatedShipment);
     } catch (error) {
       console.error("Error creating shipment:", error);
@@ -182,12 +193,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const shipmentId = parseInt(req.params.id);
       const { step, shipmentData, items, shippingData } = req.body;
+      const userId = (req.user as any)?.id;
 
       // Validate shipment exists
       const existingShipment = await storage.getShipment(shipmentId);
       if (!existingShipment) {
         return res.status(404).json({ message: "الشحنة غير موجودة" });
       }
+      const previousStatus = existingShipment.status;
 
       // Update shipment basic data
       if (shipmentData) {
@@ -311,6 +324,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       const updatedShipment = await storage.getShipment(shipmentId);
+      void logAuditEvent({
+        userId,
+        entityType: "SHIPMENT",
+        entityId: shipmentId.toString(),
+        actionType: "UPDATE",
+        details: {
+          step,
+          status: updatedShipment?.status,
+        },
+      });
+      if (updatedShipment && updatedShipment.status !== previousStatus) {
+        void logAuditEvent({
+          userId,
+          entityType: "SHIPMENT",
+          entityId: shipmentId.toString(),
+          actionType: "STATUS_CHANGE",
+          details: { from: previousStatus, to: updatedShipment.status },
+        });
+      }
       res.json(updatedShipment);
     } catch (error) {
       console.error("Error updating shipment:", error);
@@ -320,7 +352,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.delete("/api/shipments/:id", isAuthenticated, async (req, res) => {
     try {
-      await storage.deleteShipment(parseInt(req.params.id));
+      const shipmentId = parseInt(req.params.id);
+      await storage.deleteShipment(shipmentId);
+      void logAuditEvent({
+        userId: (req.user as any)?.id,
+        entityType: "SHIPMENT",
+        entityId: shipmentId.toString(),
+        actionType: "DELETE",
+      });
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ message: "Error deleting shipment" });
@@ -360,7 +399,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/exchange-rates", isAuthenticated, async (req, res) => {
     try {
       const data = insertExchangeRateSchema.parse(req.body);
+      const userId = (req.user as any)?.id;
       const rate = await storage.createExchangeRate(data);
+      void logAuditEvent({
+        userId,
+        entityType: "EXCHANGE_RATE",
+        entityId: rate.id.toString(),
+        actionType: "CREATE",
+        details: { from: rate.fromCurrency, to: rate.toCurrency },
+      });
       res.json(rate);
     } catch (error) {
       res.status(400).json({ message: "Invalid data" });
@@ -368,12 +415,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Manual/automatic refresh - simulate external update
-  app.post("/api/exchange-rates/refresh", isAuthenticated, async (_req, res) => {
+  app.post("/api/exchange-rates/refresh", isAuthenticated, async (req, res) => {
     try {
       const today = new Date();
       const todayStr = today.toISOString().split("T")[0];
       const latestRmb = await storage.getLatestRate("RMB", "EGP");
       const latestUsd = await storage.getLatestRate("USD", "RMB");
+      const userId = (req.user as any)?.id;
 
       const refreshed = await Promise.all([
         storage.createExchangeRate({
@@ -391,6 +439,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           source: "تحديث تلقائي",
         }),
       ]);
+
+      refreshed.forEach((rate) => {
+        void logAuditEvent({
+          userId,
+          entityType: "EXCHANGE_RATE",
+          entityId: rate.id.toString(),
+          actionType: "CREATE",
+          details: { from: rate.fromCurrency, to: rate.toCurrency },
+        });
+      });
 
       res.json({
         message: "تم تحديث الأسعار",
@@ -449,6 +507,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ...data,
         createdByUserId: userId,
       });
+      void logAuditEvent({
+        userId,
+        entityType: "PAYMENT",
+        entityId: payment.id.toString(),
+        actionType: "CREATE",
+        details: { shipmentId: payment.shipmentId },
+      });
       res.json(payment);
     } catch (error) {
       console.error("Error creating payment:", error);
@@ -505,6 +570,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/users", isAdmin, async (req, res) => {
     try {
       const { username, password, firstName, lastName, role } = req.body;
+      const actorId = (req.user as any)?.id;
       
       if (!username || !password) {
         return res.status(400).json({ message: "اسم المستخدم وكلمة المرور مطلوبان" });
@@ -525,6 +591,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
 
       const { password: _, ...userWithoutPassword } = user;
+      void logAuditEvent({
+        userId: actorId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "CREATE",
+        details: { role: user.role },
+      });
       res.json(userWithoutPassword);
     } catch (error) {
       console.error("Error creating user:", error);
@@ -538,6 +611,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { id } = req.params;
       const { password, firstName, lastName, role } = req.body;
       const currentUser = req.user!;
+      const actorId = (req.user as any)?.id;
 
       // Only admin can update other users or roles
       if (currentUser.id !== id && currentUser.role !== "مدير") {
@@ -563,6 +637,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       const { password: _, ...userWithoutPassword } = user;
+      void logAuditEvent({
+        userId: actorId,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { updatedFields: Object.keys(updateData) },
+      });
       res.json(userWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Error updating user" });
@@ -577,6 +658,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ message: "User not found" });
       }
       const { password: _, ...userWithoutPassword } = user;
+      void logAuditEvent({
+        userId: (req.user as any)?.id,
+        entityType: "USER",
+        entityId: user.id,
+        actionType: "UPDATE",
+        details: { role: user.role },
+      });
       res.json(userWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Error updating user role" });
@@ -588,6 +676,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const { id } = req.params;
       const currentUser = req.user!;
+      const actorId = (req.user as any)?.id;
 
       // Prevent deleting yourself
       if (currentUser.id === id) {
@@ -601,6 +690,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       await storage.deleteUser(id);
+      void logAuditEvent({
+        userId: actorId,
+        entityType: "USER",
+        entityId: id,
+        actionType: "DELETE",
+      });
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ message: "Error deleting user" });
