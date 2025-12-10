@@ -407,13 +407,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/payments", isAuthenticated, async (req, res) => {
     try {
       const payments = await storage.getAllPayments();
-      // Include shipment info
-      const paymentsWithShipments = await Promise.all(
-        payments.map(async (payment) => {
-          const shipment = await storage.getShipment(payment.shipmentId);
-          return { ...payment, shipment };
-        })
+      const shipmentIds = Array.from(
+        new Set(payments.map((payment) => payment.shipmentId))
       );
+      const shipments = await storage.getShipmentsByIds(shipmentIds);
+      const shipmentMap = new Map(shipments.map((shipment) => [shipment.id, shipment]));
+
+      const paymentsWithShipments = payments.map((payment) => ({
+        ...payment,
+        shipment: shipmentMap.get(payment.shipmentId),
+      }));
       res.json(paymentsWithShipments);
     } catch (error) {
       res.status(500).json({ message: "Error fetching payments" });
