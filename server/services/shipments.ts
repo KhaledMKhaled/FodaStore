@@ -259,7 +259,11 @@ export const shipmentService = {
       const balanceEgp = Math.max(0, finalTotalCostEgp - totalPaidEgp);
 
       let newStatus = shipment.status;
-      if (step === 2 && shippingData) {
+      if (step === 1) {
+        newStatus = "في انتظار الشحن";
+      } else if (step === 2 && shippingData) {
+        newStatus = "في انتظار الشحن";
+      } else if (step === 3) {
         newStatus = "جاهزة للاستلام";
       } else if (step === 4) {
         newStatus = "مستلمة بنجاح";

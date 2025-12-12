@@ -17,8 +17,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { 
-  FileSpreadsheet, 
+import {
+  FileSpreadsheet,
   Filter,
   Download,
   TrendingUp,
@@ -26,6 +26,7 @@ import {
   ArrowUpDown,
 } from "lucide-react";
 import type { Supplier, Shipment } from "@shared/schema";
+import { costComponentColors } from "@/lib/colorMaps";
 
 interface MovementReportData {
   movements: Array<{
@@ -95,6 +96,8 @@ export default function MovementReportPage() {
   const [movementType, setMovementType] = useState<string>("all");
   const [costComponent, setCostComponent] = useState<string>("all");
   const [paymentMethod, setPaymentMethod] = useState<string>("all");
+  const [shipmentStatus, setShipmentStatus] = useState<string>("all");
+  const [paymentStatus, setPaymentStatus] = useState<string>("all");
   const [includeArchived, setIncludeArchived] = useState(false);
 
   const queryParams = new URLSearchParams();
@@ -105,12 +108,14 @@ export default function MovementReportPage() {
   if (movementType && movementType !== "all") queryParams.append("movementType", movementType);
   if (costComponent && costComponent !== "all") queryParams.append("costComponent", costComponent);
   if (paymentMethod && paymentMethod !== "all") queryParams.append("paymentMethod", paymentMethod);
+  if (shipmentStatus && shipmentStatus !== "all") queryParams.append("shipmentStatus", shipmentStatus);
+  if (paymentStatus && paymentStatus !== "all") queryParams.append("paymentStatus", paymentStatus);
   if (includeArchived) queryParams.append("includeArchived", "true");
 
   const { data: report, isLoading } = useQuery<MovementReportData>({
     queryKey: [
       "/api/accounting/movement-report",
-      dateFrom, dateTo, supplierId, shipmentId, movementType, costComponent, paymentMethod, includeArchived
+      dateFrom, dateTo, supplierId, shipmentId, movementType, costComponent, paymentMethod, shipmentStatus, paymentStatus, includeArchived
     ],
     queryFn: async () => {
       const response = await fetch(`/api/accounting/movement-report?${queryParams.toString()}`, {
@@ -137,6 +142,8 @@ export default function MovementReportPage() {
     setMovementType("all");
     setCostComponent("all");
     setPaymentMethod("all");
+    setShipmentStatus("all");
+    setPaymentStatus("all");
     setIncludeArchived(false);
   };
 
@@ -203,7 +210,7 @@ export default function MovementReportPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
             <div className="space-y-2">
               <Label>من تاريخ</Label>
               <Input
@@ -296,6 +303,36 @@ export default function MovementReportPage() {
                       {p.label}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>حالة الشحنة</Label>
+              <Select value={shipmentStatus} onValueChange={setShipmentStatus}>
+                <SelectTrigger data-testid="select-shipment-status">
+                  <SelectValue placeholder="الكل" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">الكل</SelectItem>
+                  <SelectItem value="جديدة">جديدة</SelectItem>
+                  <SelectItem value="في انتظار الشحن">في انتظار الشحن</SelectItem>
+                  <SelectItem value="جاهزة للاستلام">جاهزة للاستلام</SelectItem>
+                  <SelectItem value="مستلمة بنجاح">مستلمة بنجاح</SelectItem>
+                  <SelectItem value="مؤرشفة">مؤرشفة</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>حالة السداد</Label>
+              <Select value={paymentStatus} onValueChange={setPaymentStatus}>
+                <SelectTrigger data-testid="select-payment-status">
+                  <SelectValue placeholder="الكل" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">الكل</SelectItem>
+                  <SelectItem value="لم يتم دفع أي مبلغ">لم يتم دفع أي مبلغ</SelectItem>
+                  <SelectItem value="مدفوعة جزئياً">مدفوعة جزئياً</SelectItem>
+                  <SelectItem value="مسددة بالكامل">مسددة بالكامل</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -398,7 +435,18 @@ export default function MovementReportPage() {
                       <TableCell>
                         <Badge variant="outline">{m.movementType}</Badge>
                       </TableCell>
-                      <TableCell>{m.costComponent || "-"}</TableCell>
+                      <TableCell>
+                        {m.costComponent ? (
+                          <Badge
+                            variant="outline"
+                            className={costComponentColors[m.costComponent] || ""}
+                          >
+                            {m.costComponent}
+                          </Badge>
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
                       <TableCell>{m.paymentMethod || "-"}</TableCell>
                       <TableCell className={m.direction === 'cost' ? 'text-red-600' : 'text-green-600'}>
                         {formatCurrency(m.amountEgp)} جنيه
