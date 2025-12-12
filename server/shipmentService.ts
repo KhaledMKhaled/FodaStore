@@ -244,6 +244,9 @@ export async function updateShipmentWithItems(
         const shippingCostRmb = convertUsdToRmb(shippingCostUsd, usdToRmb);
         const shippingCostEgp = convertRmbToEgp(shippingCostRmb, rmbToEgp);
 
+        const parsedShippingDate = shippingData.shippingDate || null;
+        const parsedRatesUpdatedAt = shippingData.ratesUpdatedAt ? new Date(shippingData.ratesUpdatedAt) : null;
+
         await tx
           .insert(shipmentShippingDetails)
           .values({
@@ -257,11 +260,11 @@ export async function updateShipmentWithItems(
             totalShippingCostUsdOriginal: shippingCostUsd.toFixed(2),
             totalShippingCostRmb: shippingCostRmb.toFixed(2),
             totalShippingCostEgp: shippingCostEgp.toFixed(2),
-            shippingDate: shippingData.shippingDate,
+            shippingDate: parsedShippingDate,
             rmbToEgpRateAtShipping: shippingData.rmbToEgpRate,
             usdToRmbRateAtShipping: shippingData.usdToRmbRate,
             sourceOfRates: shippingData.sourceOfRates,
-            ratesUpdatedAt: shippingData.ratesUpdatedAt,
+            ratesUpdatedAt: parsedRatesUpdatedAt,
           })
           .onConflictDoUpdate({
             target: shipmentShippingDetails.shipmentId,
@@ -275,11 +278,11 @@ export async function updateShipmentWithItems(
               totalShippingCostUsdOriginal: shippingCostUsd.toFixed(2),
               totalShippingCostRmb: shippingCostRmb.toFixed(2),
               totalShippingCostEgp: shippingCostEgp.toFixed(2),
-              shippingDate: shippingData.shippingDate,
+              shippingDate: parsedShippingDate,
               rmbToEgpRateAtShipping: shippingData.rmbToEgpRate,
               usdToRmbRateAtShipping: shippingData.usdToRmbRate,
               sourceOfRates: shippingData.sourceOfRates,
-              ratesUpdatedAt: shippingData.ratesUpdatedAt,
+              ratesUpdatedAt: parsedRatesUpdatedAt,
               updatedAt: new Date(),
             },
           })
