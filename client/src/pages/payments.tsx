@@ -86,6 +86,8 @@ export default function Payments() {
     queryKey: ["/api/shipments"],
   });
 
+  const activeShipments = shipments?.filter((s) => s.status !== "مؤرشفة");
+
   const { data: payments, isLoading: loadingPayments } = useQuery<
     (ShipmentPayment & { shipment?: Shipment })[]
   >({
@@ -104,8 +106,16 @@ export default function Payments() {
       setIsDialogOpen(false);
       resetForm();
     },
-    onError: () => {
-      toast({ title: "حدث خطأ", variant: "destructive" });
+    onError: (error: Error) => {
+      const [, serverMessage] = error.message.split(":");
+      let parsed = serverMessage ? serverMessage.trim() : "";
+      try {
+        const json = JSON.parse(parsed);
+        parsed = json?.message || parsed;
+      } catch {
+        // ignore parse failures
+      }
+      toast({ title: parsed || "حدث خطأ", variant: "destructive" });
     },
   });
 
@@ -130,6 +140,14 @@ export default function Payments() {
       return;
     }
 
+ codex/implement-major-changes-and-improvements-efasar
+    if (!paymentMethod) {
+      toast({ title: "يرجى اختيار طريقة الدفع", variant: "destructive" });
+      return;
+    }
+
+=======
+ main
     const amountOriginal = formData.get("amountOriginal") as string;
     const exchangeRate = formData.get("exchangeRateToEgp") as string;
     const amountEgp =
@@ -167,7 +185,7 @@ export default function Payments() {
     return new Date(date).toLocaleDateString("ar-EG");
   };
 
-  const filteredShipments = shipments?.filter(
+  const filteredShipments = activeShipments?.filter(
     (s) =>
       !search ||
       s.shipmentName.toLowerCase().includes(search.toLowerCase()) ||
@@ -206,7 +224,7 @@ export default function Payments() {
                     <SelectValue placeholder="اختر الشحنة" />
                   </SelectTrigger>
                   <SelectContent>
-                    {shipments?.map((s) => (
+                    {activeShipments?.map((s) => (
                       <SelectItem key={s.id} value={s.id.toString()}>
                         {s.shipmentCode} - {s.shipmentName}
                       </SelectItem>
