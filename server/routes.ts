@@ -387,7 +387,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(payment);
     } catch (error) {
       console.error("Error creating payment:", error);
-      res.status(400).json({ message: "Invalid data" });
+      const message = (error as Error)?.message || "Invalid data";
+      res.status(400).json({ message });
     }
   });
 

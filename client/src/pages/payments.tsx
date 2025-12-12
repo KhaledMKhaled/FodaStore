@@ -55,11 +55,16 @@ const PAYMENT_METHODS = [
   { value: "أخرى", label: "أخرى" },
 ];
 
+const COST_COMPONENTS = [
+  { value: "تكلفة البضاعة", label: "تكلفة البضاعة" },
+  { value: "الشحن", label: "الشحن" },
+  { value: "الجمرك والتخريج", label: "الجمرك والتخريج" },
+];
+
 interface PaymentsStats {
   totalCostEgp: string;
   totalPaidEgp: string;
   totalBalanceEgp: string;
-  totalOverpaidEgp: string;
   lastPayment: ShipmentPayment | null;
 }
 
@@ -69,6 +74,8 @@ export default function Payments() {
   const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
   const [paymentCurrency, setPaymentCurrency] = useState("EGP");
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [costComponent, setCostComponent] = useState("");
+  const [activeShipment, setActiveShipment] = useState<Shipment | null>(null);
   const { toast } = useToast();
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
@@ -106,6 +113,7 @@ export default function Payments() {
     setSelectedShipmentId(null);
     setPaymentCurrency("EGP");
     setPaymentMethod("");
+    setCostComponent("");
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -114,6 +122,11 @@ export default function Payments() {
 
     if (!selectedShipmentId) {
       toast({ title: "يرجى اختيار الشحنة", variant: "destructive" });
+      return;
+    }
+
+    if (!costComponent) {
+      toast({ title: "يرجى اختيار بند التكلفة", variant: "destructive" });
       return;
     }
 
@@ -131,6 +144,7 @@ export default function Payments() {
       amountOriginal,
       exchangeRateToEgp: paymentCurrency === "RMB" ? exchangeRate : null,
       amountEgp,
+      costComponent,
       paymentMethod,
       cashReceiverName: (formData.get("cashReceiverName") as string) || null,
       referenceNumber: (formData.get("referenceNumber") as string) || null,
@@ -257,6 +271,22 @@ export default function Payments() {
               </div>
 
               <div className="space-y-2">
+                <Label>تحت حساب أي جزء؟ *</Label>
+                <Select value={costComponent} onValueChange={setCostComponent}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="اختر البند" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COST_COMPONENTS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
                 <Label>طريقة الدفع *</Label>
                 <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                   <SelectTrigger data-testid="select-payment-method">
@@ -332,13 +362,13 @@ export default function Payments() {
 
       {/* Stats Cards */}
       {loadingStats ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-28" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <StatCard
             title="إجمالي تكلفة الشحنات"
             value={`${formatCurrency(stats?.totalCostEgp || 0)} ج.م`}
@@ -355,12 +385,6 @@ export default function Payments() {
             value={`${formatCurrency(stats?.totalBalanceEgp || 0)} ج.م`}
             icon={TrendingDown}
             trend={parseFloat(stats?.totalBalanceEgp || "0") > 0 ? "down" : undefined}
-          />
-          <StatCard
-            title="المدفوع زيادة"
-            value={`${formatCurrency(stats?.totalOverpaidEgp || 0)} ج.م`}
-            icon={TrendingUp}
-            trend={parseFloat(stats?.totalOverpaidEgp || "0") > 0 ? "up" : undefined}
           />
         </div>
       )}
@@ -405,66 +429,133 @@ export default function Payments() {
               {loadingShipments ? (
                 <TableSkeleton />
               ) : filteredShipments && filteredShipments.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-right">رقم الشحنة</TableHead>
-                        <TableHead className="text-right">اسم الشحنة</TableHead>
-                        <TableHead className="text-right">الحالة</TableHead>
-                        <TableHead className="text-right">التكلفة (ج.م)</TableHead>
-                        <TableHead className="text-right">المدفوع (ج.م)</TableHead>
-                        <TableHead className="text-right">الرصيد</TableHead>
-                        <TableHead className="text-right">آخر سداد</TableHead>
-                        <TableHead className="text-right">إجراءات</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredShipments.map((shipment) => (
-                        <TableRow
-                          key={shipment.id}
-                          data-testid={`row-payment-${shipment.id}`}
-                        >
-                          <TableCell className="font-medium">
-                            {shipment.shipmentCode}
-                          </TableCell>
-                          <TableCell>{shipment.shipmentName}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{shipment.status}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            {formatCurrency(shipment.finalTotalCostEgp)}
-                          </TableCell>
-                          <TableCell>
-                            {formatCurrency(shipment.totalPaidEgp)}
-                          </TableCell>
-                          <TableCell>
-                            <BalanceBadge
-                              cost={shipment.finalTotalCostEgp}
-                              paid={shipment.totalPaidEgp}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {formatDate(shipment.lastPaymentDate)}
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedShipmentId(shipment.id);
-                                setIsDialogOpen(true);
-                              }}
-                            >
-                              <Plus className="w-4 h-4 ml-1" />
-                              دفعة
-                            </Button>
-                          </TableCell>
+                <>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-right">رقم الشحنة</TableHead>
+                          <TableHead className="text-right">اسم الشحنة</TableHead>
+                          <TableHead className="text-right">الحالة</TableHead>
+                          <TableHead className="text-right">التكلفة (ج.م)</TableHead>
+                          <TableHead className="text-right">المدفوع (ج.م)</TableHead>
+                          <TableHead className="text-right">الرصيد</TableHead>
+                          <TableHead className="text-right">آخر سداد</TableHead>
+                          <TableHead className="text-right">إجراءات</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredShipments.map((shipment) => (
+                          <TableRow
+                            key={shipment.id}
+                            data-testid={`row-payment-${shipment.id}`}
+                          >
+                            <TableCell className="font-medium">
+                              {shipment.shipmentCode}
+                            </TableCell>
+                            <TableCell>
+                              <button
+                                type="button"
+                                className="underline underline-offset-2"
+                                onClick={() => setActiveShipment(shipment)}
+                              >
+                                {shipment.shipmentName}
+                              </button>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{shipment.status}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              {formatCurrency(shipment.finalTotalCostEgp)}
+                            </TableCell>
+                            <TableCell>
+                              {formatCurrency(shipment.totalPaidEgp)}
+                            </TableCell>
+                            <TableCell>
+                              <BalanceBadge
+                                cost={shipment.finalTotalCostEgp}
+                                paid={shipment.totalPaidEgp}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {formatDate(shipment.lastPaymentDate)}
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedShipmentId(shipment.id);
+                                  setIsDialogOpen(true);
+                                }}
+                              >
+                                <Plus className="w-4 h-4 ml-1" />
+                                دفعة
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {activeShipment && (
+                    <div className="mt-6 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-lg font-semibold">
+                          سجل مدفوعات الشحنة {activeShipment.shipmentName}
+                        </h4>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedShipmentId(activeShipment.id);
+                            setIsDialogOpen(true);
+                          }}
+                        >
+                          إضافة دفعة
+                        </Button>
+                      </div>
+                      <div className="grid gap-3">
+                        {payments
+                          ?.filter((p) => p.shipmentId === activeShipment.id)
+                          .map((payment) => (
+                            <div
+                              key={payment.id}
+                              className="p-3 border rounded-md bg-muted/40 flex flex-wrap gap-3 justify-between"
+                            >
+                              <div className="space-y-1">
+                                <div className="text-sm text-muted-foreground">
+                                  {new Date(payment.paymentDate).toLocaleString("ar-EG")}
+                                </div>
+                                <div className="font-semibold">
+                                  {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}
+                                  {" "}
+                                  {formatCurrency(payment.amountOriginal)}
+                                  <span className="text-sm text-muted-foreground mr-2">
+                                    ({payment.amountEgp} ج.م)
+                                  </span>
+                                </div>
+                                <div className="text-sm">طريقة الدفع: {payment.paymentMethod}</div>
+                              </div>
+                              <div className="text-sm space-y-1 text-right">
+                                <div>تحت حساب: {payment.costComponent}</div>
+                                {payment.cashReceiverName && (
+                                  <div>المستلم: {payment.cashReceiverName}</div>
+                                )}
+                                {payment.referenceNumber && (
+                                  <div>المرجع: {payment.referenceNumber}</div>
+                                )}
+                                {payment.note && <div>ملاحظة: {payment.note}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        {payments?.filter((p) => p.shipmentId === activeShipment.id).length === 0 && (
+                          <div className="text-sm text-muted-foreground">لا توجد مدفوعات بعد لهذه الشحنة.</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <EmptyState
                   icon={Ship}
@@ -494,6 +585,7 @@ export default function Payments() {
                       <TableRow>
                         <TableHead className="text-right">التاريخ</TableHead>
                         <TableHead className="text-right">الشحنة</TableHead>
+                        <TableHead className="text-right">تحت حساب</TableHead>
                         <TableHead className="text-right">المبلغ الأصلي</TableHead>
                         <TableHead className="text-right">المبلغ (ج.م)</TableHead>
                         <TableHead className="text-right">طريقة الدفع</TableHead>
@@ -516,6 +608,7 @@ export default function Payments() {
                           <TableCell>
                             {payment.shipment?.shipmentCode || "-"}
                           </TableCell>
+                          <TableCell>{payment.costComponent}</TableCell>
                           <TableCell>
                             <span className="font-mono">
                               {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}{" "}
@@ -615,7 +708,6 @@ function BalanceBadge({
   const costValue = typeof cost === "string" ? parseFloat(cost) : cost || 0;
   const paidValue = typeof paid === "string" ? parseFloat(paid) : paid || 0;
   const remaining = Math.max(0, costValue - paidValue);
-  const overpaid = Math.max(0, paidValue - costValue);
 
   const formatCurrency = (num: number) =>
     new Intl.NumberFormat("ar-EG", {
@@ -623,24 +715,13 @@ function BalanceBadge({
       maximumFractionDigits: 2,
     }).format(num);
 
-  if (remaining === 0 && overpaid === 0) {
+  if (remaining === 0) {
     return (
       <Badge
         variant="outline"
         className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
       >
         مسددة
-      </Badge>
-    );
-  }
-
-  if (overpaid > 0) {
-    return (
-      <Badge
-        variant="outline"
-        className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400"
-      >
-        مبلغ زيادة: {formatCurrency(overpaid)} ج.م
       </Badge>
     );
   }
