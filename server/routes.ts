@@ -588,6 +588,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         dateFrom: req.query.dateFrom as string | undefined,
         dateTo: req.query.dateTo as string | undefined,
         supplierId: req.query.supplierId ? parseInt(req.query.supplierId as string) : undefined,
+        shipmentStatus: req.query.shipmentStatus as string | undefined,
+        paymentStatus: req.query.paymentStatus as string | undefined,
         includeArchived: req.query.includeArchived === "true",
       };
       const stats = await storage.getAccountingDashboard(filters);
@@ -639,6 +641,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         movementType: req.query.movementType as string | undefined,
         costComponent: req.query.costComponent as string | undefined,
         paymentMethod: req.query.paymentMethod as string | undefined,
+        shipmentStatus: req.query.shipmentStatus as string | undefined,
+        paymentStatus: req.query.paymentStatus as string | undefined,
         includeArchived: req.query.includeArchived === "true",
       };
       const report = await storage.getMovementReport(filters);

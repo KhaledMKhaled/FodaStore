@@ -644,6 +644,8 @@ export class DatabaseStorage implements IStorage {
     dateFrom?: string;
     dateTo?: string;
     supplierId?: number;
+    shipmentStatus?: string;
+    paymentStatus?: string;
     includeArchived?: boolean;
   }) {
     const allShipments = await this.getAllShipments();
@@ -656,6 +658,10 @@ export class DatabaseStorage implements IStorage {
     
     if (!filters?.includeArchived) {
       filteredShipments = filteredShipments.filter(s => s.status !== "مؤرشفة");
+    }
+
+    if (filters?.shipmentStatus && filters.shipmentStatus !== "all") {
+      filteredShipments = filteredShipments.filter(s => s.status === filters.shipmentStatus);
     }
 
     if (filters?.dateFrom) {
@@ -682,6 +688,18 @@ export class DatabaseStorage implements IStorage {
           .map(item => item.shipmentId)
       );
       filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
+    }
+
+    if (filters?.paymentStatus && filters.paymentStatus !== "all") {
+      filteredShipments = filteredShipments.filter((s) => {
+        const cost = parseFloat(s.finalTotalCostEgp || "0");
+        const paid = parseFloat(s.totalPaidEgp || "0");
+        const balance = Math.max(0, cost - paid);
+        if (filters.paymentStatus === "لم يتم دفع أي مبلغ") return paid <= 0.0001;
+        if (filters.paymentStatus === "مسددة بالكامل") return balance <= 0.0001;
+        if (filters.paymentStatus === "مدفوعة جزئياً") return paid > 0.0001 && balance > 0.0001;
+        return true;
+      });
     }
 
     const filteredShipmentIds = new Set(filteredShipments.map(s => s.id));
@@ -930,6 +948,8 @@ export class DatabaseStorage implements IStorage {
     movementType?: string;
     costComponent?: string;
     paymentMethod?: string;
+    shipmentStatus?: string;
+    paymentStatus?: string;
     includeArchived?: boolean;
   }) {
     const allShipments = await this.getAllShipments();
@@ -947,6 +967,10 @@ export class DatabaseStorage implements IStorage {
     
     if (!filters?.includeArchived) {
       filteredShipments = filteredShipments.filter(s => s.status !== "مؤرشفة");
+    }
+
+    if (filters?.shipmentStatus && filters.shipmentStatus !== "all") {
+      filteredShipments = filteredShipments.filter((s) => s.status === filters.shipmentStatus);
     }
 
     if (filters?.dateFrom) {
@@ -977,6 +1001,18 @@ export class DatabaseStorage implements IStorage {
         }
       });
       filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
+    }
+
+    if (filters?.paymentStatus && filters.paymentStatus !== "all") {
+      filteredShipments = filteredShipments.filter((s) => {
+        const cost = parseFloat(s.finalTotalCostEgp || "0");
+        const paid = parseFloat(s.totalPaidEgp || "0");
+        const balance = Math.max(0, cost - paid);
+        if (filters.paymentStatus === "لم يتم دفع أي مبلغ") return paid <= 0.0001;
+        if (filters.paymentStatus === "مسددة بالكامل") return balance <= 0.0001;
+        if (filters.paymentStatus === "مدفوعة جزئياً") return paid > 0.0001 && balance > 0.0001;
+        return true;
+      });
     }
 
     const filteredShipmentIds = new Set(filteredShipments.map(s => s.id));
