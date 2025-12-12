@@ -62,6 +62,10 @@ export async function createShipmentWithItems(
       createdByUserId: userId,
     });
 
+    const purchaseRateFromPayload = validatedShipment.purchaseRmbToEgpRate
+      ? parseFloat(validatedShipment.purchaseRmbToEgpRate)
+      : undefined;
+
     const parsedItems = (items as unknown[]).map((item) =>
       insertShipmentItemSchema.omit({ shipmentId: true }).parse(item)
     );
@@ -92,8 +96,12 @@ export async function createShipmentWithItems(
         .orderBy(desc(exchangeRates.rateDate))
         .limit(1);
 
-      const rmbToEgp = latestRmbRate ? parseFloat(latestRmbRate.rateValue) : 7.15;
-      const purchaseCostEgp = totals.purchaseCostRmb * rmbToEgp;
+      const purchaseRate = purchaseRateFromPayload
+        ? purchaseRateFromPayload
+        : latestRmbRate
+        ? parseFloat(latestRmbRate.rateValue)
+        : 7.15;
+      const purchaseCostEgp = totals.purchaseCostRmb * purchaseRate;
       const finalTotalCostEgp = purchaseCostEgp + totals.customsCostEgp + totals.takhreegCostEgp;
 
       const [updatedShipment] = await tx
@@ -101,6 +109,7 @@ export async function createShipmentWithItems(
         .set({
           purchaseCostRmb: totals.purchaseCostRmb.toFixed(2),
           purchaseCostEgp: purchaseCostEgp.toFixed(2),
+          purchaseRmbToEgpRate: purchaseRate.toFixed(4),
           customsCostEgp: totals.customsCostEgp.toFixed(2),
           takhreegCostEgp: totals.takhreegCostEgp.toFixed(2),
           finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
@@ -151,6 +160,10 @@ export async function updateShipmentWithItems(
 
       let currentShipment = existingShipment;
 
+      const purchaseRate = validatedShipmentData?.purchaseRmbToEgpRate
+        ? parseFloat(validatedShipmentData.purchaseRmbToEgpRate)
+        : parseFloat(existingShipment.purchaseRmbToEgpRate || "0") || 7.15;
+
       if (validatedShipmentData) {
         const [updated] = await tx
           .update(shipments)
@@ -180,6 +193,8 @@ export async function updateShipmentWithItems(
           .update(shipments)
           .set({
             purchaseCostRmb: totals.purchaseCostRmb.toFixed(2),
+            purchaseCostEgp: (totals.purchaseCostRmb * purchaseRate).toFixed(2),
+            purchaseRmbToEgpRate: purchaseRate.toFixed(4),
             customsCostEgp: totals.customsCostEgp.toFixed(2),
             takhreegCostEgp: totals.takhreegCostEgp.toFixed(2),
             updatedAt: new Date(),
@@ -193,6 +208,8 @@ export async function updateShipmentWithItems(
           currentShipment = {
             ...currentShipment,
             purchaseCostRmb: totals.purchaseCostRmb.toFixed(2),
+            purchaseCostEgp: (totals.purchaseCostRmb * purchaseRate).toFixed(2),
+            purchaseRmbToEgpRate: purchaseRate.toFixed(4),
             customsCostEgp: totals.customsCostEgp.toFixed(2),
             takhreegCostEgp: totals.takhreegCostEgp.toFixed(2),
           } as Shipment;
@@ -232,6 +249,7 @@ export async function updateShipmentWithItems(
             rmbToEgpRateAtShipping: shippingData.rmbToEgpRate,
             usdToRmbRateAtShipping: shippingData.usdToRmbRate,
             sourceOfRates: shippingData.sourceOfRates,
+            ratesUpdatedAt: shippingData.ratesUpdatedAt,
           })
           .onConflictDoUpdate({
             target: shipmentShippingDetails.shipmentId,
@@ -249,6 +267,7 @@ export async function updateShipmentWithItems(
               rmbToEgpRateAtShipping: shippingData.rmbToEgpRate,
               usdToRmbRateAtShipping: shippingData.usdToRmbRate,
               sourceOfRates: shippingData.sourceOfRates,
+              ratesUpdatedAt: shippingData.ratesUpdatedAt,
               updatedAt: new Date(),
             },
           })
@@ -257,7 +276,7 @@ export async function updateShipmentWithItems(
         const [updatedAfterShipping] = await tx
           .update(shipments)
           .set({
-            purchaseCostEgp: (totalPurchaseCostRmb * rmbToEgp).toFixed(2),
+            purchaseCostEgp: (totalPurchaseCostRmb * purchaseRate).toFixed(2),
             commissionCostRmb: commissionRmb.toFixed(2),
             commissionCostEgp: commissionEgp.toFixed(2),
             shippingCostRmb: shippingCostRmb.toFixed(2),

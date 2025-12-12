@@ -35,6 +35,7 @@ import type {
   ShipmentItem,
   ShipmentShippingDetails,
   Supplier,
+  ExchangeRate,
 } from "@shared/schema";
 
 const STEPS = [
@@ -57,6 +58,7 @@ export default function ShipmentWizard() {
     shipmentName: "",
     purchaseDate: new Date().toISOString().split("T")[0],
     status: "جديدة",
+    purchaseRmbToEgpRate: "",
   });
 
   const [items, setItems] = useState<Partial<ShipmentItem>[]>([
@@ -70,7 +72,10 @@ export default function ShipmentWizard() {
     shippingDate: new Date().toISOString().split("T")[0],
     rmbToEgpRate: "7.0",
     usdToRmbRate: "7.2",
+    ratesUpdatedAt: "",
   });
+
+  const [purchaseRateInitialized, setPurchaseRateInitialized] = useState(false);
 
   // Fetch existing shipment data
   const { data: existingShipment, isLoading: loadingShipment } = useQuery<Shipment>({
@@ -88,6 +93,10 @@ export default function ShipmentWizard() {
     enabled: !isNew,
   });
 
+  const { data: exchangeRates } = useQuery<ExchangeRate[]>({
+    queryKey: ["/api/exchange-rates"],
+  });
+
   const { data: suppliers } = useQuery<Supplier[]>({
     queryKey: ["/api/suppliers"],
   });
@@ -100,6 +109,8 @@ export default function ShipmentWizard() {
         shipmentName: existingShipment.shipmentName,
         purchaseDate: existingShipment.purchaseDate?.toString() || "",
         status: existingShipment.status,
+        purchaseRmbToEgpRate:
+          existingShipment.purchaseRmbToEgpRate?.toString() || shipmentData.purchaseRmbToEgpRate,
       });
     }
   }, [existingShipment]);
@@ -120,9 +131,53 @@ export default function ShipmentWizard() {
         shippingDate: existingShipping.shippingDate?.toString() || "",
         rmbToEgpRate: existingShipping.rmbToEgpRateAtShipping?.toString() || "7.0",
         usdToRmbRate: existingShipping.usdToRmbRateAtShipping?.toString() || "7.2",
+        ratesUpdatedAt: existingShipping.ratesUpdatedAt?.toString() || "",
       });
     }
   }, [existingShipping]);
+
+  const latestRmbRate = exchangeRates?.find(
+    (rate) => rate.fromCurrency === "RMB" && rate.toCurrency === "EGP",
+  );
+  const latestUsdToRmbRate = exchangeRates?.find(
+    (rate) => rate.fromCurrency === "USD" && rate.toCurrency === "RMB",
+  );
+
+  useEffect(() => {
+    if (isNew && latestRmbRate && !purchaseRateInitialized) {
+      setShipmentData((prev) => ({
+        ...prev,
+        purchaseRmbToEgpRate: latestRmbRate.rateValue?.toString() || prev.purchaseRmbToEgpRate,
+      }));
+      setPurchaseRateInitialized(true);
+    }
+  }, [isNew, latestRmbRate, purchaseRateInitialized]);
+
+  useEffect(() => {
+    if (
+      currentStep === 2 &&
+      !existingShipping &&
+      !shippingData.ratesUpdatedAt &&
+      (latestRmbRate || latestUsdToRmbRate)
+    ) {
+      setShippingData((prev) => ({
+        ...prev,
+        rmbToEgpRate: latestRmbRate?.rateValue?.toString() || prev.rmbToEgpRate,
+        usdToRmbRate: latestUsdToRmbRate?.rateValue?.toString() || prev.usdToRmbRate,
+        ratesUpdatedAt: new Date().toISOString(),
+      }));
+    }
+  }, [currentStep, existingShipping, latestRmbRate, latestUsdToRmbRate, shippingData.ratesUpdatedAt]);
+
+  const refreshShippingRates = () => {
+    if (!latestRmbRate && !latestUsdToRmbRate) return;
+    setShippingData((prev) => ({
+      ...prev,
+      rmbToEgpRate: latestRmbRate?.rateValue?.toString() || prev.rmbToEgpRate,
+      usdToRmbRate: latestUsdToRmbRate?.rateValue?.toString() || prev.usdToRmbRate,
+      ratesUpdatedAt: new Date().toISOString(),
+    }));
+  };
 
   // Save mutation
   const validateStep = () => {
@@ -297,11 +352,11 @@ export default function ShipmentWizard() {
     parseFloat(shippingData.shippingCostPerSqmUsdOriginal);
 
   const shippingCostRmb = shippingCostUsd * parseFloat(shippingData.usdToRmbRate);
-
-  const rmbToEgp = parseFloat(shippingData.rmbToEgpRate);
-  const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgp;
-  const commissionEgp = commissionRmb * rmbToEgp;
-  const shippingCostEgp = shippingCostRmb * rmbToEgp;
+  const purchaseRate = parseFloat(shipmentData.purchaseRmbToEgpRate || "0");
+  const shippingRmbToEgp = parseFloat(shippingData.rmbToEgpRate);
+  const purchaseCostEgp = totalPurchaseCostRmb * purchaseRate;
+  const commissionEgp = commissionRmb * shippingRmbToEgp;
+  const shippingCostEgp = shippingCostRmb * shippingRmbToEgp;
 
   // Calculate customs totals
   const totalCustomsCostEgp = items.reduce((sum, item) => {
@@ -403,6 +458,7 @@ export default function ShipmentWizard() {
               shippingCostUsd={shippingCostUsd}
               shippingCostRmb={shippingCostRmb}
               shippingCostEgp={shippingCostEgp}
+              refreshRates={refreshShippingRates}
             />
           )}
 
@@ -541,7 +597,13 @@ function Step1Import({
   removeItemImage,
   uploadingImage,
 }: {
-  shipmentData: { shipmentCode: string; shipmentName: string; purchaseDate: string; status: string };
+  shipmentData: {
+    shipmentCode: string;
+    shipmentName: string;
+    purchaseDate: string;
+    status: string;
+    purchaseRmbToEgpRate?: string;
+  };
   setShipmentData: (data: typeof shipmentData) => void;
   items: Partial<ShipmentItem>[];
   updateItem: (index: number, field: string, value: string | number) => void;
@@ -564,7 +626,7 @@ function Step1Import({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-2">
               <Label htmlFor="shipmentCode">رقم الشحنة *</Label>
               <Input
@@ -599,6 +661,22 @@ function Step1Import({
                   setShipmentData({ ...shipmentData, purchaseDate: e.target.value })
                 }
                 data-testid="input-purchase-date"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="purchaseRate">سعر صرف الرممبي مقابل الجنيه</Label>
+              <Input
+                id="purchaseRate"
+                type="number"
+                step="0.0001"
+                value={shipmentData.purchaseRmbToEgpRate || ""}
+                onChange={(e) =>
+                  setShipmentData({
+                    ...shipmentData,
+                    purchaseRmbToEgpRate: e.target.value,
+                  })
+                }
+                placeholder="7.0000"
               />
             </div>
           </div>
@@ -801,6 +879,7 @@ function Step2Shipping({
   shippingCostUsd,
   shippingCostRmb,
   shippingCostEgp,
+  refreshRates,
 }: {
   shippingData: {
     commissionRatePercent: string;
@@ -809,6 +888,7 @@ function Step2Shipping({
     shippingDate: string;
     rmbToEgpRate: string;
     usdToRmbRate: string;
+    ratesUpdatedAt?: string;
   };
   setShippingData: (data: typeof shippingData) => void;
   totalPurchaseCostRmb: number;
@@ -817,6 +897,7 @@ function Step2Shipping({
   shippingCostUsd: number;
   shippingCostRmb: number;
   shippingCostEgp: number;
+  refreshRates: () => void;
 }) {
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("ar-EG", {
@@ -826,6 +907,18 @@ function Step2Shipping({
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div className="text-sm text-muted-foreground">
+          آخر تحديث لسعر الصرف:
+          {shippingData.ratesUpdatedAt
+            ? ` ${new Date(shippingData.ratesUpdatedAt).toLocaleString("ar-EG")}`
+            : " لم يتم التحديث بعد"}
+        </div>
+        <Button variant="outline" size="sm" onClick={refreshRates}>
+          تحديث الأسعار
+        </Button>
+      </div>
+
       {/* Read-only Total */}
       <Card className="bg-primary/5 border-primary/20">
         <CardContent className="p-4">
