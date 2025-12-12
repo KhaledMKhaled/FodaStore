@@ -4,6 +4,7 @@ import {
   exchangeRates,
   insertShipmentItemSchema,
   insertShipmentSchema,
+  inventoryMovements,
   shipmentItems,
   shipments,
   shipmentShippingDetails,
@@ -327,6 +328,7 @@ export async function updateShipmentWithItems(
       const balanceEgp = roundAmount(Math.max(0, finalTotalCostEgp - totalPaidEgp));
 
       let newStatus = shipmentForTotals.status;
+      const previousStatus = shipmentForTotals.status;
       if (step === 1) {
         newStatus = "في انتظار الشحن";
       } else if (step === 2 && shippingData) {
@@ -347,6 +349,44 @@ export async function updateShipmentWithItems(
         })
         .where(eq(shipments.id, shipmentId))
         .returning();
+
+      if (step === 4 && newStatus === "مستلمة بنجاح" && previousStatus !== "مستلمة بنجاح") {
+        const shipmentItemsForInventory = await tx
+          .select()
+          .from(shipmentItems)
+          .where(eq(shipmentItems.shipmentId, shipmentId));
+
+        const purchaseRate = parseFloat(shipmentForTotals.purchaseRmbToEgpRate || "7");
+        const totalCustomsCost = parseFloat(shipmentForTotals.customsCostEgp || "0");
+        const totalTakhreegCost = parseFloat(shipmentForTotals.takhreegCostEgp || "0");
+        const totalShippingCost = parseFloat(shipmentForTotals.shippingCostEgp || "0");
+        const totalCommissionCost = parseFloat(shipmentForTotals.commissionCostEgp || "0");
+        const totalPurchaseCost = parseFloat(shipmentForTotals.purchaseCostEgp || "0");
+
+        const totalPieces = shipmentItemsForInventory.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
+
+        for (const item of shipmentItemsForInventory) {
+          const itemPurchaseCostEgp = parseFloat(item.totalPurchaseCostRmb || "0") * purchaseRate;
+          
+          const pieceRatio = totalPieces > 0 ? (item.totalPiecesCou || 0) / totalPieces : 0;
+          const itemShareOfExtras = pieceRatio * (totalCustomsCost + totalTakhreegCost + totalShippingCost + totalCommissionCost);
+          
+          const itemTotalCostEgp = itemPurchaseCostEgp + itemShareOfExtras;
+          const unitCostEgp = (item.totalPiecesCou || 0) > 0 ? itemTotalCostEgp / (item.totalPiecesCou || 1) : 0;
+          const unitCostRmb = purchaseRate > 0 ? unitCostEgp / purchaseRate : 0;
+
+          await tx.insert(inventoryMovements).values({
+            shipmentId,
+            shipmentItemId: item.id,
+            productId: item.productId,
+            totalPiecesIn: item.totalPiecesCou || 0,
+            unitCostRmb: unitCostRmb.toFixed(4),
+            unitCostEgp: unitCostEgp.toFixed(4),
+            totalCostEgp: itemTotalCostEgp.toFixed(2),
+            movementDate: new Date().toISOString().split("T")[0],
+          });
+        }
+      }
 
       return finalShipment || shipmentForTotals;
     });

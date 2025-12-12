@@ -12,6 +12,9 @@ import {
   Calendar,
   FileText,
   User,
+  Filter,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +48,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { shipmentStatusColors } from "@/lib/colorMaps";
 import type { Shipment, ShipmentPayment, InsertShipmentPayment } from "@shared/schema";
 
 const PAYMENT_METHODS = [
@@ -70,12 +74,15 @@ interface PaymentsStats {
 
 export default function Payments() {
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
   const [paymentCurrency, setPaymentCurrency] = useState("EGP");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [costComponent, setCostComponent] = useState("");
-  const [activeShipment, setActiveShipment] = useState<Shipment | null>(null);
+  const [expandedShipments, setExpandedShipments] = useState<Set<number>>(new Set());
   const { toast } = useToast();
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
@@ -182,12 +189,64 @@ export default function Payments() {
     return new Date(date).toLocaleDateString("ar-EG");
   };
 
-  const filteredShipments = activeShipments?.filter(
-    (s) =>
-      !search ||
-      s.shipmentName.toLowerCase().includes(search.toLowerCase()) ||
-      s.shipmentCode.toLowerCase().includes(search.toLowerCase())
-  );
+  const toggleShipmentExpand = (shipmentId: number) => {
+    setExpandedShipments(prev => {
+      const next = new Set(prev);
+      if (next.has(shipmentId)) {
+        next.delete(shipmentId);
+      } else {
+        next.add(shipmentId);
+      }
+      return next;
+    });
+  };
+
+  const clearFilters = () => {
+    setSearch("");
+    setDateFrom("");
+    setDateTo("");
+    setStatusFilter("all");
+  };
+
+  const filteredShipments = activeShipments?.filter((s) => {
+    if (search && !s.shipmentName.toLowerCase().includes(search.toLowerCase()) && 
+        !s.shipmentCode.toLowerCase().includes(search.toLowerCase())) {
+      return false;
+    }
+    if (statusFilter && statusFilter !== "all" && s.status !== statusFilter) {
+      return false;
+    }
+    if (dateFrom) {
+      const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+      if (!purchaseDate || purchaseDate < new Date(dateFrom)) return false;
+    }
+    if (dateTo) {
+      const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+      if (!purchaseDate || purchaseDate > new Date(dateTo)) return false;
+    }
+    return true;
+  });
+
+  const filteredPayments = payments?.filter((p) => {
+    const shipment = shipments?.find(s => s.id === p.shipmentId);
+    if (search && shipment && 
+        !shipment.shipmentName.toLowerCase().includes(search.toLowerCase()) && 
+        !shipment.shipmentCode.toLowerCase().includes(search.toLowerCase())) {
+      return false;
+    }
+    if (statusFilter && statusFilter !== "all" && shipment && shipment.status !== statusFilter) {
+      return false;
+    }
+    if (dateFrom) {
+      const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
+      if (!paymentDate || paymentDate < new Date(dateFrom)) return false;
+    }
+    if (dateTo) {
+      const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
+      if (!paymentDate || paymentDate > new Date(dateTo)) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="p-6 space-y-6">
@@ -416,19 +475,57 @@ export default function Payments() {
         </TabsList>
 
         <TabsContent value="shipments" className="space-y-4">
-          {/* Search */}
+          {/* Filters */}
           <Card>
             <CardContent className="p-4">
-              <div className="relative max-w-md">
-                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <div className="flex items-center gap-2 mb-4">
+                <Filter className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">الفلاتر</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="relative">
+                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="بحث بالشحنة..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pr-10"
+                    data-testid="input-search-payments"
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger data-testid="select-status-filter">
+                    <SelectValue placeholder="حالة الشحنة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">جميع الحالات</SelectItem>
+                    <SelectItem value="في انتظار الشحن">في انتظار الشحن</SelectItem>
+                    <SelectItem value="جاهزة للاستلام">جاهزة للاستلام</SelectItem>
+                    <SelectItem value="مستلمة بنجاح">مستلمة بنجاح</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Input
-                  placeholder="بحث بالشحنة..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pr-10"
-                  data-testid="input-search-payments"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  placeholder="من تاريخ"
+                  data-testid="input-date-from"
+                />
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  placeholder="إلى تاريخ"
+                  data-testid="input-date-to"
                 />
               </div>
+              {(search || statusFilter !== "all" || dateFrom || dateTo) && (
+                <div className="mt-4 flex items-center justify-end">
+                  <Button variant="ghost" size="sm" onClick={clearFilters} data-testid="button-clear-filters">
+                    مسح الفلاتر
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -460,116 +557,114 @@ export default function Payments() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredShipments.map((shipment) => (
-                          <TableRow
-                            key={shipment.id}
-                            data-testid={`row-payment-${shipment.id}`}
-                          >
-                            <TableCell className="font-medium">
-                              {shipment.shipmentCode}
-                            </TableCell>
-                            <TableCell>
-                              <button
-                                type="button"
-                                className="underline underline-offset-2"
-                                onClick={() => setActiveShipment(shipment)}
+                        {filteredShipments.map((shipment) => {
+                          const isExpanded = expandedShipments.has(shipment.id);
+                          const shipmentPayments = payments?.filter((p) => p.shipmentId === shipment.id) || [];
+                          return (
+                            <>
+                              <TableRow
+                                key={shipment.id}
+                                data-testid={`row-payment-${shipment.id}`}
+                                className="cursor-pointer"
+                                onClick={() => toggleShipmentExpand(shipment.id)}
                               >
-                                {shipment.shipmentName}
-                              </button>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline">{shipment.status}</Badge>
-                            </TableCell>
-                            <TableCell>
-                              {formatCurrency(shipment.finalTotalCostEgp)}
-                            </TableCell>
-                            <TableCell>
-                              {formatCurrency(shipment.totalPaidEgp)}
-                            </TableCell>
-                            <TableCell>
-                              <BalanceBadge
-                                cost={shipment.finalTotalCostEgp}
-                                paid={shipment.totalPaidEgp}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              {formatDate(shipment.lastPaymentDate)}
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedShipmentId(shipment.id);
-                                  setIsDialogOpen(true);
-                                }}
-                              >
-                                <Plus className="w-4 h-4 ml-1" />
-                                دفعة
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    {isExpanded ? (
+                                      <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                                    ) : (
+                                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                                    )}
+                                    {shipment.shipmentCode}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {shipment.shipmentName}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className={shipmentStatusColors[shipment.status] || ""}>{shipment.status}</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {formatCurrency(shipment.finalTotalCostEgp)}
+                                </TableCell>
+                                <TableCell>
+                                  {formatCurrency(shipment.totalPaidEgp)}
+                                </TableCell>
+                                <TableCell>
+                                  <BalanceBadge
+                                    cost={shipment.finalTotalCostEgp}
+                                    paid={shipment.totalPaidEgp}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  {formatDate(shipment.lastPaymentDate)}
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedShipmentId(shipment.id);
+                                      setIsDialogOpen(true);
+                                    }}
+                                  >
+                                    <Plus className="w-4 h-4 ml-1" />
+                                    دفعة
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                              {isExpanded && (
+                                <TableRow key={`${shipment.id}-details`}>
+                                  <TableCell colSpan={8} className="bg-muted/30 p-4">
+                                    {shipmentPayments.length > 0 ? (
+                                      <div className="grid gap-2">
+                                        {shipmentPayments.map((payment) => (
+                                          <div
+                                            key={payment.id}
+                                            className="p-3 border rounded-md bg-background flex flex-wrap gap-3 justify-between"
+                                          >
+                                            <div className="space-y-1">
+                                              <div className="text-sm text-muted-foreground">
+                                                {new Date(payment.paymentDate).toLocaleString("ar-EG")}
+                                              </div>
+                                              <div className="font-semibold">
+                                                {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}
+                                                {" "}
+                                                {formatCurrency(payment.amountOriginal)}
+                                                <span className="text-sm text-muted-foreground mr-2">
+                                                  ({payment.amountEgp} ج.م)
+                                                </span>
+                                              </div>
+                                              <div className="text-sm">طريقة الدفع: {payment.paymentMethod}</div>
+                                            </div>
+                                            <div className="text-sm space-y-1 text-right">
+                                              <div>تحت حساب: {payment.costComponent}</div>
+                                              {payment.cashReceiverName && (
+                                                <div>المستلم: {payment.cashReceiverName}</div>
+                                              )}
+                                              {payment.referenceNumber && (
+                                                <div>المرجع: {payment.referenceNumber}</div>
+                                              )}
+                                              {payment.note && <div>ملاحظة: {payment.note}</div>}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div className="text-sm text-muted-foreground text-center py-2">
+                                        لا توجد مدفوعات بعد لهذه الشحنة
+                                      </div>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>
-                  {activeShipment && (
-                    <div className="mt-6 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-lg font-semibold">
-                          سجل مدفوعات الشحنة {activeShipment.shipmentName}
-                        </h4>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedShipmentId(activeShipment.id);
-                            setIsDialogOpen(true);
-                          }}
-                        >
-                          إضافة دفعة
-                        </Button>
-                      </div>
-                      <div className="grid gap-3">
-                        {payments
-                          ?.filter((p) => p.shipmentId === activeShipment.id)
-                          .map((payment) => (
-                            <div
-                              key={payment.id}
-                              className="p-3 border rounded-md bg-muted/40 flex flex-wrap gap-3 justify-between"
-                            >
-                              <div className="space-y-1">
-                                <div className="text-sm text-muted-foreground">
-                                  {new Date(payment.paymentDate).toLocaleString("ar-EG")}
-                                </div>
-                                <div className="font-semibold">
-                                  {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}
-                                  {" "}
-                                  {formatCurrency(payment.amountOriginal)}
-                                  <span className="text-sm text-muted-foreground mr-2">
-                                    ({payment.amountEgp} ج.م)
-                                  </span>
-                                </div>
-                                <div className="text-sm">طريقة الدفع: {payment.paymentMethod}</div>
-                              </div>
-                              <div className="text-sm space-y-1 text-right">
-                                <div>تحت حساب: {payment.costComponent}</div>
-                                {payment.cashReceiverName && (
-                                  <div>المستلم: {payment.cashReceiverName}</div>
-                                )}
-                                {payment.referenceNumber && (
-                                  <div>المرجع: {payment.referenceNumber}</div>
-                                )}
-                                {payment.note && <div>ملاحظة: {payment.note}</div>}
-                              </div>
-                            </div>
-                          ))}
-                        {payments?.filter((p) => p.shipmentId === activeShipment.id).length === 0 && (
-                          <div className="text-sm text-muted-foreground">لا توجد مدفوعات بعد لهذه الشحنة.</div>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </>
               ) : (
                 <EmptyState
@@ -583,6 +678,60 @@ export default function Payments() {
         </TabsContent>
 
         <TabsContent value="ledger" className="space-y-4">
+          {/* Filters for Ledger */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Filter className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">الفلاتر</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="relative">
+                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="بحث بالشحنة..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pr-10"
+                    data-testid="input-search-ledger"
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger data-testid="select-ledger-status-filter">
+                    <SelectValue placeholder="حالة الشحنة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">جميع الحالات</SelectItem>
+                    <SelectItem value="في انتظار الشحن">في انتظار الشحن</SelectItem>
+                    <SelectItem value="جاهزة للاستلام">جاهزة للاستلام</SelectItem>
+                    <SelectItem value="مستلمة بنجاح">مستلمة بنجاح</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  placeholder="من تاريخ"
+                  data-testid="input-ledger-date-from"
+                />
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  placeholder="إلى تاريخ"
+                  data-testid="input-ledger-date-to"
+                />
+              </div>
+              {(search || statusFilter !== "all" || dateFrom || dateTo) && (
+                <div className="mt-4 flex items-center justify-end">
+                  <Button variant="ghost" size="sm" onClick={clearFilters} data-testid="button-clear-ledger-filters">
+                    مسح الفلاتر
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="pb-4">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -593,7 +742,7 @@ export default function Payments() {
             <CardContent>
               {loadingPayments ? (
                 <TableSkeleton />
-              ) : payments && payments.length > 0 ? (
+              ) : filteredPayments && filteredPayments.length > 0 ? (
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
@@ -609,7 +758,7 @@ export default function Payments() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {payments.map((payment) => (
+                      {filteredPayments.map((payment) => (
                         <TableRow
                           key={payment.id}
                           data-testid={`row-ledger-${payment.id}`}
