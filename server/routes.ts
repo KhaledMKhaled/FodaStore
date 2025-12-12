@@ -588,6 +588,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         dateFrom: req.query.dateFrom as string | undefined,
         dateTo: req.query.dateTo as string | undefined,
         supplierId: req.query.supplierId ? parseInt(req.query.supplierId as string) : undefined,
+        shipmentCode: req.query.shipmentCode as string | undefined,
         shipmentStatus: req.query.shipmentStatus as string | undefined,
         paymentStatus: req.query.paymentStatus as string | undefined,
         includeArchived: req.query.includeArchived === "true",

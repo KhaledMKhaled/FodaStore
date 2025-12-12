@@ -132,6 +132,9 @@ export interface IStorage {
     dateFrom?: string;
     dateTo?: string;
     supplierId?: number;
+    shipmentCode?: string;
+    shipmentStatus?: string;
+    paymentStatus?: string;
     includeArchived?: boolean;
   }): Promise<{
     totalPurchaseRmb: string;
@@ -658,6 +661,7 @@ export class DatabaseStorage implements IStorage {
     dateFrom?: string;
     dateTo?: string;
     supplierId?: number;
+    shipmentCode?: string;
     shipmentStatus?: string;
     paymentStatus?: string;
     includeArchived?: boolean;
@@ -672,6 +676,12 @@ export class DatabaseStorage implements IStorage {
     
     if (!filters?.includeArchived) {
       filteredShipments = filteredShipments.filter(s => s.status !== "مؤرشفة");
+    }
+
+    if (filters?.shipmentCode) {
+      filteredShipments = filteredShipments.filter(s => 
+        s.shipmentCode?.toLowerCase().includes(filters.shipmentCode!.toLowerCase())
+      );
     }
 
     if (filters?.shipmentStatus && filters.shipmentStatus !== "all") {

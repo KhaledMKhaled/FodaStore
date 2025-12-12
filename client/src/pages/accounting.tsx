@@ -51,6 +51,7 @@ export default function AccountingPage() {
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [supplierId, setSupplierId] = useState<string>("");
+  const [shipmentCode, setShipmentCode] = useState<string>("");
   const [shipmentStatus, setShipmentStatus] = useState<string>("all");
   const [paymentStatus, setPaymentStatus] = useState<string>("all");
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -59,12 +60,13 @@ export default function AccountingPage() {
   if (dateFrom) queryParams.append("dateFrom", dateFrom);
   if (dateTo) queryParams.append("dateTo", dateTo);
   if (supplierId) queryParams.append("supplierId", supplierId);
+  if (shipmentCode) queryParams.append("shipmentCode", shipmentCode);
   if (shipmentStatus && shipmentStatus !== "all") queryParams.append("shipmentStatus", shipmentStatus);
   if (paymentStatus && paymentStatus !== "all") queryParams.append("paymentStatus", paymentStatus);
   if (includeArchived) queryParams.append("includeArchived", "true");
 
   const { data: stats, isLoading } = useQuery<AccountingDashboard>({
-    queryKey: ["/api/accounting/dashboard", dateFrom, dateTo, supplierId, shipmentStatus, paymentStatus, includeArchived],
+    queryKey: ["/api/accounting/dashboard", dateFrom, dateTo, supplierId, shipmentCode, shipmentStatus, paymentStatus, includeArchived],
     queryFn: async () => {
       const response = await fetch(`/api/accounting/dashboard?${queryParams.toString()}`, {
         credentials: "include",
@@ -82,6 +84,7 @@ export default function AccountingPage() {
     setDateFrom("");
     setDateTo("");
     setSupplierId("");
+    setShipmentCode("");
     setShipmentStatus("all");
     setPaymentStatus("all");
     setIncludeArchived(false);
@@ -130,7 +133,17 @@ export default function AccountingPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+            <div className="space-y-2">
+              <Label>رقم الشحنة</Label>
+              <Input
+                type="text"
+                placeholder="ادخل رقم الشحنة"
+                value={shipmentCode}
+                onChange={(e) => setShipmentCode(e.target.value)}
+                data-testid="input-shipment-code"
+              />
+            </div>
             <div className="space-y-2">
               <Label>من تاريخ</Label>
               <Input
