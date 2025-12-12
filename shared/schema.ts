@@ -69,12 +69,13 @@ export const shipments = pgTable("shipments", {
   shipmentCode: varchar("shipment_code", { length: 50 }).unique().notNull(),
   shipmentName: varchar("shipment_name", { length: 255 }).notNull(),
   purchaseDate: date("purchase_date").notNull(),
-  status: varchar("status", { length: 50 }).default("جديدة").notNull(), // جديدة, في انتظار الشحن, جاهزة للاستلام, مستلمة بنجاح
+  status: varchar("status", { length: 50 }).default("جديدة").notNull(), // جديدة, في انتظار الشحن, جاهزة للاستلام, مستلمة بنجاح, مؤرشفة
   invoiceCustomsDate: date("invoice_customs_date"),
   createdByUserId: varchar("created_by_user_id").references(() => users.id),
   // Cost breakdown fields
   purchaseCostRmb: decimal("purchase_cost_rmb", { precision: 15, scale: 2 }).default("0"),
   purchaseCostEgp: decimal("purchase_cost_egp", { precision: 15, scale: 2 }).default("0"),
+  purchaseRmbToEgpRate: decimal("purchase_rmb_to_egp_rate", { precision: 10, scale: 4 }).default("0"),
   commissionCostRmb: decimal("commission_cost_rmb", { precision: 15, scale: 2 }).default("0"),
   commissionCostEgp: decimal("commission_cost_egp", { precision: 15, scale: 2 }).default("0"),
   shippingCostRmb: decimal("shipping_cost_rmb", { precision: 15, scale: 2 }).default("0"),
@@ -130,6 +131,7 @@ export const shipmentShippingDetails = pgTable("shipment_shipping_details", {
   rmbToEgpRateAtShipping: decimal("rmb_to_egp_rate_at_shipping", { precision: 10, scale: 4 }),
   usdToRmbRateAtShipping: decimal("usd_to_rmb_rate_at_shipping", { precision: 10, scale: 4 }),
   sourceOfRates: varchar("source_of_rates", { length: 100 }),
+  ratesUpdatedAt: timestamp("rates_updated_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -165,6 +167,7 @@ export const shipmentPayments = pgTable("shipment_payments", {
   amountOriginal: decimal("amount_original", { precision: 15, scale: 2 }).notNull(),
   exchangeRateToEgp: decimal("exchange_rate_to_egp", { precision: 10, scale: 4 }),
   amountEgp: decimal("amount_egp", { precision: 15, scale: 2 }).notNull(),
+  costComponent: varchar("cost_component", { length: 50 }).notNull(),
   paymentMethod: varchar("payment_method", { length: 50 }).notNull(), // نقدي, فودافون كاش, إنستاباي, تحويل بنكي, أخرى
   cashReceiverName: varchar("cash_receiver_name", { length: 255 }),
   referenceNumber: varchar("reference_number", { length: 100 }),

@@ -105,7 +105,6 @@ export interface IStorage {
     totalCostEgp: string;
     totalPaidEgp: string;
     totalBalanceEgp: string;
-    totalOverpaidEgp: string;
     recentShipments: Shipment[];
     pendingShipments: number;
     completedShipments: number;
@@ -116,7 +115,6 @@ export interface IStorage {
     totalCostEgp: string;
     totalPaidEgp: string;
     totalBalanceEgp: string;
-    totalOverpaidEgp: string;
     lastPayment: ShipmentPayment | null;
   }>;
 
@@ -377,6 +375,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPayment(data: InsertShipmentPayment): Promise<ShipmentPayment> {
+    const shipment = await this.getShipment(data.shipmentId);
+
+    if (!shipment) {
+      throw new Error("الشحنة غير موجودة");
+    }
+
+    const currentPaid = parseFloat(shipment.totalPaidEgp || "0");
+    const finalCost = parseFloat(shipment.finalTotalCostEgp || "0");
+    const remainingBefore = Math.max(0, finalCost - currentPaid);
+
+    const intendedAmount = parseFloat(data.amountEgp || "0");
+
+    if (intendedAmount > remainingBefore + 0.0001) {
+      throw new Error("لا يمكن دفع مبلغ أكبر من المتبقي على الشحنة.");
+    }
+
     const [payment] = await db.insert(shipmentPayments).values(data).returning();
 
     // Update shipment totals
@@ -397,10 +411,9 @@ export class DatabaseStorage implements IStorage {
         return latest;
       }, null) || data.paymentDate || new Date();
 
-    const shipment = await this.getShipment(data.shipmentId);
-    if (shipment) {
-      const finalCost = parseFloat(shipment.finalTotalCostEgp || "0");
-      // remaining should never be negative; keep overpaid separately (derived on the client)
+    const updatedShipment = await this.getShipment(data.shipmentId);
+    if (updatedShipment) {
+      const finalCost = parseFloat(updatedShipment.finalTotalCostEgp || "0");
       const remaining = Math.max(0, finalCost - totalPaid);
 
       await this.updateShipment(data.shipmentId, {
@@ -443,19 +456,15 @@ export class DatabaseStorage implements IStorage {
       0
     );
 
-    // Calculate remaining and overpaid correctly
+    // Calculate remaining correctly
     // remaining = max(0, cost - paid) per shipment
-    // overpaid = max(0, paid - cost) per shipment
     let totalBalanceEgp = 0;
-    let totalOverpaidEgp = 0;
 
     allShipments.forEach((s) => {
       const cost = parseFloat(s.finalTotalCostEgp || "0");
       const paid = parseFloat(s.totalPaidEgp || "0");
       const remaining = Math.max(0, cost - paid);
-      const overpaid = Math.max(0, paid - cost);
       totalBalanceEgp += remaining;
-      totalOverpaidEgp += overpaid;
     });
 
     const pendingShipments = allShipments.filter(
@@ -473,7 +482,6 @@ export class DatabaseStorage implements IStorage {
       totalCostEgp: totalCostEgp.toFixed(2),
       totalPaidEgp: totalPaidEgp.toFixed(2),
       totalBalanceEgp: totalBalanceEgp.toFixed(2),
-      totalOverpaidEgp: totalOverpaidEgp.toFixed(2),
       recentShipments,
       pendingShipments,
       completedShipments,
@@ -485,30 +493,29 @@ export class DatabaseStorage implements IStorage {
     const allShipments = await this.getAllShipments();
     const allPayments = await this.getAllPayments();
 
-    const totalCostEgp = allShipments.reduce(
+    const activeShipments = allShipments.filter((s) => s.status !== "مؤرشفة");
+
+    const unsettledShipments = activeShipments.filter((s) => {
+      const cost = parseFloat(s.finalTotalCostEgp || "0");
+      const paid = parseFloat(s.totalPaidEgp || "0");
+      return Math.max(0, cost - paid) > 0.0001;
+    });
+
+    const totalCostEgp = unsettledShipments.reduce(
       (sum, s) => sum + parseFloat(s.finalTotalCostEgp || "0"),
       0
     );
 
-    const totalPaidEgp = allShipments.reduce(
+    const totalPaidEgp = unsettledShipments.reduce(
       (sum, s) => sum + parseFloat(s.totalPaidEgp || "0"),
       0
     );
 
-    // Calculate remaining and overpaid correctly
-    // remaining = max(0, cost - paid) per shipment
-    // overpaid = max(0, paid - cost) per shipment
-    let totalBalanceEgp = 0;
-    let totalOverpaidEgp = 0;
-
-    allShipments.forEach((s) => {
+    const totalBalanceEgp = unsettledShipments.reduce((sum, s) => {
       const cost = parseFloat(s.finalTotalCostEgp || "0");
       const paid = parseFloat(s.totalPaidEgp || "0");
-      const remaining = Math.max(0, cost - paid);
-      const overpaid = Math.max(0, paid - cost);
-      totalBalanceEgp += remaining;
-      totalOverpaidEgp += overpaid;
-    });
+      return sum + Math.max(0, cost - paid);
+    }, 0);
 
     const lastPayment = allPayments.length > 0 ? allPayments[0] : null;
 
@@ -516,7 +523,6 @@ export class DatabaseStorage implements IStorage {
       totalCostEgp: totalCostEgp.toFixed(2),
       totalPaidEgp: totalPaidEgp.toFixed(2),
       totalBalanceEgp: totalBalanceEgp.toFixed(2),
-      totalOverpaidEgp: totalOverpaidEgp.toFixed(2),
       lastPayment,
     };
   }

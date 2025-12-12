@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -11,6 +11,8 @@ import {
   Trash2,
   ChevronDown,
   Calendar,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,11 +62,19 @@ export default function Shipments() {
   const [dateTo, setDateTo] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [shipmentToDelete, setShipmentToDelete] = useState<Shipment | null>(null);
+  const [viewArchived, setViewArchived] = useState(false);
   const { toast } = useToast();
 
   const { data: shipments, isLoading } = useQuery<Shipment[]>({
     queryKey: ["/api/shipments"],
   });
+
+  const activeShipments = shipments?.filter((shipment) => shipment.status !== "مؤرشفة");
+  const archivedShipments = shipments?.filter((shipment) => shipment.status === "مؤرشفة");
+
+  useEffect(() => {
+    setStatusFilter("all");
+  }, [viewArchived]);
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -79,6 +89,22 @@ export default function Shipments() {
     },
     onError: () => {
       toast({ title: "حدث خطأ أثناء حذف الشحنة", variant: "destructive" });
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+      return apiRequest("PATCH", `/api/shipments/${id}` , {
+        shipmentData: { status },
+      });
+    },
+    onSuccess: () => {
+      toast({ title: viewArchived ? "تم إلغاء الأرشفة" : "تمت أرشفة الشحنة" });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+    },
+    onError: () => {
+      toast({ title: "تعذر تحديث حالة الشحنة", variant: "destructive" });
     },
   });
 
@@ -106,7 +132,9 @@ export default function Shipments() {
     return new Date(date).toLocaleDateString("ar-EG");
   };
 
-  const filteredShipments = shipments?.filter((shipment) => {
+  const baseShipments = viewArchived ? archivedShipments : activeShipments;
+
+  const filteredShipments = baseShipments?.filter((shipment) => {
     const matchesSearch =
       !search ||
       shipment.shipmentName.toLowerCase().includes(search.toLowerCase()) ||
@@ -139,17 +167,37 @@ export default function Shipments() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">الشحنات</h1>
+          <h1 className="text-3xl font-semibold">{viewArchived ? "الشحنات المؤرشفة" : "الشحنات"}</h1>
           <p className="text-muted-foreground mt-1">
             إدارة جميع الشحنات من لحظة الشراء حتى الاستلام
           </p>
         </div>
-        <Button asChild data-testid="button-add-shipment">
-          <Link href="/shipments/new">
-            <Plus className="w-4 h-4 ml-2" />
-            إضافة شحنة جديدة
-          </Link>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-md border overflow-hidden">
+            <Button
+              type="button"
+              variant={viewArchived ? "outline" : "default"}
+              className={!viewArchived ? "rounded-none" : "rounded-none"}
+              onClick={() => setViewArchived(false)}
+            >
+              الشحنات النشطة
+            </Button>
+            <Button
+              type="button"
+              variant={viewArchived ? "default" : "outline"}
+              className={!viewArchived ? "rounded-none" : "rounded-none"}
+              onClick={() => setViewArchived(true)}
+            >
+              الشحنات المؤرشفة
+            </Button>
+          </div>
+          <Button asChild data-testid="button-add-shipment">
+            <Link href="/shipments/new">
+              <Plus className="w-4 h-4 ml-2" />
+              إضافة شحنة جديدة
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -178,6 +226,7 @@ export default function Shipments() {
                   <SelectItem value="في انتظار الشحن">في انتظار الشحن</SelectItem>
                   <SelectItem value="جاهزة للاستلام">جاهزة للاستلام</SelectItem>
                   <SelectItem value="مستلمة بنجاح">مستلمة بنجاح</SelectItem>
+                  <SelectItem value="مؤرشفة">مؤرشفة</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -293,17 +342,32 @@ export default function Shipments() {
                                 عرض
                               </Link>
                             </DropdownMenuItem>
-                            <DropdownMenuItem asChild>
-                              <Link href={`/shipments/${shipment.id}/edit`}>
-                                <Edit className="w-4 h-4 ml-2" />
-                                تعديل
-                              </Link>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() => handleDeleteClick(shipment)}
-                            >
-                              <Trash2 className="w-4 h-4 ml-2" />
+                          <DropdownMenuItem asChild>
+                            <Link href={`/shipments/${shipment.id}/edit`}>
+                              <Edit className="w-4 h-4 ml-2" />
+                              تعديل
+                            </Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              statusMutation.mutate({
+                                id: shipment.id,
+                                status: shipment.status === "مؤرشفة" ? "جديدة" : "مؤرشفة",
+                              })
+                            }
+                          >
+                            {shipment.status === "مؤرشفة" ? (
+                              <ArchiveRestore className="w-4 h-4 ml-2" />
+                            ) : (
+                              <Archive className="w-4 h-4 ml-2" />
+                            )}
+                            {shipment.status === "مؤرشفة" ? "إلغاء الأرشفة" : "أرشفة"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => handleDeleteClick(shipment)}
+                          >
+                            <Trash2 className="w-4 h-4 ml-2" />
                               حذف
                             </DropdownMenuItem>
                           </DropdownMenuContent>
@@ -355,6 +419,8 @@ function StatusBadge({ status }: { status: string }) {
       "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800",
     "مستلمة بنجاح":
       "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800",
+    مؤرشفة:
+      "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-300 border-slate-200 dark:border-slate-800",
   };
 
   return (
@@ -374,7 +440,6 @@ function BalanceBadge({
   const costValue = typeof cost === "string" ? parseFloat(cost) : cost || 0;
   const paidValue = typeof paid === "string" ? parseFloat(paid) : paid || 0;
   const remaining = Math.max(0, costValue - paidValue);
-  const overpaid = Math.max(0, paidValue - costValue);
 
   const formatCurrency = (num: number) =>
     new Intl.NumberFormat("ar-EG", {
@@ -382,24 +447,13 @@ function BalanceBadge({
       maximumFractionDigits: 2,
     }).format(num);
 
-  if (remaining === 0 && overpaid === 0) {
+  if (remaining === 0) {
     return (
       <Badge
         variant="outline"
         className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
       >
         مسددة
-      </Badge>
-    );
-  }
-
-  if (overpaid > 0) {
-    return (
-      <Badge
-        variant="outline"
-        className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400"
-      >
-        مبلغ زيادة: {formatCurrency(overpaid)} ج.م
       </Badge>
     );
   }
