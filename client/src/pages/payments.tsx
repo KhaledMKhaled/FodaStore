@@ -140,14 +140,11 @@ export default function Payments() {
       return;
     }
 
- codex/implement-major-changes-and-improvements-efasar
     if (!paymentMethod) {
       toast({ title: "يرجى اختيار طريقة الدفع", variant: "destructive" });
       return;
     }
 
-=======
- main
     const amountOriginal = formData.get("amountOriginal") as string;
     const exchangeRate = formData.get("exchangeRateToEgp") as string;
     const amountEgp =

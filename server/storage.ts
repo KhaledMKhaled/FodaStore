@@ -493,13 +493,7 @@ export class DatabaseStorage implements IStorage {
     const allShipments = await this.getAllShipments();
     const allPayments = await this.getAllPayments();
 
- codex/implement-major-changes-and-improvements-efasar
-    const activeShipments = allShipments.filter((s) => s.status !== "مؤرشفة");
-
-    const unsettledShipments = activeShipments.filter((s) => {
-=======
     const unsettledShipments = allShipments.filter((s) => {
- main
       const cost = parseFloat(s.finalTotalCostEgp || "0");
       const paid = parseFloat(s.totalPaidEgp || "0");
       return Math.max(0, cost - paid) > 0.0001;
