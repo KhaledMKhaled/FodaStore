@@ -51,16 +51,20 @@ export default function AccountingPage() {
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [supplierId, setSupplierId] = useState<string>("");
+  const [shipmentStatus, setShipmentStatus] = useState<string>("all");
+  const [paymentStatus, setPaymentStatus] = useState<string>("all");
   const [includeArchived, setIncludeArchived] = useState(false);
 
   const queryParams = new URLSearchParams();
   if (dateFrom) queryParams.append("dateFrom", dateFrom);
   if (dateTo) queryParams.append("dateTo", dateTo);
   if (supplierId) queryParams.append("supplierId", supplierId);
+  if (shipmentStatus && shipmentStatus !== "all") queryParams.append("shipmentStatus", shipmentStatus);
+  if (paymentStatus && paymentStatus !== "all") queryParams.append("paymentStatus", paymentStatus);
   if (includeArchived) queryParams.append("includeArchived", "true");
 
   const { data: stats, isLoading } = useQuery<AccountingDashboard>({
-    queryKey: ["/api/accounting/dashboard", dateFrom, dateTo, supplierId, includeArchived],
+    queryKey: ["/api/accounting/dashboard", dateFrom, dateTo, supplierId, shipmentStatus, paymentStatus, includeArchived],
     queryFn: async () => {
       const response = await fetch(`/api/accounting/dashboard?${queryParams.toString()}`, {
         credentials: "include",
@@ -78,6 +82,8 @@ export default function AccountingPage() {
     setDateFrom("");
     setDateTo("");
     setSupplierId("");
+    setShipmentStatus("all");
+    setPaymentStatus("all");
     setIncludeArchived(false);
   };
 
@@ -124,7 +130,7 @@ export default function AccountingPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
             <div className="space-y-2">
               <Label>من تاريخ</Label>
               <Input
@@ -156,6 +162,36 @@ export default function AccountingPage() {
                       {s.name}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>حالة الشحنة</Label>
+              <Select value={shipmentStatus} onValueChange={setShipmentStatus}>
+                <SelectTrigger data-testid="select-shipment-status">
+                  <SelectValue placeholder="جميع الحالات" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">جميع الحالات</SelectItem>
+                  <SelectItem value="جديدة">جديدة</SelectItem>
+                  <SelectItem value="في انتظار الشحن">في انتظار الشحن</SelectItem>
+                  <SelectItem value="جاهزة للاستلام">جاهزة للاستلام</SelectItem>
+                  <SelectItem value="مستلمة بنجاح">مستلمة بنجاح</SelectItem>
+                  <SelectItem value="مؤرشفة">مؤرشفة</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>حالة السداد</Label>
+              <Select value={paymentStatus} onValueChange={setPaymentStatus}>
+                <SelectTrigger data-testid="select-payment-status">
+                  <SelectValue placeholder="الكل" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">الكل</SelectItem>
+                  <SelectItem value="لم يتم دفع أي مبلغ">لم يتم دفع أي مبلغ</SelectItem>
+                  <SelectItem value="مدفوعة جزئياً">مدفوعة جزئياً</SelectItem>
+                  <SelectItem value="مسددة بالكامل">مسددة بالكامل</SelectItem>
                 </SelectContent>
               </Select>
             </div>

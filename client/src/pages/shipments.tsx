@@ -53,11 +53,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { paymentStatusColors, shipmentStatusColors } from "@/lib/colorMaps";
 import type { Shipment } from "@shared/schema";
 
 export default function Shipments() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -74,6 +76,7 @@ export default function Shipments() {
 
   useEffect(() => {
     setStatusFilter("all");
+    setPaymentStatusFilter("all");
   }, [viewArchived]);
 
   const deleteMutation = useMutation({
@@ -141,6 +144,10 @@ export default function Shipments() {
       shipment.shipmentCode.toLowerCase().includes(search.toLowerCase());
     const matchesStatus =
       statusFilter === "all" || shipment.status === statusFilter;
+
+    const paymentStatus = getPaymentStatus(shipment);
+    const matchesPaymentStatus =
+      paymentStatusFilter === "all" || paymentStatus === paymentStatusFilter;
     
     // Date range filter
     let matchesDateRange = true;
@@ -159,7 +166,7 @@ export default function Shipments() {
       }
     }
     
-    return matchesSearch && matchesStatus && matchesDateRange;
+    return matchesSearch && matchesStatus && matchesPaymentStatus && matchesDateRange;
   });
 
   return (
@@ -231,6 +238,20 @@ export default function Shipments() {
               </Select>
             </div>
             <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-muted-foreground" />
+              <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
+                <SelectTrigger className="w-[200px]" data-testid="select-payment-status-filter">
+                  <SelectValue placeholder="حالة السداد" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">الكل</SelectItem>
+                  <SelectItem value="لم يتم دفع أي مبلغ">لم يتم دفع أي مبلغ</SelectItem>
+                  <SelectItem value="مدفوعة جزئياً">مدفوعة جزئياً</SelectItem>
+                  <SelectItem value="مسددة بالكامل">مسددة بالكامل</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-muted-foreground" />
               <div className="flex items-center gap-2">
                 <Label className="text-sm text-muted-foreground whitespace-nowrap">من:</Label>
@@ -294,6 +315,7 @@ export default function Shipments() {
                     <TableHead className="text-right">اسم الشحنة</TableHead>
                     <TableHead className="text-right">تاريخ الشراء</TableHead>
                     <TableHead className="text-right">الحالة</TableHead>
+                    <TableHead className="text-right">حالة السداد</TableHead>
                     <TableHead className="text-right">التكلفة (ج.م)</TableHead>
                     <TableHead className="text-right">المدفوع (ج.م)</TableHead>
                     <TableHead className="text-right">الرصيد</TableHead>
@@ -314,6 +336,9 @@ export default function Shipments() {
                       <TableCell>{formatDate(shipment.purchaseDate)}</TableCell>
                       <TableCell>
                         <StatusBadge status={shipment.status} />
+                      </TableCell>
+                      <TableCell>
+                        <PaymentStatusBadge status={getPaymentStatus(shipment)} />
                       </TableCell>
                       <TableCell>
                         {formatCurrency(shipment.finalTotalCostEgp)}
@@ -411,20 +436,16 @@ export default function Shipments() {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    جديدة: "",
-    "في انتظار الشحن":
-      "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-200 dark:border-amber-800",
-    "جاهزة للاستلام":
-      "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800",
-    "مستلمة بنجاح":
-      "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800",
-    مؤرشفة:
-      "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-300 border-slate-200 dark:border-slate-800",
-  };
-
   return (
-    <Badge variant="outline" className={colors[status] || ""}>
+    <Badge variant="outline" className={shipmentStatusColors[status] || ""}>
+      {status}
+    </Badge>
+  );
+}
+
+function PaymentStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant="outline" className={paymentStatusColors[status] || ""}>
       {status}
     </Badge>
   );
@@ -486,6 +507,16 @@ function EmptyState() {
       </Button>
     </div>
   );
+}
+
+function getPaymentStatus(shipment: Shipment) {
+  const cost = parseFloat(shipment.finalTotalCostEgp || "0");
+  const paid = parseFloat(shipment.totalPaidEgp || "0");
+  const balance = parseFloat(shipment.balanceEgp || (cost - paid).toString());
+
+  if (paid <= 0.0001) return "لم يتم دفع أي مبلغ";
+  if (balance <= 0.0001) return "مسددة بالكامل";
+  return "مدفوعة جزئياً";
 }
 
 function TableSkeleton() {
