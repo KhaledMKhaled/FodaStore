@@ -35,6 +35,7 @@ import {
   type AuditLog,
   type InsertAuditLog,
 } from "@shared/schema";
+import { normalizePaymentAmounts, roundAmount } from "./services/currency";
 
 export interface IStorage {
   // Users
@@ -465,55 +466,68 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPayment(data: InsertShipmentPayment): Promise<ShipmentPayment> {
-    const shipment = await this.getShipment(data.shipmentId);
+    return db.transaction(async (tx) => {
+      const lockedShipment = await tx.execute(sql<Shipment>`SELECT * FROM shipments WHERE id = ${data.shipmentId} FOR UPDATE`);
+      const shipment = (lockedShipment.rows?.[0] as Shipment | undefined) || undefined;
 
-    if (!shipment) {
-      throw new Error("الشحنة غير موجودة");
-    }
+      if (!shipment) {
+        throw new Error("الشحنة غير موجودة");
+      }
 
-    const currentPaid = parseFloat(shipment.totalPaidEgp || "0");
-    const finalCost = parseFloat(shipment.finalTotalCostEgp || "0");
-    const remainingBefore = Math.max(0, finalCost - currentPaid);
+      const amountOriginal = parseFloat(data.amountOriginal as any);
+      const exchangeRate = data.exchangeRateToEgp
+        ? parseFloat(data.exchangeRateToEgp as any)
+        : null;
 
-    const intendedAmount = parseFloat(data.amountEgp || "0");
-
-    if (intendedAmount > remainingBefore + 0.0001) {
-      throw new Error("لا يمكن دفع مبلغ أكبر من المتبقي على الشحنة.");
-    }
-
-    const [payment] = await db.insert(shipmentPayments).values(data).returning();
-
-    // Update shipment totals
-    const allPayments = await this.getShipmentPayments(data.shipmentId);
-    const totalPaid = allPayments.reduce(
-      (sum, p) => sum + parseFloat(p.amountEgp),
-      0
-    );
-
-    // Ensure we persist the actual latest payment date (not the server time)
-    const latestPaymentDate =
-      allPayments.reduce<Date | null>((latest, payment) => {
-        const candidate = payment.paymentDate || payment.createdAt || null;
-        if (!candidate) return latest;
-        if (!latest || candidate.getTime() > latest.getTime()) {
-          return candidate;
-        }
-        return latest;
-      }, null) || data.paymentDate || new Date();
-
-    const updatedShipment = await this.getShipment(data.shipmentId);
-    if (updatedShipment) {
-      const finalCost = parseFloat(updatedShipment.finalTotalCostEgp || "0");
-      const remaining = Math.max(0, finalCost - totalPaid);
-
-      await this.updateShipment(data.shipmentId, {
-        totalPaidEgp: totalPaid.toFixed(2),
-        balanceEgp: remaining.toFixed(2),
-        lastPaymentDate: latestPaymentDate,
+      const { amountEgp, exchangeRateToEgp } = normalizePaymentAmounts({
+        paymentCurrency: data.paymentCurrency,
+        amountOriginal,
+        exchangeRateToEgp: exchangeRate,
       });
-    }
 
-    return payment;
+      const currentPaid = parseFloat(shipment.totalPaidEgp || "0");
+      const finalCost = parseFloat(shipment.finalTotalCostEgp || "0");
+      const remainingBefore = Math.max(0, finalCost - currentPaid);
+
+      if (amountEgp > remainingBefore + 0.0001) {
+        throw new Error("لا يمكن دفع مبلغ أكبر من المتبقي على الشحنة.");
+      }
+
+      const [payment] = await tx
+        .insert(shipmentPayments)
+        .values({
+          ...data,
+          amountOriginal: roundAmount(amountOriginal, 2).toFixed(2),
+          exchangeRateToEgp: exchangeRateToEgp ? roundAmount(exchangeRateToEgp, 4).toFixed(4) : null,
+          amountEgp: roundAmount(amountEgp, 2).toFixed(2),
+        })
+        .returning();
+
+      const [paymentTotals] = await tx
+        .select({
+          totalPaid: sql<string>`COALESCE(SUM(${shipmentPayments.amountEgp}), 0)`,
+          lastPaymentDate: sql<Date>`MAX(${shipmentPayments.paymentDate})`,
+        })
+        .from(shipmentPayments)
+        .where(eq(shipmentPayments.shipmentId, data.shipmentId));
+
+      const totalPaidNumber = roundAmount(parseFloat(paymentTotals?.totalPaid || "0"));
+      const balance = roundAmount(Math.max(0, finalCost - totalPaidNumber));
+      const latestPaymentDate =
+        paymentTotals?.lastPaymentDate || data.paymentDate || new Date();
+
+      await tx
+        .update(shipments)
+        .set({
+          totalPaidEgp: totalPaidNumber.toFixed(2),
+          balanceEgp: balance.toFixed(2),
+          lastPaymentDate: latestPaymentDate,
+          updatedAt: new Date(),
+        })
+        .where(eq(shipments.id, data.shipmentId));
+
+      return payment;
+    });
   }
 
   // Inventory
