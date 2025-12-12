@@ -99,6 +99,13 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **December 2025**: Implemented comprehensive accounting layer
+  - New accounting dashboard with cost totals and payment summaries
+  - Supplier balances page showing debts/credits per supplier with detailed statements
+  - Movement report with comprehensive filters (date, supplier, shipment, cost component, payment method)
+  - Payment methods report with charts showing distribution by payment method
+  - All reports support CSV/Excel export
+  - New sidebar section "المحاسبة والتقارير" (Accounting & Reports)
 - **December 2025**: Fixed shipment display issue - costs now calculate at every step, not just step 4
   - POST /api/shipments now uses latest RMB→EGP exchange rate for preliminary purchase cost calculation
   - PATCH /api/shipments/:id now always recalculates finalTotalCostEgp on any update
