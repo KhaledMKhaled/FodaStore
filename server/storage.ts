@@ -125,6 +125,96 @@ export interface IStorage {
     totalItems: number;
     avgUnitCostEgp: string;
   }>;
+
+  // Accounting Methods
+  getAccountingDashboard(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    supplierId?: number;
+    includeArchived?: boolean;
+  }): Promise<{
+    totalPurchaseRmb: string;
+    totalPurchaseEgp: string;
+    totalShippingRmb: string;
+    totalShippingEgp: string;
+    totalCommissionRmb: string;
+    totalCommissionEgp: string;
+    totalCustomsEgp: string;
+    totalTakhreegEgp: string;
+    totalCostEgp: string;
+    totalPaidEgp: string;
+    totalBalanceEgp: string;
+    unsettledShipmentsCount: number;
+  }>;
+
+  getSupplierBalances(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    supplierId?: number;
+    balanceType?: 'owing' | 'credit' | 'all';
+  }): Promise<Array<{
+    supplierId: number;
+    supplierName: string;
+    totalCostEgp: string;
+    totalPaidEgp: string;
+    balanceEgp: string;
+    balanceStatus: 'owing' | 'settled' | 'credit';
+  }>>;
+
+  getSupplierStatement(supplierId: number, filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<{
+    supplier: Supplier;
+    movements: Array<{
+      date: Date | string;
+      type: 'shipment' | 'payment';
+      description: string;
+      shipmentCode?: string;
+      costEgp?: string;
+      paidEgp?: string;
+      runningBalance: string;
+    }>;
+  }>;
+
+  getMovementReport(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    shipmentId?: number;
+    supplierId?: number;
+    movementType?: string;
+    costComponent?: string;
+    paymentMethod?: string;
+    includeArchived?: boolean;
+  }): Promise<{
+    movements: Array<{
+      date: Date | string;
+      shipmentCode: string;
+      shipmentName: string;
+      supplierName?: string;
+      supplierId?: number;
+      movementType: string;
+      costComponent?: string;
+      paymentMethod?: string;
+      originalCurrency?: string;
+      amountOriginal?: string;
+      amountEgp: string;
+      direction: 'cost' | 'payment';
+      userName?: string;
+    }>;
+    totalCostEgp: string;
+    totalPaidEgp: string;
+    netMovement: string;
+  }>;
+
+  getPaymentMethodsReport(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<Array<{
+    paymentMethod: string;
+    paymentCount: number;
+    totalAmountEgp: string;
+  }>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -547,6 +637,506 @@ export class DatabaseStorage implements IStorage {
       totalItems: movements.length,
       avgUnitCostEgp: avgUnitCostEgp.toFixed(4),
     };
+  }
+
+  // Accounting Dashboard
+  async getAccountingDashboard(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    supplierId?: number;
+    includeArchived?: boolean;
+  }) {
+    const allShipments = await this.getAllShipments();
+    const allPayments = await this.getAllPayments();
+    const allItems = await Promise.all(
+      allShipments.map(s => this.getShipmentItems(s.id))
+    );
+
+    let filteredShipments = allShipments;
+    
+    if (!filters?.includeArchived) {
+      filteredShipments = filteredShipments.filter(s => s.status !== "مؤرشفة");
+    }
+
+    if (filters?.dateFrom) {
+      const fromDate = new Date(filters.dateFrom);
+      filteredShipments = filteredShipments.filter(s => {
+        const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+        return purchaseDate && purchaseDate >= fromDate;
+      });
+    }
+
+    if (filters?.dateTo) {
+      const toDate = new Date(filters.dateTo);
+      filteredShipments = filteredShipments.filter(s => {
+        const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+        return purchaseDate && purchaseDate <= toDate;
+      });
+    }
+
+    if (filters?.supplierId) {
+      const shipmentItemsForFilter = allItems.flat();
+      const shipmentIdsWithSupplier = new Set(
+        shipmentItemsForFilter
+          .filter(item => item.supplierId === filters.supplierId)
+          .map(item => item.shipmentId)
+      );
+      filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
+    }
+
+    const filteredShipmentIds = new Set(filteredShipments.map(s => s.id));
+    const filteredPayments = allPayments.filter(p => filteredShipmentIds.has(p.shipmentId));
+
+    const totalPurchaseRmb = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat(s.purchaseCostRmb || "0"), 0
+    );
+    const totalPurchaseEgp = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat(s.purchaseCostEgp || "0"), 0
+    );
+    const totalShippingRmb = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat(s.shippingCostRmb || "0"), 0
+    );
+    const totalShippingEgp = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat(s.shippingCostEgp || "0"), 0
+    );
+    const totalCommissionRmb = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat(s.commissionCostRmb || "0"), 0
+    );
+    const totalCommissionEgp = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat(s.commissionCostEgp || "0"), 0
+    );
+    const totalCustomsEgp = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat(s.customsCostEgp || "0"), 0
+    );
+    const totalTakhreegEgp = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat(s.takhreegCostEgp || "0"), 0
+    );
+    const totalCostEgp = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat(s.finalTotalCostEgp || "0"), 0
+    );
+    const totalPaidEgp = filteredPayments.reduce(
+      (sum, p) => sum + parseFloat(p.amountEgp || "0"), 0
+    );
+    const totalBalanceEgp = filteredShipments.reduce((sum, s) => {
+      const cost = parseFloat(s.finalTotalCostEgp || "0");
+      const paid = parseFloat(s.totalPaidEgp || "0");
+      return sum + Math.max(0, cost - paid);
+    }, 0);
+
+    const unsettledShipmentsCount = filteredShipments.filter(s => {
+      const cost = parseFloat(s.finalTotalCostEgp || "0");
+      const paid = parseFloat(s.totalPaidEgp || "0");
+      return Math.max(0, cost - paid) > 0.0001;
+    }).length;
+
+    return {
+      totalPurchaseRmb: totalPurchaseRmb.toFixed(2),
+      totalPurchaseEgp: totalPurchaseEgp.toFixed(2),
+      totalShippingRmb: totalShippingRmb.toFixed(2),
+      totalShippingEgp: totalShippingEgp.toFixed(2),
+      totalCommissionRmb: totalCommissionRmb.toFixed(2),
+      totalCommissionEgp: totalCommissionEgp.toFixed(2),
+      totalCustomsEgp: totalCustomsEgp.toFixed(2),
+      totalTakhreegEgp: totalTakhreegEgp.toFixed(2),
+      totalCostEgp: totalCostEgp.toFixed(2),
+      totalPaidEgp: totalPaidEgp.toFixed(2),
+      totalBalanceEgp: totalBalanceEgp.toFixed(2),
+      unsettledShipmentsCount,
+    };
+  }
+
+  // Supplier Balances
+  async getSupplierBalances(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    supplierId?: number;
+    balanceType?: 'owing' | 'credit' | 'all';
+  }) {
+    const allSuppliers = await this.getAllSuppliers();
+    const allShipments = await this.getAllShipments();
+    const allPayments = await this.getAllPayments();
+    const allItems = await Promise.all(
+      allShipments.map(s => this.getShipmentItems(s.id))
+    );
+
+    const result: Array<{
+      supplierId: number;
+      supplierName: string;
+      totalCostEgp: string;
+      totalPaidEgp: string;
+      balanceEgp: string;
+      balanceStatus: 'owing' | 'settled' | 'credit';
+    }> = [];
+
+    for (const supplier of allSuppliers) {
+      if (filters?.supplierId && supplier.id !== filters.supplierId) continue;
+
+      const supplierShipmentIds = new Set<number>();
+      allItems.forEach((items, idx) => {
+        if (items.some(item => item.supplierId === supplier.id)) {
+          supplierShipmentIds.add(allShipments[idx].id);
+        }
+      });
+
+      let supplierShipments = allShipments.filter(s => supplierShipmentIds.has(s.id));
+
+      if (filters?.dateFrom) {
+        const fromDate = new Date(filters.dateFrom);
+        supplierShipments = supplierShipments.filter(s => {
+          const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+          return purchaseDate && purchaseDate >= fromDate;
+        });
+      }
+
+      if (filters?.dateTo) {
+        const toDate = new Date(filters.dateTo);
+        supplierShipments = supplierShipments.filter(s => {
+          const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+          return purchaseDate && purchaseDate <= toDate;
+        });
+      }
+
+      const supplierShipmentIdsFiltered = new Set(supplierShipments.map(s => s.id));
+      const supplierPayments = allPayments.filter(p => supplierShipmentIdsFiltered.has(p.shipmentId));
+
+      const totalCost = supplierShipments.reduce(
+        (sum, s) => sum + parseFloat(s.finalTotalCostEgp || "0"), 0
+      );
+      const totalPaid = supplierPayments.reduce(
+        (sum, p) => sum + parseFloat(p.amountEgp || "0"), 0
+      );
+      const balance = totalCost - totalPaid;
+
+      let balanceStatus: 'owing' | 'settled' | 'credit' = 'settled';
+      if (balance > 0.0001) balanceStatus = 'owing';
+      else if (balance < -0.0001) balanceStatus = 'credit';
+
+      if (filters?.balanceType && filters.balanceType !== 'all') {
+        if (filters.balanceType === 'owing' && balanceStatus !== 'owing') continue;
+        if (filters.balanceType === 'credit' && balanceStatus !== 'credit') continue;
+      }
+
+      result.push({
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+        totalCostEgp: totalCost.toFixed(2),
+        totalPaidEgp: totalPaid.toFixed(2),
+        balanceEgp: balance.toFixed(2),
+        balanceStatus,
+      });
+    }
+
+    return result;
+  }
+
+  // Supplier Statement
+  async getSupplierStatement(supplierId: number, filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+  }) {
+    const supplier = await this.getSupplier(supplierId);
+    if (!supplier) {
+      throw new Error("Supplier not found");
+    }
+
+    const allShipments = await this.getAllShipments();
+    const allPayments = await this.getAllPayments();
+    const allItems = await Promise.all(
+      allShipments.map(s => this.getShipmentItems(s.id))
+    );
+
+    const supplierShipmentIds = new Set<number>();
+    allItems.forEach((items, idx) => {
+      if (items.some(item => item.supplierId === supplierId)) {
+        supplierShipmentIds.add(allShipments[idx].id);
+      }
+    });
+
+    let supplierShipments = allShipments.filter(s => supplierShipmentIds.has(s.id));
+    let supplierPayments = allPayments.filter(p => supplierShipmentIds.has(p.shipmentId));
+
+    if (filters?.dateFrom) {
+      const fromDate = new Date(filters.dateFrom);
+      supplierShipments = supplierShipments.filter(s => {
+        const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+        return purchaseDate && purchaseDate >= fromDate;
+      });
+      supplierPayments = supplierPayments.filter(p => new Date(p.paymentDate) >= fromDate);
+    }
+
+    if (filters?.dateTo) {
+      const toDate = new Date(filters.dateTo);
+      supplierShipments = supplierShipments.filter(s => {
+        const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+        return purchaseDate && purchaseDate <= toDate;
+      });
+      supplierPayments = supplierPayments.filter(p => new Date(p.paymentDate) <= toDate);
+    }
+
+    const movements: Array<{
+      date: Date | string;
+      type: 'shipment' | 'payment';
+      description: string;
+      shipmentCode?: string;
+      costEgp?: string;
+      paidEgp?: string;
+      runningBalance: string;
+    }> = [];
+
+    supplierShipments.forEach(s => {
+      movements.push({
+        date: s.purchaseDate || s.createdAt || new Date(),
+        type: 'shipment',
+        description: `شحنة: ${s.shipmentName}`,
+        shipmentCode: s.shipmentCode,
+        costEgp: s.finalTotalCostEgp || "0",
+        runningBalance: "0",
+      });
+    });
+
+    supplierPayments.forEach(p => {
+      const shipment = allShipments.find(s => s.id === p.shipmentId);
+      movements.push({
+        date: p.paymentDate,
+        type: 'payment',
+        description: `دفعة - ${p.costComponent}`,
+        shipmentCode: shipment?.shipmentCode,
+        paidEgp: p.amountEgp || "0",
+        runningBalance: "0",
+      });
+    });
+
+    movements.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    let runningBalance = 0;
+    movements.forEach(m => {
+      if (m.type === 'shipment') {
+        runningBalance += parseFloat(m.costEgp || "0");
+      } else {
+        runningBalance -= parseFloat(m.paidEgp || "0");
+      }
+      m.runningBalance = runningBalance.toFixed(2);
+    });
+
+    return { supplier, movements };
+  }
+
+  // Movement Report
+  async getMovementReport(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    shipmentId?: number;
+    supplierId?: number;
+    movementType?: string;
+    costComponent?: string;
+    paymentMethod?: string;
+    includeArchived?: boolean;
+  }) {
+    const allShipments = await this.getAllShipments();
+    const allPayments = await this.getAllPayments();
+    const allSuppliers = await this.getAllSuppliers();
+    const allUsers = await this.getAllUsers();
+    const allItems = await Promise.all(
+      allShipments.map(s => this.getShipmentItems(s.id))
+    );
+
+    const supplierMap = new Map(allSuppliers.map(s => [s.id, s.name]));
+    const userMap = new Map(allUsers.map(u => [u.id, u.firstName || u.username]));
+
+    let filteredShipments = allShipments;
+    
+    if (!filters?.includeArchived) {
+      filteredShipments = filteredShipments.filter(s => s.status !== "مؤرشفة");
+    }
+
+    if (filters?.dateFrom) {
+      const fromDate = new Date(filters.dateFrom);
+      filteredShipments = filteredShipments.filter(s => {
+        const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+        return purchaseDate && purchaseDate >= fromDate;
+      });
+    }
+
+    if (filters?.dateTo) {
+      const toDate = new Date(filters.dateTo);
+      filteredShipments = filteredShipments.filter(s => {
+        const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+        return purchaseDate && purchaseDate <= toDate;
+      });
+    }
+
+    if (filters?.shipmentId) {
+      filteredShipments = filteredShipments.filter(s => s.id === filters.shipmentId);
+    }
+
+    if (filters?.supplierId) {
+      const shipmentIdsWithSupplier = new Set<number>();
+      allItems.forEach((items, idx) => {
+        if (items.some(item => item.supplierId === filters.supplierId)) {
+          shipmentIdsWithSupplier.add(allShipments[idx].id);
+        }
+      });
+      filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
+    }
+
+    const filteredShipmentIds = new Set(filteredShipments.map(s => s.id));
+
+    const movements: Array<{
+      date: Date | string;
+      shipmentCode: string;
+      shipmentName: string;
+      supplierName?: string;
+      supplierId?: number;
+      movementType: string;
+      costComponent?: string;
+      paymentMethod?: string;
+      originalCurrency?: string;
+      amountOriginal?: string;
+      amountEgp: string;
+      direction: 'cost' | 'payment';
+      userName?: string;
+    }> = [];
+
+    const shipmentSupplierMap = new Map<number, number | undefined>();
+    allItems.forEach((items, idx) => {
+      const firstSupplier = items.find(i => i.supplierId)?.supplierId;
+      shipmentSupplierMap.set(allShipments[idx].id, firstSupplier ?? undefined);
+    });
+
+    for (const s of filteredShipments) {
+      const supplierId = shipmentSupplierMap.get(s.id);
+      const supplierName = supplierId ? supplierMap.get(supplierId) : undefined;
+
+      const costTypes = [
+        { type: "تكلفة بضاعة", rmb: s.purchaseCostRmb, egp: s.purchaseCostEgp },
+        { type: "تكلفة شحن", rmb: s.shippingCostRmb, egp: s.shippingCostEgp },
+        { type: "عمولة", rmb: s.commissionCostRmb, egp: s.commissionCostEgp },
+        { type: "جمرك", rmb: null, egp: s.customsCostEgp },
+        { type: "تخريج", rmb: null, egp: s.takhreegCostEgp },
+      ];
+
+      for (const ct of costTypes) {
+        const egpAmount = parseFloat(ct.egp || "0");
+        if (egpAmount <= 0) continue;
+
+        if (filters?.movementType && filters.movementType !== ct.type && filters.movementType !== 'all') {
+          continue;
+        }
+
+        movements.push({
+          date: s.purchaseDate || s.createdAt || new Date(),
+          shipmentCode: s.shipmentCode,
+          shipmentName: s.shipmentName,
+          supplierName,
+          supplierId,
+          movementType: ct.type,
+          originalCurrency: ct.rmb ? "RMB" : "EGP",
+          amountOriginal: ct.rmb || ct.egp || "0",
+          amountEgp: ct.egp || "0",
+          direction: 'cost',
+        });
+      }
+    }
+
+    let filteredPayments = allPayments.filter(p => filteredShipmentIds.has(p.shipmentId));
+
+    if (filters?.dateFrom) {
+      const fromDate = new Date(filters.dateFrom);
+      filteredPayments = filteredPayments.filter(p => new Date(p.paymentDate) >= fromDate);
+    }
+
+    if (filters?.dateTo) {
+      const toDate = new Date(filters.dateTo);
+      filteredPayments = filteredPayments.filter(p => new Date(p.paymentDate) <= toDate);
+    }
+
+    if (filters?.costComponent) {
+      filteredPayments = filteredPayments.filter(p => p.costComponent === filters.costComponent);
+    }
+
+    if (filters?.paymentMethod) {
+      filteredPayments = filteredPayments.filter(p => p.paymentMethod === filters.paymentMethod);
+    }
+
+    for (const p of filteredPayments) {
+      const shipment = allShipments.find(s => s.id === p.shipmentId);
+      if (!shipment) continue;
+
+      if (filters?.movementType && filters.movementType !== 'دفعة' && filters.movementType !== 'all') {
+        continue;
+      }
+
+      const supplierId = shipmentSupplierMap.get(p.shipmentId);
+      const supplierName = supplierId ? supplierMap.get(supplierId) : undefined;
+      const userName = p.createdByUserId ? userMap.get(p.createdByUserId) : undefined;
+
+      movements.push({
+        date: p.paymentDate,
+        shipmentCode: shipment.shipmentCode,
+        shipmentName: shipment.shipmentName,
+        supplierName,
+        supplierId,
+        movementType: "دفعة",
+        costComponent: p.costComponent,
+        paymentMethod: p.paymentMethod,
+        originalCurrency: p.paymentCurrency,
+        amountOriginal: p.amountOriginal || "0",
+        amountEgp: p.amountEgp || "0",
+        direction: 'payment',
+        userName,
+      });
+    }
+
+    movements.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    const totalCostEgp = movements
+      .filter(m => m.direction === 'cost')
+      .reduce((sum, m) => sum + parseFloat(m.amountEgp), 0);
+
+    const totalPaidEgp = movements
+      .filter(m => m.direction === 'payment')
+      .reduce((sum, m) => sum + parseFloat(m.amountEgp), 0);
+
+    return {
+      movements,
+      totalCostEgp: totalCostEgp.toFixed(2),
+      totalPaidEgp: totalPaidEgp.toFixed(2),
+      netMovement: (totalCostEgp - totalPaidEgp).toFixed(2),
+    };
+  }
+
+  // Payment Methods Report
+  async getPaymentMethodsReport(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+  }) {
+    let allPayments = await this.getAllPayments();
+
+    if (filters?.dateFrom) {
+      const fromDate = new Date(filters.dateFrom);
+      allPayments = allPayments.filter(p => new Date(p.paymentDate) >= fromDate);
+    }
+
+    if (filters?.dateTo) {
+      const toDate = new Date(filters.dateTo);
+      allPayments = allPayments.filter(p => new Date(p.paymentDate) <= toDate);
+    }
+
+    const methodStats = new Map<string, { count: number; total: number }>();
+
+    for (const p of allPayments) {
+      const method = p.paymentMethod || "أخرى";
+      const current = methodStats.get(method) || { count: 0, total: 0 };
+      current.count += 1;
+      current.total += parseFloat(p.amountEgp || "0");
+      methodStats.set(method, current);
+    }
+
+    return Array.from(methodStats.entries()).map(([method, stats]) => ({
+      paymentMethod: method,
+      paymentCount: stats.count,
+      totalAmountEgp: stats.total.toFixed(2),
+    }));
   }
 }
 

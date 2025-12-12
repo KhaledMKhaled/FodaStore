@@ -581,6 +581,88 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Accounting Routes
+  app.get("/api/accounting/dashboard", isAuthenticated, async (req, res) => {
+    try {
+      const filters = {
+        dateFrom: req.query.dateFrom as string | undefined,
+        dateTo: req.query.dateTo as string | undefined,
+        supplierId: req.query.supplierId ? parseInt(req.query.supplierId as string) : undefined,
+        includeArchived: req.query.includeArchived === "true",
+      };
+      const stats = await storage.getAccountingDashboard(filters);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching accounting dashboard:", error);
+      res.status(500).json({ message: "Error fetching accounting dashboard" });
+    }
+  });
+
+  app.get("/api/accounting/supplier-balances", isAuthenticated, async (req, res) => {
+    try {
+      const filters = {
+        dateFrom: req.query.dateFrom as string | undefined,
+        dateTo: req.query.dateTo as string | undefined,
+        supplierId: req.query.supplierId ? parseInt(req.query.supplierId as string) : undefined,
+        balanceType: req.query.balanceType as 'owing' | 'credit' | 'all' | undefined,
+      };
+      const balances = await storage.getSupplierBalances(filters);
+      res.json(balances);
+    } catch (error) {
+      console.error("Error fetching supplier balances:", error);
+      res.status(500).json({ message: "Error fetching supplier balances" });
+    }
+  });
+
+  app.get("/api/accounting/supplier-statement/:supplierId", isAuthenticated, async (req, res) => {
+    try {
+      const supplierId = parseInt(req.params.supplierId);
+      const filters = {
+        dateFrom: req.query.dateFrom as string | undefined,
+        dateTo: req.query.dateTo as string | undefined,
+      };
+      const statement = await storage.getSupplierStatement(supplierId, filters);
+      res.json(statement);
+    } catch (error) {
+      console.error("Error fetching supplier statement:", error);
+      res.status(500).json({ message: "Error fetching supplier statement" });
+    }
+  });
+
+  app.get("/api/accounting/movement-report", isAuthenticated, async (req, res) => {
+    try {
+      const filters = {
+        dateFrom: req.query.dateFrom as string | undefined,
+        dateTo: req.query.dateTo as string | undefined,
+        shipmentId: req.query.shipmentId ? parseInt(req.query.shipmentId as string) : undefined,
+        supplierId: req.query.supplierId ? parseInt(req.query.supplierId as string) : undefined,
+        movementType: req.query.movementType as string | undefined,
+        costComponent: req.query.costComponent as string | undefined,
+        paymentMethod: req.query.paymentMethod as string | undefined,
+        includeArchived: req.query.includeArchived === "true",
+      };
+      const report = await storage.getMovementReport(filters);
+      res.json(report);
+    } catch (error) {
+      console.error("Error fetching movement report:", error);
+      res.status(500).json({ message: "Error fetching movement report" });
+    }
+  });
+
+  app.get("/api/accounting/payment-methods-report", isAuthenticated, async (req, res) => {
+    try {
+      const filters = {
+        dateFrom: req.query.dateFrom as string | undefined,
+        dateTo: req.query.dateTo as string | undefined,
+      };
+      const report = await storage.getPaymentMethodsReport(filters);
+      res.json(report);
+    } catch (error) {
+      console.error("Error fetching payment methods report:", error);
+      res.status(500).json({ message: "Error fetching payment methods report" });
+    }
+  });
+
   // Change own password
   app.post("/api/auth/change-password", isAuthenticated, async (req, res) => {
     try {

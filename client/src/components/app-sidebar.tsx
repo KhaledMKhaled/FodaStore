@@ -7,6 +7,9 @@ import {
   CreditCard,
   Shield,
   LayoutDashboard,
+  Calculator,
+  FileSpreadsheet,
+  Banknote,
 } from "lucide-react";
 import {
   Sidebar,
@@ -71,6 +74,33 @@ const menuItems = [
   },
 ];
 
+const accountingItems = [
+  {
+    title: "المحاسبة",
+    url: "/accounting",
+    icon: Calculator,
+    tooltip: "ملخص التكاليف والمدفوعات والأرصدة",
+  },
+  {
+    title: "كشف حساب الموردين",
+    url: "/supplier-balances",
+    icon: Users,
+    tooltip: "الفلوس اللي عليك وليك لكل مورد",
+  },
+  {
+    title: "كشف حركة الحساب",
+    url: "/movement-report",
+    icon: FileSpreadsheet,
+    tooltip: "تقرير شامل لجميع التكاليف والمدفوعات",
+  },
+  {
+    title: "وسائل الدفع",
+    url: "/payment-methods-report",
+    icon: Banknote,
+    tooltip: "تحليل المدفوعات حسب وسيلة الدفع",
+  },
+];
+
 const adminItems = [
   {
     title: "المستخدمون والصلاحيات",
@@ -113,6 +143,35 @@ export function AppSidebar() {
                         asChild
                         isActive={location === item.url}
                         data-testid={`nav-${item.url.replace("/", "") || "dashboard"}`}
+                      >
+                        <Link href={item.url}>
+                          <item.icon className="w-5 h-5" />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" className="max-w-xs">
+                      {item.tooltip}
+                    </TooltipContent>
+                  </Tooltip>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>المحاسبة والتقارير</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {accountingItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={location === item.url}
+                        data-testid={`nav-${item.url.replace("/", "")}`}
                       >
                         <Link href={item.url}>
                           <item.icon className="w-5 h-5" />

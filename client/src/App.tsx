@@ -17,6 +17,10 @@ import ExchangeRates from "@/pages/exchange-rates";
 import Payments from "@/pages/payments";
 import Inventory from "@/pages/inventory";
 import UsersPage from "@/pages/users";
+import AccountingPage from "@/pages/accounting";
+import SupplierBalancesPage from "@/pages/supplier-balances";
+import MovementReportPage from "@/pages/movement-report";
+import PaymentMethodsReportPage from "@/pages/payment-methods-report";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function AuthenticatedRouter() {
@@ -32,6 +36,10 @@ function AuthenticatedRouter() {
       <Route path="/payments" component={Payments} />
       <Route path="/inventory" component={Inventory} />
       <Route path="/users" component={UsersPage} />
+      <Route path="/accounting" component={AccountingPage} />
+      <Route path="/supplier-balances" component={SupplierBalancesPage} />
+      <Route path="/movement-report" component={MovementReportPage} />
+      <Route path="/payment-methods-report" component={PaymentMethodsReportPage} />
       <Route component={NotFound} />
     </Switch>
   );
