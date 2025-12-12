@@ -12,6 +12,11 @@ import {
   type ShipmentItem,
 } from "@shared/schema";
 import { db } from "./db";
+import {
+  convertRmbToEgp,
+  convertUsdToRmb,
+  roundAmount,
+} from "./services/currency";
 
 type CreateShipmentPayload = {
   items?: unknown[];
@@ -96,13 +101,15 @@ export async function createShipmentWithItems(
         .orderBy(desc(exchangeRates.rateDate))
         .limit(1);
 
-      const purchaseRate = purchaseRateFromPayload
-        ? purchaseRateFromPayload
-        : latestRmbRate
+    const purchaseRate = purchaseRateFromPayload
+      ? purchaseRateFromPayload
+      : latestRmbRate
         ? parseFloat(latestRmbRate.rateValue)
         : 7.15;
-      const purchaseCostEgp = totals.purchaseCostRmb * purchaseRate;
-      const finalTotalCostEgp = purchaseCostEgp + totals.customsCostEgp + totals.takhreegCostEgp;
+    const purchaseCostEgp = convertRmbToEgp(totals.purchaseCostRmb, purchaseRate);
+    const finalTotalCostEgp = roundAmount(
+      purchaseCostEgp + totals.customsCostEgp + totals.takhreegCostEgp,
+    );
 
       const [updatedShipment] = await tx
         .update(shipments)
@@ -193,7 +200,7 @@ export async function updateShipmentWithItems(
           .update(shipments)
           .set({
             purchaseCostRmb: totals.purchaseCostRmb.toFixed(2),
-            purchaseCostEgp: (totals.purchaseCostRmb * purchaseRate).toFixed(2),
+            purchaseCostEgp: convertRmbToEgp(totals.purchaseCostRmb, purchaseRate).toFixed(2),
             purchaseRmbToEgpRate: purchaseRate.toFixed(4),
             customsCostEgp: totals.customsCostEgp.toFixed(2),
             takhreegCostEgp: totals.takhreegCostEgp.toFixed(2),
@@ -208,7 +215,7 @@ export async function updateShipmentWithItems(
           currentShipment = {
             ...currentShipment,
             purchaseCostRmb: totals.purchaseCostRmb.toFixed(2),
-            purchaseCostEgp: (totals.purchaseCostRmb * purchaseRate).toFixed(2),
+            purchaseCostEgp: convertRmbToEgp(totals.purchaseCostRmb, purchaseRate).toFixed(2),
             purchaseRmbToEgpRate: purchaseRate.toFixed(4),
             customsCostEgp: totals.customsCostEgp.toFixed(2),
             takhreegCostEgp: totals.takhreegCostEgp.toFixed(2),
@@ -217,20 +224,25 @@ export async function updateShipmentWithItems(
       }
 
       if (shippingData) {
-        const rmbToEgp = parseFloat(shippingData.rmbToEgpRate || "1");
-        const usdToRmb = parseFloat(shippingData.usdToRmbRate || "1");
+        const rmbToEgpRaw =
+          parseFloat(shippingData.rmbToEgpRate || "0") ||
+          parseFloat(currentShipment.purchaseRmbToEgpRate || "0") ||
+          1;
+        const usdToRmbRaw = parseFloat(shippingData.usdToRmbRate || "0") || 1;
+        const rmbToEgp = rmbToEgpRaw > 0 ? rmbToEgpRaw : 1;
+        const usdToRmb = usdToRmbRaw > 0 ? usdToRmbRaw : 1;
 
         const totalPurchaseCostRmb = parseFloat(currentShipment.purchaseCostRmb || "0");
         const commissionRmb =
           (totalPurchaseCostRmb * parseFloat(shippingData.commissionRatePercent || "0")) /
           100;
-        const commissionEgp = commissionRmb * rmbToEgp;
+        const commissionEgp = convertRmbToEgp(commissionRmb, rmbToEgp);
 
         const shippingCostUsd =
           parseFloat(shippingData.shippingAreaSqm || "0") *
           parseFloat(shippingData.shippingCostPerSqmUsdOriginal || "0");
-        const shippingCostRmb = shippingCostUsd * usdToRmb;
-        const shippingCostEgp = shippingCostRmb * rmbToEgp;
+        const shippingCostRmb = convertUsdToRmb(shippingCostUsd, usdToRmb);
+        const shippingCostEgp = convertRmbToEgp(shippingCostRmb, rmbToEgp);
 
         await tx
           .insert(shipmentShippingDetails)
@@ -276,7 +288,7 @@ export async function updateShipmentWithItems(
         const [updatedAfterShipping] = await tx
           .update(shipments)
           .set({
-            purchaseCostEgp: (totalPurchaseCostRmb * purchaseRate).toFixed(2),
+            purchaseCostEgp: convertRmbToEgp(totalPurchaseCostRmb, purchaseRate).toFixed(2),
             commissionCostRmb: commissionRmb.toFixed(2),
             commissionCostEgp: commissionEgp.toFixed(2),
             shippingCostRmb: shippingCostRmb.toFixed(2),
@@ -304,11 +316,12 @@ export async function updateShipmentWithItems(
       const customsCostEgp = parseFloat(shipmentForTotals.customsCostEgp || "0");
       const takhreegCostEgp = parseFloat(shipmentForTotals.takhreegCostEgp || "0");
 
-      const finalTotalCostEgp =
-        purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp;
+      const finalTotalCostEgp = roundAmount(
+        purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp,
+      );
 
       const totalPaidEgp = parseFloat(shipmentForTotals.totalPaidEgp || "0");
-      const balanceEgp = Math.max(0, finalTotalCostEgp - totalPaidEgp);
+      const balanceEgp = roundAmount(Math.max(0, finalTotalCostEgp - totalPaidEgp));
 
       let newStatus = shipmentForTotals.status;
       if (step === 1) {
@@ -323,9 +336,9 @@ export async function updateShipmentWithItems(
 
       const [finalShipment] = await tx
         .update(shipments)
-        .set({
-          finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
-          balanceEgp: balanceEgp.toFixed(2),
+          .set({
+            finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
+            balanceEgp: balanceEgp.toFixed(2),
           status: newStatus,
           updatedAt: new Date(),
         })
