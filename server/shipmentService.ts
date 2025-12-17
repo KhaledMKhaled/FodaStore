@@ -37,12 +37,14 @@ function calculateItemTotals(items: ShipmentItem[]) {
     0
   );
 
+  // Customs is calculated per piece
   const customsCostEgp = items.reduce((sum, item) => {
-    const ctn = item.cartonsCtn || 0;
-    const customsPerCarton = parseFloat(item.customsCostPerCartonEgp || "0");
-    return sum + ctn * customsPerCarton;
+    const pieces = item.totalPiecesCou || 0;
+    const customsPerPiece = parseFloat(item.customsCostPerCartonEgp || "0");
+    return sum + pieces * customsPerPiece;
   }, 0);
 
+  // Takhreeg is calculated per carton
   const takhreegCostEgp = items.reduce((sum, item) => {
     const ctn = item.cartonsCtn || 0;
     const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp || "0");
@@ -85,10 +87,12 @@ export async function createShipmentWithItems(
       const insertedItems: ShipmentItem[] = [];
       for (const item of parsedItems) {
         // Calculate total customs and takhreeg costs for this item
+        // Customs is calculated per piece, Takhreeg is calculated per carton
+        const pieces = item.totalPiecesCou || 0;
         const cartons = item.cartonsCtn || 0;
-        const customsPerCarton = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
+        const customsPerPiece = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
         const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp?.toString() || "0");
-        const totalCustomsCostEgp = (cartons * customsPerCarton).toFixed(2);
+        const totalCustomsCostEgp = (pieces * customsPerPiece).toFixed(2);
         const totalTakhreegCostEgp = (cartons * takhreegPerCarton).toFixed(2);
 
         const [insertedItem] = await tx
@@ -201,10 +205,12 @@ export async function updateShipmentWithItems(
         const insertedItems: ShipmentItem[] = [];
         for (const item of parsedItems as InsertShipmentItem[]) {
           // Calculate total customs and takhreeg costs for this item
+          // Customs is calculated per piece, Takhreeg is calculated per carton
+          const pieces = item.totalPiecesCou || 0;
           const cartons = item.cartonsCtn || 0;
-          const customsPerCarton = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
+          const customsPerPiece = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
           const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp?.toString() || "0");
-          const totalCustomsCostEgp = (cartons * customsPerCarton).toFixed(2);
+          const totalCustomsCostEgp = (pieces * customsPerPiece).toFixed(2);
           const totalTakhreegCostEgp = (cartons * takhreegPerCarton).toFixed(2);
 
           const [insertedItem] = await tx
