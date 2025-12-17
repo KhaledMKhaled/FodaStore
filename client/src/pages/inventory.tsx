@@ -7,8 +7,13 @@ import {
   DollarSign,
   TrendingUp,
   Filter,
+  Download,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useState } from "react";
+
+const ITEMS_PER_PAGE = 25;
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -37,6 +42,7 @@ export default function Inventory() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [shipmentCodeFilter, setShipmentCodeFilter] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
 
   const { data: stats, isLoading: loadingStats } = useQuery<InventoryStats>({
     queryKey: ["/api/inventory/stats"],
@@ -91,6 +97,57 @@ export default function Inventory() {
     return matchesSearch && matchesShipmentCode && matchesDateRange;
   });
 
+  // Pagination
+  const totalPages = Math.ceil((filteredMovements?.length || 0) / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedMovements = filteredMovements?.slice(startIndex, endIndex);
+
+  // Reset to page 1 when filters change
+  const handleFilterChange = () => {
+    setCurrentPage(1);
+  };
+
+  // CSV Export function
+  const exportToCSV = () => {
+    if (!filteredMovements || filteredMovements.length === 0) return;
+
+    const headers = [
+      "التاريخ",
+      "رقم الشحنة",
+      "المنتج",
+      "عدد القطع",
+      "تكلفة الوحدة (RMB)",
+      "تكلفة الوحدة (ج.م)",
+      "إجمالي التكلفة (ج.م)",
+    ];
+
+    const csvContent = [
+      headers.join(","),
+      ...filteredMovements.map((m) =>
+        [
+          m.movementDate ? new Date(m.movementDate).toLocaleDateString("ar-EG") : "-",
+          m.shipment?.shipmentCode || "-",
+          m.shipmentItem?.productName || "-",
+          m.totalPiecesIn || 0,
+          m.unitCostRmb || "-",
+          m.unitCostEgp || 0,
+          m.totalCostEgp || 0,
+        ].join(",")
+      ),
+    ].join("\n");
+
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `inventory_${new Date().toISOString().split("T")[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -142,7 +199,10 @@ export default function Inventory() {
               <Input
                 placeholder="بحث بالمنتج..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setCurrentPage(1);
+                }}
                 className="pr-10"
                 data-testid="input-search-inventory"
               />
@@ -152,7 +212,10 @@ export default function Inventory() {
               <Input
                 placeholder="رقم الشحنة..."
                 value={shipmentCodeFilter}
-                onChange={(e) => setShipmentCodeFilter(e.target.value)}
+                onChange={(e) => {
+                  setShipmentCodeFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
                 className="w-[150px]"
                 data-testid="input-shipment-code-filter"
               />
@@ -164,7 +227,10 @@ export default function Inventory() {
                 <Input
                   type="date"
                   value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="w-[140px]"
                   data-testid="input-date-from"
                 />
@@ -174,7 +240,10 @@ export default function Inventory() {
                 <Input
                   type="date"
                   value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="w-[140px]"
                   data-testid="input-date-to"
                 />
@@ -187,6 +256,7 @@ export default function Inventory() {
                     setDateFrom("");
                     setDateTo("");
                     setShipmentCodeFilter("");
+                    setCurrentPage(1);
                   }}
                 >
                   مسح الفلاتر
@@ -199,7 +269,7 @@ export default function Inventory() {
 
       {/* Inventory Table */}
       <Card>
-        <CardHeader className="pb-4">
+        <CardHeader className="pb-4 flex flex-row items-center justify-between gap-4">
           <CardTitle className="text-lg flex items-center gap-2">
             <Package className="w-5 h-5" />
             حركات المخزون
@@ -209,64 +279,130 @@ export default function Inventory() {
               </Badge>
             )}
           </CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportToCSV}
+            disabled={!filteredMovements || filteredMovements.length === 0}
+            data-testid="button-export-csv"
+          >
+            <Download className="w-4 h-4 ml-2" />
+            تصدير CSV
+          </Button>
         </CardHeader>
         <CardContent>
           {loadingMovements ? (
             <TableSkeleton />
           ) : filteredMovements && filteredMovements.length > 0 ? (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-right">التاريخ</TableHead>
-                    <TableHead className="text-right">الشحنة</TableHead>
-                    <TableHead className="text-right">المنتج</TableHead>
-                    <TableHead className="text-right">عدد القطع</TableHead>
-                    <TableHead className="text-right">تكلفة الوحدة (RMB)</TableHead>
-                    <TableHead className="text-right">تكلفة الوحدة (ج.م)</TableHead>
-                    <TableHead className="text-right">إجمالي التكلفة (ج.م)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredMovements.map((movement) => (
-                    <TableRow
-                      key={movement.id}
-                      data-testid={`row-inventory-${movement.id}`}
-                    >
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-muted-foreground" />
-                          {formatDate(movement.movementDate)}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {movement.shipment?.shipmentCode || "-"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {movement.shipmentItem?.productName || "-"}
-                      </TableCell>
-                      <TableCell>
-                        {new Intl.NumberFormat("ar-EG").format(
-                          movement.totalPiecesIn || 0
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {movement.unitCostRmb
-                          ? `¥ ${formatCurrency(movement.unitCostRmb)}`
-                          : "-"}
-                      </TableCell>
-                      <TableCell>
-                        {formatCurrency(movement.unitCostEgp)} ج.م
-                      </TableCell>
-                      <TableCell className="font-bold">
-                        {formatCurrency(movement.totalCostEgp)} ج.م
-                      </TableCell>
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-right">التاريخ</TableHead>
+                      <TableHead className="text-right">الشحنة</TableHead>
+                      <TableHead className="text-right">المنتج</TableHead>
+                      <TableHead className="text-right">عدد القطع</TableHead>
+                      <TableHead className="text-right">تكلفة الوحدة (RMB)</TableHead>
+                      <TableHead className="text-right">تكلفة الوحدة (ج.م)</TableHead>
+                      <TableHead className="text-right">إجمالي التكلفة (ج.م)</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedMovements?.map((movement) => (
+                      <TableRow
+                        key={movement.id}
+                        data-testid={`row-inventory-${movement.id}`}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-muted-foreground" />
+                            {formatDate(movement.movementDate)}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {movement.shipment?.shipmentCode || "-"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {movement.shipmentItem?.productName || "-"}
+                        </TableCell>
+                        <TableCell>
+                          {new Intl.NumberFormat("ar-EG").format(
+                            movement.totalPiecesIn || 0
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {movement.unitCostRmb
+                            ? `¥ ${formatCurrency(movement.unitCostRmb)}`
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          {formatCurrency(movement.unitCostEgp)} ج.م
+                        </TableCell>
+                        <TableCell className="font-bold">
+                          {formatCurrency(movement.totalCostEgp)} ج.م
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 pt-4 border-t">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    data-testid="button-prev-page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                    السابق
+                  </Button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                      let pageNum: number;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
+                      return (
+                        <Button
+                          key={pageNum}
+                          variant={currentPage === pageNum ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setCurrentPage(pageNum)}
+                          data-testid={`button-page-${pageNum}`}
+                        >
+                          {pageNum}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    data-testid="button-next-page"
+                  >
+                    التالي
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <span className="text-sm text-muted-foreground mr-4">
+                    صفحة {currentPage} من {totalPages}
+                  </span>
+                </div>
+              )}
             </div>
           ) : (
             <EmptyState />

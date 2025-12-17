@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import {
@@ -15,12 +15,15 @@ import {
   Upload,
   Image as ImageIcon,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
@@ -45,6 +48,8 @@ const STEPS = [
   { id: 4, title: "ملخص الشحنة", icon: ClipboardCheck, description: "مراجعة نهائية" },
 ];
 
+const ITEMS_PER_PAGE = 10;
+
 export default function ShipmentWizard() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
@@ -59,6 +64,7 @@ export default function ShipmentWizard() {
     purchaseDate: new Date().toISOString().split("T")[0],
     status: "جديدة",
     purchaseRmbToEgpRate: "",
+    purchaseDiscount: "0",
   });
 
   const [items, setItems] = useState<Partial<ShipmentItem>[]>([
@@ -76,6 +82,8 @@ export default function ShipmentWizard() {
   });
 
   const [purchaseRateInitialized, setPurchaseRateInitialized] = useState(false);
+  const [currentItemsPage, setCurrentItemsPage] = useState(1);
+  const newItemRef = useRef<HTMLDivElement>(null);
 
   // Fetch existing shipment data
   const { data: existingShipment, isLoading: loadingShipment } = useQuery<Shipment>({
@@ -111,6 +119,7 @@ export default function ShipmentWizard() {
         status: existingShipment.status,
         purchaseRmbToEgpRate:
           existingShipment.purchaseRmbToEgpRate?.toString() || shipmentData.purchaseRmbToEgpRate,
+        purchaseDiscount: (existingShipment as any).purchaseDiscount?.toString() || "0",
       });
     }
   }, [existingShipment]);
@@ -239,12 +248,9 @@ export default function ShipmentWizard() {
     },
     onSuccess: (result, variables) => {
       toast({ title: "تم الحفظ بنجاح" });
-      // Invalidate all related queries to ensure UI is updated
-      // Note: id from useParams is a string, use it consistently
       queryClient.invalidateQueries({ queryKey: ["/api/shipments"] });
       const shipmentIdStr = isNew ? result?.id?.toString() : id;
       if (shipmentIdStr) {
-        // Invalidate with string key (matching how useQuery uses id from useParams)
         queryClient.invalidateQueries({ queryKey: ["/api/shipments", shipmentIdStr] });
         queryClient.invalidateQueries({ queryKey: ["/api/shipments", shipmentIdStr, "items"] });
         queryClient.invalidateQueries({ queryKey: ["/api/shipments", shipmentIdStr, "shipping"] });
@@ -313,12 +319,22 @@ export default function ShipmentWizard() {
   };
 
   const addItem = () => {
-    setItems([...items, createEmptyItem()]);
+    const newItems = [...items, createEmptyItem()];
+    setItems(newItems);
+    const newTotalPages = Math.ceil(newItems.length / ITEMS_PER_PAGE);
+    setCurrentItemsPage(newTotalPages);
+    setTimeout(() => {
+      newItemRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
   };
 
   const removeItem = (index: number) => {
     if (items.length > 1) {
       setItems(items.filter((_, i) => i !== index));
+      const newTotalPages = Math.ceil((items.length - 1) / ITEMS_PER_PAGE);
+      if (currentItemsPage > newTotalPages) {
+        setCurrentItemsPage(Math.max(1, newTotalPages));
+      }
     }
   };
 
@@ -326,7 +342,6 @@ export default function ShipmentWizard() {
     const newItems = [...items];
     (newItems[index] as Record<string, unknown>)[field] = value;
 
-    // Auto-calculate COU and total
     const item = newItems[index];
     const ctn = item.cartonsCtn || 0;
     const pcs = item.piecesPerCartonPcs || 0;
@@ -339,6 +354,9 @@ export default function ShipmentWizard() {
   };
 
   // Calculate totals
+  const totalCartons = items.reduce((sum, item) => sum + (item.cartonsCtn || 0), 0);
+  const totalPieces = items.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
+  
   const totalPurchaseCostRmb = items.reduce(
     (sum, item) => sum + parseFloat(item.totalPurchaseCostRmb?.toString() || "0"),
     0
@@ -355,14 +373,16 @@ export default function ShipmentWizard() {
   const purchaseRate = parseFloat(shipmentData.purchaseRmbToEgpRate || "0");
   const shippingRmbToEgp = parseFloat(shippingData.rmbToEgpRate);
   const purchaseCostEgp = totalPurchaseCostRmb * purchaseRate;
+  const purchaseDiscount = parseFloat(shipmentData.purchaseDiscount || "0");
+  const discountedPurchaseCostEgp = purchaseCostEgp - purchaseDiscount;
   const commissionEgp = commissionRmb * shippingRmbToEgp;
   const shippingCostEgp = shippingCostRmb * shippingRmbToEgp;
 
-  // Calculate customs totals
+  // Calculate customs totals - now per piece instead of per carton
   const totalCustomsCostEgp = items.reduce((sum, item) => {
-    const ctn = item.cartonsCtn || 0;
-    const customsPerCarton = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
-    return sum + ctn * customsPerCarton;
+    const cou = item.totalPiecesCou || 0;
+    const customsPerPiece = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
+    return sum + cou * customsPerPiece;
   }, 0);
 
   const totalTakhreegCostEgp = items.reduce((sum, item) => {
@@ -372,7 +392,7 @@ export default function ShipmentWizard() {
   }, 0);
 
   const finalTotalCostEgp =
-    purchaseCostEgp + commissionEgp + shippingCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
+    discountedPurchaseCostEgp + commissionEgp + shippingCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("ar-EG", {
@@ -445,6 +465,10 @@ export default function ShipmentWizard() {
               handleImageUpload={handleImageUpload}
               removeItemImage={removeItemImage}
               uploadingImage={uploadingImage}
+              currentItemsPage={currentItemsPage}
+              setCurrentItemsPage={setCurrentItemsPage}
+              totalCartons={totalCartons}
+              newItemRef={newItemRef}
             />
           )}
 
@@ -477,6 +501,8 @@ export default function ShipmentWizard() {
               items={items}
               totalPurchaseCostRmb={totalPurchaseCostRmb}
               purchaseCostEgp={purchaseCostEgp}
+              discountedPurchaseCostEgp={discountedPurchaseCostEgp}
+              purchaseDiscount={purchaseDiscount}
               commissionRmb={commissionRmb}
               commissionEgp={commissionEgp}
               shippingCostRmb={shippingCostRmb}
@@ -489,7 +515,7 @@ export default function ShipmentWizard() {
         </div>
 
         {/* Cost Summary Sidebar */}
-        <Card className="h-fit lg:sticky lg:top-6">
+        <Card className="h-fit lg:sticky lg:top-6 z-40">
           <CardHeader className="pb-4">
             <CardTitle className="text-lg">ملخص التكاليف</CardTitle>
           </CardHeader>
@@ -502,6 +528,18 @@ export default function ShipmentWizard() {
               label="تكلفة الشراء (ج.م)"
               value={`${formatCurrency(purchaseCostEgp)} ج.م`}
             />
+            {purchaseDiscount > 0 && (
+              <>
+                <SummaryRow
+                  label="الخصم (ج.م)"
+                  value={`- ${formatCurrency(purchaseDiscount)} ج.م`}
+                />
+                <SummaryRow
+                  label="بعد الخصم (ج.م)"
+                  value={`${formatCurrency(discountedPurchaseCostEgp)} ج.م`}
+                />
+              </>
+            )}
             <hr className="border-border" />
             <SummaryRow
               label="العمولة (RMB)"
@@ -596,15 +634,27 @@ function Step1Import({
   handleImageUpload,
   removeItemImage,
   uploadingImage,
+  currentItemsPage,
+  setCurrentItemsPage,
+  totalCartons,
+  newItemRef,
 }: {
   shipmentData: {
     shipmentCode: string;
     shipmentName: string;
     purchaseDate: string;
     status: string;
-    purchaseRmbToEgpRate?: string;
+    purchaseRmbToEgpRate: string;
+    purchaseDiscount: string;
   };
-  setShipmentData: (data: typeof shipmentData) => void;
+  setShipmentData: (data: {
+    shipmentCode: string;
+    shipmentName: string;
+    purchaseDate: string;
+    status: string;
+    purchaseRmbToEgpRate: string;
+    purchaseDiscount: string;
+  }) => void;
   items: Partial<ShipmentItem>[];
   updateItem: (index: number, field: string, value: string | number) => void;
   addItem: () => void;
@@ -614,19 +664,42 @@ function Step1Import({
   handleImageUpload: (index: number, file: File) => Promise<void>;
   removeItemImage: (index: number) => void;
   uploadingImage: number | null;
+  currentItemsPage: number;
+  setCurrentItemsPage: (page: number) => void;
+  totalCartons: number;
+  newItemRef: React.RefObject<HTMLDivElement>;
 }) {
+  const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
+  const startIndex = (currentItemsPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedItems = items.slice(startIndex, endIndex);
+
   return (
     <div className="space-y-6">
-      {/* Shipment Info */}
-      <Card>
+      {/* Sticky Shipment Info */}
+      <Card className="sticky top-0 z-50 shadow-md">
         <CardHeader className="pb-4">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Ship className="w-5 h-5" />
-            بيانات الشحنة
-          </CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Ship className="w-5 h-5" />
+              بيانات الشحنة
+            </CardTitle>
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary" className="text-sm">
+                عدد الموديلات: {items.length}
+              </Badge>
+              <Badge variant="secondary" className="text-sm">
+                إجمالي الكراتين: {totalCartons}
+              </Badge>
+              <Button size="sm" onClick={addItem} data-testid="button-add-item">
+                <Plus className="w-4 h-4 ml-2" />
+                إضافة بند
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div className="space-y-2">
               <Label htmlFor="shipmentCode">رقم الشحنة *</Label>
               <Input
@@ -664,7 +737,7 @@ function Step1Import({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="purchaseRate">سعر صرف الرممبي مقابل الجنيه</Label>
+              <Label htmlFor="purchaseRate">سعر صرف الرممبي</Label>
               <Input
                 id="purchaseRate"
                 type="number"
@@ -679,6 +752,23 @@ function Step1Import({
                 placeholder="7.0000"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="purchaseDiscount">خصم جزئي (ج.م)</Label>
+              <Input
+                id="purchaseDiscount"
+                type="number"
+                step="0.01"
+                value={shipmentData.purchaseDiscount || "0"}
+                onChange={(e) =>
+                  setShipmentData({
+                    ...shipmentData,
+                    purchaseDiscount: e.target.value,
+                  })
+                }
+                placeholder="0.00"
+                data-testid="input-purchase-discount"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -690,179 +780,227 @@ function Step1Import({
             <Package className="w-5 h-5" />
             بنود الشحنة ({items.length})
           </CardTitle>
-          <Button size="sm" onClick={addItem} data-testid="button-add-item">
-            <Plus className="w-4 h-4 ml-2" />
-            إضافة بند
-          </Button>
+          {totalPages > 1 && (
+            <div className="text-sm text-muted-foreground">
+              صفحة {currentItemsPage} من {totalPages}
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
-          {items.map((item, index) => (
-            <div
-              key={index}
-              className="p-4 border rounded-md space-y-4 bg-card"
-              data-testid={`item-row-${index}`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium">البند {index + 1}</span>
-                {items.length > 1 && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeItem(index)}
-                    className="text-destructive"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="space-y-2">
-                  <Label>المورد</Label>
-                  <Select
-                    value={item.supplierId?.toString() || ""}
-                    onValueChange={(value) =>
-                      updateItem(index, "supplierId", parseInt(value))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="اختر المورد" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {suppliers.map((supplier) => (
-                        <SelectItem key={supplier.id} value={supplier.id.toString()}>
-                          {supplier.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>نوع الصنف (TYP)</Label>
-                  <Input
-                    value={item.productType || ""}
-                    onChange={(e) => updateItem(index, "productType", e.target.value)}
-                    placeholder="ملابس"
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label>اسم المنتج *</Label>
-                  <Input
-                    value={item.productName || ""}
-                    onChange={(e) => updateItem(index, "productName", e.target.value)}
-                    placeholder="قميص رجالي قطن"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <div className="space-y-2">
-                  <Label>بلد المنشأ</Label>
-                  <Input
-                    value={item.countryOfOrigin || "الصين"}
-                    onChange={(e) => updateItem(index, "countryOfOrigin", e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>عدد الكراتين (CTN)</Label>
-                  <Input
-                    type="number"
-                    value={item.cartonsCtn || 0}
-                    onChange={(e) =>
-                      updateItem(index, "cartonsCtn", parseInt(e.target.value) || 0)
-                    }
-                    min="0"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>قطع/كرتونة (PCS)</Label>
-                  <Input
-                    type="number"
-                    value={item.piecesPerCartonPcs || 0}
-                    onChange={(e) =>
-                      updateItem(index, "piecesPerCartonPcs", parseInt(e.target.value) || 0)
-                    }
-                    min="0"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>إجمالي القطع (COU)</Label>
-                  <Input
-                    value={item.totalPiecesCou || 0}
-                    readOnly
-                    className="bg-muted"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>سعر القطعة (RMB)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={item.purchasePricePerPiecePriRmb || "0"}
-                    onChange={(e) =>
-                      updateItem(index, "purchasePricePerPiecePriRmb", e.target.value)
-                    }
-                    min="0"
-                  />
-                </div>
-              </div>
-              {/* Image Upload Section */}
-              <div className="flex items-center gap-4 pt-2 border-t">
-                <div className="flex items-center gap-3">
-                  <Label className="whitespace-nowrap">صورة البند:</Label>
-                  {item.imageUrl ? (
-                    <div className="relative group">
-                      <img
-                        src={item.imageUrl}
-                        alt={item.productName || "صورة البند"}
-                        className="w-16 h-16 object-cover rounded-md border"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeItemImage(index)}
-                        className="absolute -top-2 -left-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <label className="cursor-pointer">
-                      <div className="flex items-center gap-2 px-3 py-2 border border-dashed rounded-md hover:bg-muted/50 transition-colors">
-                        {uploadingImage === index ? (
-                          <span className="text-sm text-muted-foreground">جاري الرفع...</span>
-                        ) : (
-                          <>
-                            <Upload className="w-4 h-4 text-muted-foreground" />
-                            <span className="text-sm text-muted-foreground">اختر صورة</span>
-                          </>
-                        )}
-                      </div>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            handleImageUpload(index, file);
-                          }
-                          e.target.value = "";
-                        }}
-                        disabled={uploadingImage !== null}
-                      />
-                    </label>
+          {paginatedItems.map((item, pageIndex) => {
+            const actualIndex = startIndex + pageIndex;
+            const isLastItem = actualIndex === items.length - 1;
+            
+            return (
+              <div
+                key={actualIndex}
+                ref={isLastItem ? newItemRef : null}
+                className="p-4 border rounded-md space-y-4 bg-card"
+                data-testid={`item-row-${actualIndex}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">البند {actualIndex + 1}</span>
+                  {items.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeItem(actualIndex)}
+                      className="text-destructive"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   )}
                 </div>
-                <div className="flex-1" />
-                <div className="bg-primary/10 px-4 py-2 rounded-md">
-                  <span className="text-sm text-muted-foreground ml-2">
-                    إجمالي البند:
-                  </span>
-                  <span className="font-bold text-primary">
-                    ¥ {new Intl.NumberFormat("ar-EG").format(parseFloat(item.totalPurchaseCostRmb?.toString() || "0"))}
-                  </span>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="space-y-2">
+                    <Label>المورد</Label>
+                    <Select
+                      value={item.supplierId?.toString() || ""}
+                      onValueChange={(value) =>
+                        updateItem(actualIndex, "supplierId", parseInt(value))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="اختر المورد" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {suppliers.map((supplier) => (
+                          <SelectItem key={supplier.id} value={supplier.id.toString()}>
+                            {supplier.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>نوع الصنف (TYP)</Label>
+                    <Input
+                      value={item.productType || ""}
+                      onChange={(e) => updateItem(actualIndex, "productType", e.target.value)}
+                      placeholder="ملابس"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>اسم المنتج *</Label>
+                    <Input
+                      value={item.productName || ""}
+                      onChange={(e) => updateItem(actualIndex, "productName", e.target.value)}
+                      placeholder="قميص رجالي قطن"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="space-y-2">
+                    <Label>بلد المنشأ</Label>
+                    <Input
+                      value={item.countryOfOrigin || "الصين"}
+                      onChange={(e) => updateItem(actualIndex, "countryOfOrigin", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>عدد الكراتين (CTN)</Label>
+                    <Input
+                      type="number"
+                      value={item.cartonsCtn || 0}
+                      onChange={(e) =>
+                        updateItem(actualIndex, "cartonsCtn", parseInt(e.target.value) || 0)
+                      }
+                      min="0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>قطع/كرتونة (PCS)</Label>
+                    <Input
+                      type="number"
+                      value={item.piecesPerCartonPcs || 0}
+                      onChange={(e) =>
+                        updateItem(actualIndex, "piecesPerCartonPcs", parseInt(e.target.value) || 0)
+                      }
+                      min="0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>إجمالي القطع (COU)</Label>
+                    <Input
+                      value={item.totalPiecesCou || 0}
+                      readOnly
+                      className="bg-muted"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>سعر القطعة (RMB)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={item.purchasePricePerPiecePriRmb || "0"}
+                      onChange={(e) =>
+                        updateItem(actualIndex, "purchasePricePerPiecePriRmb", e.target.value)
+                      }
+                      min="0"
+                    />
+                  </div>
+                </div>
+                {/* Image Upload Section */}
+                <div className="flex items-center gap-4 pt-2 border-t">
+                  <div className="flex items-center gap-3">
+                    <Label className="whitespace-nowrap">صورة البند:</Label>
+                    {item.imageUrl ? (
+                      <div className="relative group">
+                        <img
+                          src={item.imageUrl}
+                          alt={item.productName || "صورة البند"}
+                          className="w-16 h-16 object-cover rounded-md border"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeItemImage(actualIndex)}
+                          className="absolute -top-2 -left-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="cursor-pointer">
+                        <div className="flex items-center gap-2 px-3 py-2 border border-dashed rounded-md hover:bg-muted/50 transition-colors">
+                          {uploadingImage === actualIndex ? (
+                            <span className="text-sm text-muted-foreground">جاري الرفع...</span>
+                          ) : (
+                            <>
+                              <Upload className="w-4 h-4 text-muted-foreground" />
+                              <span className="text-sm text-muted-foreground">اختر صورة</span>
+                            </>
+                          )}
+                        </div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleImageUpload(actualIndex, file);
+                            }
+                            e.target.value = "";
+                          }}
+                          disabled={uploadingImage !== null}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <div className="flex-1" />
+                  <div className="bg-primary/10 px-4 py-2 rounded-md">
+                    <span className="text-sm text-muted-foreground ml-2">
+                      إجمالي البند:
+                    </span>
+                    <span className="font-bold text-primary">
+                      ¥ {new Intl.NumberFormat("ar-EG").format(parseFloat(item.totalPurchaseCostRmb?.toString() || "0"))}
+                    </span>
+                  </div>
                 </div>
               </div>
+            );
+          })}
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentItemsPage(Math.max(1, currentItemsPage - 1))}
+                disabled={currentItemsPage === 1}
+                data-testid="button-prev-page"
+              >
+                <ChevronRight className="w-4 h-4" />
+                السابق
+              </Button>
+              
+              <div className="flex gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <Button
+                    key={page}
+                    variant={currentItemsPage === page ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCurrentItemsPage(page)}
+                    data-testid={`button-page-${page}`}
+                  >
+                    {page}
+                  </Button>
+                ))}
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentItemsPage(Math.min(totalPages, currentItemsPage + 1))}
+                disabled={currentItemsPage === totalPages}
+                data-testid="button-next-page"
+              >
+                التالي
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
             </div>
-          ))}
+          )}
         </CardContent>
       </Card>
     </div>
@@ -888,9 +1026,17 @@ function Step2Shipping({
     shippingDate: string;
     rmbToEgpRate: string;
     usdToRmbRate: string;
-    ratesUpdatedAt?: string;
+    ratesUpdatedAt: string;
   };
-  setShippingData: (data: typeof shippingData) => void;
+  setShippingData: (data: {
+    commissionRatePercent: string;
+    shippingAreaSqm: string;
+    shippingCostPerSqmUsdOriginal: string;
+    shippingDate: string;
+    rmbToEgpRate: string;
+    usdToRmbRate: string;
+    ratesUpdatedAt: string;
+  }) => void;
   totalPurchaseCostRmb: number;
   commissionRmb: number;
   commissionEgp: number;
@@ -1100,13 +1246,14 @@ function Step3Customs({
         <CardContent className="space-y-4">
           {items.map((item, index) => {
             const ctn = item.cartonsCtn || 0;
-            const customsPerCarton = parseFloat(
+            const cou = item.totalPiecesCou || 0;
+            const customsPerPiece = parseFloat(
               item.customsCostPerCartonEgp?.toString() || "0"
             );
             const takhreegPerCarton = parseFloat(
               item.takhreegCostPerCartonEgp?.toString() || "0"
             );
-            const totalCustoms = ctn * customsPerCarton;
+            const totalCustoms = cou * customsPerPiece;
             const totalTakhreeg = ctn * takhreegPerCarton;
 
             return (
@@ -1126,13 +1273,13 @@ function Step3Customs({
                   <div className="flex-1">
                     <span className="font-medium">{item.productName || `البند ${index + 1}`}</span>
                     <span className="text-sm text-muted-foreground mr-2">
-                      ({ctn} كرتونة)
+                      ({ctn} كرتونة - {cou} قطعة)
                     </span>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="space-y-2">
-                    <Label>جمرك/كرتونة (ج.م)</Label>
+                    <Label>جمرك/قطعة (ج.م)</Label>
                     <Input
                       type="number"
                       step="0.01"
@@ -1206,6 +1353,8 @@ function Step4Summary({
   items,
   totalPurchaseCostRmb,
   purchaseCostEgp,
+  discountedPurchaseCostEgp,
+  purchaseDiscount,
   commissionRmb,
   commissionEgp,
   shippingCostRmb,
@@ -1214,10 +1363,12 @@ function Step4Summary({
   totalTakhreegCostEgp,
   finalTotalCostEgp,
 }: {
-  shipmentData: { shipmentCode: string; shipmentName: string; purchaseDate: string; status: string };
+  shipmentData: { shipmentCode: string; shipmentName: string; purchaseDate: string; status: string; purchaseDiscount?: string };
   items: Partial<ShipmentItem>[];
   totalPurchaseCostRmb: number;
   purchaseCostEgp: number;
+  discountedPurchaseCostEgp: number;
+  purchaseDiscount: number;
   commissionRmb: number;
   commissionEgp: number;
   shippingCostRmb: number;
@@ -1303,6 +1454,20 @@ function Step4Summary({
             rmbValue={`¥ ${formatCurrency(totalPurchaseCostRmb)}`}
             egpValue={`${formatCurrency(purchaseCostEgp)} ج.م`}
           />
+          {purchaseDiscount > 0 && (
+            <>
+              <CostRow
+                label="الخصم"
+                rmbValue="-"
+                egpValue={`- ${formatCurrency(purchaseDiscount)} ج.م`}
+              />
+              <CostRow
+                label="بعد الخصم"
+                rmbValue="-"
+                egpValue={`${formatCurrency(discountedPurchaseCostEgp)} ج.م`}
+              />
+            </>
+          )}
           <CostRow
             label="العمولة"
             rmbValue={`¥ ${formatCurrency(commissionRmb)}`}
