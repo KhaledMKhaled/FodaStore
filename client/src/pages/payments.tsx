@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -561,9 +561,8 @@ export default function Payments() {
                           const isExpanded = expandedShipments.has(shipment.id);
                           const shipmentPayments = payments?.filter((p) => p.shipmentId === shipment.id) || [];
                           return (
-                            <>
+                            <Fragment key={shipment.id}>
                               <TableRow
-                                key={shipment.id}
                                 data-testid={`row-payment-${shipment.id}`}
                                 className="cursor-pointer"
                                 onClick={() => toggleShipmentExpand(shipment.id)}
@@ -659,7 +658,7 @@ export default function Payments() {
                                   </TableCell>
                                 </TableRow>
                               )}
-                            </>
+                            </Fragment>
                           );
                         })}
                       </TableBody>
