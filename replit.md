@@ -1,7 +1,9 @@
-# Repit.AI - نظام إدارة الشحنات والتكاليف والمدفوعات
+# Tracker - نظام إدارة الشحنات والتكاليف والمدفوعات
 
 ## Overview
 A comprehensive multi-user Arabic RTL web application for shipment costing, inventory, and payments settlement. The system manages shipments through a 4-step workflow (Import → Shipping → Customs & Takhreej → Summary) with dual-currency support (RMB/EGP), multiple payment methods including overpayment tracking, supplier management, exchange rate management, and role-based access control.
+
+**Platform Name**: Tracker (formerly Replit.AI)
 
 ## Architecture
 
@@ -99,6 +101,11 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **December 17, 2025**: Branding and Landing Page Update
+  - Renamed platform from "Replit.AI" to "Tracker" across all pages
+  - Redesigned landing page with modern split-screen layout, gradient backgrounds, and backdrop blur
+  - Fixed React key prop warnings in payments page
+  - Added comprehensive test data for system validation
 - **December 2025**: Inventory Cost Calculation Enhancement
   - Added per-piece cost breakdown in inventory: purchase price (RMB), shipping share (RMB), customs (EGP), clearance (EGP)
   - Shipping share formula: Total shipping cost RMB ÷ Total pieces in shipment
@@ -134,13 +141,15 @@ npm run db:push    # Push database schema changes
 
 ## Test Data
 Demo data has been created in the database:
-- **Suppliers**: 3 test suppliers (suppliers with IDs 1-3)
-- **Exchange Rates**: 6 rates (RMB→EGP and USD→RMB for Dec 8-10, 2025)
-- **Shipments**: 3 test shipments with different payment scenarios:
-  - SHP-001: Partially paid (21,762.50 EGP balance)
-  - SHP-002: Fully paid (0.00 EGP balance)
-  - SHP-003: Overpaid (-3,942.50 EGP balance)
-- **Payments**: 5 test payments across the shipments
+- **Exchange Rates**: 3 rates (RMB→EGP: 7.15, USD→RMB: 7.10, USD→EGP: 50.75)
+- **Suppliers**: 3 Chinese suppliers (شركة الصين للتجارة, مصنع قوانجو, شركة شنزن للتقنية)
+- **Shipments**: 1 test shipment (SH-2024-001 - شحنة إلكترونيات ديسمبر)
+  - 3 items: سماعات بلوتوث, كابلات شحن, باور بانك
+  - Total cost: 36,550 EGP
+  - Paid: 10,000 EGP
+  - Balance: 26,550 EGP
+- **Payments**: 1 bank transfer payment (10,000 EGP)
+- **Inventory Movements**: 3 movements for all items in the shipment
 
 ## Root User Access
 - Username: `root`
