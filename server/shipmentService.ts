@@ -84,9 +84,21 @@ export async function createShipmentWithItems(
 
       const insertedItems: ShipmentItem[] = [];
       for (const item of parsedItems) {
+        // Calculate total customs and takhreeg costs for this item
+        const cartons = item.cartonsCtn || 0;
+        const customsPerCarton = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
+        const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp?.toString() || "0");
+        const totalCustomsCostEgp = (cartons * customsPerCarton).toFixed(2);
+        const totalTakhreegCostEgp = (cartons * takhreegPerCarton).toFixed(2);
+
         const [insertedItem] = await tx
           .insert(shipmentItems)
-          .values({ ...item, shipmentId: createdShipment.id })
+          .values({ 
+            ...item, 
+            shipmentId: createdShipment.id,
+            totalCustomsCostEgp,
+            totalTakhreegCostEgp,
+          })
           .returning();
         insertedItems.push(insertedItem);
       }
@@ -188,9 +200,21 @@ export async function updateShipmentWithItems(
 
         const insertedItems: ShipmentItem[] = [];
         for (const item of parsedItems as InsertShipmentItem[]) {
+          // Calculate total customs and takhreeg costs for this item
+          const cartons = item.cartonsCtn || 0;
+          const customsPerCarton = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
+          const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp?.toString() || "0");
+          const totalCustomsCostEgp = (cartons * customsPerCarton).toFixed(2);
+          const totalTakhreegCostEgp = (cartons * takhreegPerCarton).toFixed(2);
+
           const [insertedItem] = await tx
             .insert(shipmentItems)
-            .values({ ...item, shipmentId })
+            .values({ 
+              ...item, 
+              shipmentId,
+              totalCustomsCostEgp,
+              totalTakhreegCostEgp,
+            })
             .returning();
           insertedItems.push(insertedItem);
         }
