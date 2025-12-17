@@ -735,6 +735,9 @@ export class DatabaseStorage implements IStorage {
     const totalPurchaseEgp = filteredShipments.reduce(
       (sum, s) => sum + parseFloat(s.purchaseCostEgp || "0"), 0
     );
+    const totalDiscountRmb = filteredShipments.reduce(
+      (sum, s) => sum + parseFloat((s as any).purchaseDiscount || "0"), 0
+    );
     const totalShippingRmb = filteredShipments.reduce(
       (sum, s) => sum + parseFloat(s.shippingCostRmb || "0"), 0
     );
@@ -759,11 +762,21 @@ export class DatabaseStorage implements IStorage {
     const totalPaidEgp = filteredPayments.reduce(
       (sum, p) => sum + parseFloat(p.amountEgp || "0"), 0
     );
+    const totalPaidRmb = filteredPayments.reduce(
+      (sum, p) => p.paymentCurrency === "RMB" ? sum + parseFloat(p.amountOriginal || "0") : sum, 0
+    );
     const totalBalanceEgp = filteredShipments.reduce((sum, s) => {
       const cost = parseFloat(s.finalTotalCostEgp || "0");
       const paid = parseFloat(s.totalPaidEgp || "0");
       return sum + Math.max(0, cost - paid);
     }, 0);
+
+    const filteredItems = allItems.flat().filter(item => filteredShipmentIds.has(item.shipmentId));
+    const totalCartons = filteredItems.reduce((sum, item) => sum + (item.cartonsCtn || 0), 0);
+    const totalPieces = filteredItems.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
+
+    const totalCostRmb = totalPurchaseRmb + totalShippingRmb + totalCommissionRmb - totalDiscountRmb;
+    const totalBalanceRmb = Math.max(0, totalCostRmb - totalPaidRmb);
 
     const unsettledShipmentsCount = filteredShipments.filter(s => {
       const cost = parseFloat(s.finalTotalCostEgp || "0");
@@ -774,6 +787,7 @@ export class DatabaseStorage implements IStorage {
     return {
       totalPurchaseRmb: totalPurchaseRmb.toFixed(2),
       totalPurchaseEgp: totalPurchaseEgp.toFixed(2),
+      totalDiscountRmb: totalDiscountRmb.toFixed(2),
       totalShippingRmb: totalShippingRmb.toFixed(2),
       totalShippingEgp: totalShippingEgp.toFixed(2),
       totalCommissionRmb: totalCommissionRmb.toFixed(2),
@@ -781,9 +795,15 @@ export class DatabaseStorage implements IStorage {
       totalCustomsEgp: totalCustomsEgp.toFixed(2),
       totalTakhreegEgp: totalTakhreegEgp.toFixed(2),
       totalCostEgp: totalCostEgp.toFixed(2),
+      totalCostRmb: totalCostRmb.toFixed(2),
       totalPaidEgp: totalPaidEgp.toFixed(2),
+      totalPaidRmb: totalPaidRmb.toFixed(2),
       totalBalanceEgp: totalBalanceEgp.toFixed(2),
+      totalBalanceRmb: totalBalanceRmb.toFixed(2),
+      totalCartons,
+      totalPieces,
       unsettledShipmentsCount,
+      shipmentsCount: filteredShipments.length,
     };
   }
 

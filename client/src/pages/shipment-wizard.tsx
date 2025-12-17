@@ -17,6 +17,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -178,14 +179,30 @@ export default function ShipmentWizard() {
     }
   }, [currentStep, existingShipping, latestRmbRate, latestUsdToRmbRate, shippingData.ratesUpdatedAt]);
 
+  const refreshRatesMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/exchange-rates/refresh", {});
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/exchange-rates"] });
+      const updatedRates = await fetch("/api/exchange-rates", { credentials: "include" }).then(r => r.json());
+      const rmbRate = updatedRates?.find((r: ExchangeRate) => r.fromCurrency === "RMB" && r.toCurrency === "EGP");
+      const usdRate = updatedRates?.find((r: ExchangeRate) => r.fromCurrency === "USD" && r.toCurrency === "RMB");
+      setShippingData((prev) => ({
+        ...prev,
+        rmbToEgpRate: rmbRate?.rateValue?.toString() || prev.rmbToEgpRate,
+        usdToRmbRate: usdRate?.rateValue?.toString() || prev.usdToRmbRate,
+        ratesUpdatedAt: new Date().toISOString(),
+      }));
+      toast({ title: "تم تحديث أسعار الصرف بنجاح" });
+    },
+    onError: () => {
+      toast({ title: "تعذر تحديث أسعار الصرف", variant: "destructive" });
+    },
+  });
+
   const refreshShippingRates = () => {
-    if (!latestRmbRate && !latestUsdToRmbRate) return;
-    setShippingData((prev) => ({
-      ...prev,
-      rmbToEgpRate: latestRmbRate?.rateValue?.toString() || prev.rmbToEgpRate,
-      usdToRmbRate: latestUsdToRmbRate?.rateValue?.toString() || prev.usdToRmbRate,
-      ratesUpdatedAt: new Date().toISOString(),
-    }));
+    refreshRatesMutation.mutate();
   };
 
   // Save mutation
@@ -483,6 +500,7 @@ export default function ShipmentWizard() {
               shippingCostRmb={shippingCostRmb}
               shippingCostEgp={shippingCostEgp}
               refreshRates={refreshShippingRates}
+              isRefreshing={refreshRatesMutation.isPending}
             />
           )}
 
@@ -1018,6 +1036,7 @@ function Step2Shipping({
   shippingCostRmb,
   shippingCostEgp,
   refreshRates,
+  isRefreshing,
 }: {
   shippingData: {
     commissionRatePercent: string;
@@ -1044,6 +1063,7 @@ function Step2Shipping({
   shippingCostRmb: number;
   shippingCostEgp: number;
   refreshRates: () => void;
+  isRefreshing: boolean;
 }) {
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("ar-EG", {
@@ -1060,8 +1080,9 @@ function Step2Shipping({
             ? ` ${new Date(shippingData.ratesUpdatedAt).toLocaleString("ar-EG")}`
             : " لم يتم التحديث بعد"}
         </div>
-        <Button variant="outline" size="sm" onClick={refreshRates}>
-          تحديث الأسعار
+        <Button variant="outline" size="sm" onClick={refreshRates} disabled={isRefreshing} data-testid="button-refresh-rates">
+          <RefreshCw className={`w-4 h-4 ml-2 ${isRefreshing ? "animate-spin" : ""}`} />
+          {isRefreshing ? "جاري التحديث..." : "تحديث الأسعار"}
         </Button>
       </div>
 

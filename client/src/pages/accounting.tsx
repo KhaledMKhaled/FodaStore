@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { 
   Calculator, 
   TrendingUp, 
@@ -20,12 +23,18 @@ import {
   AlertCircle,
   HelpCircle,
   Filter,
+  RefreshCw,
+  Boxes,
+  Receipt,
+  Percent,
+  StickyNote,
 } from "lucide-react";
-import type { Supplier } from "@shared/schema";
+import type { Supplier, ExchangeRate } from "@shared/schema";
 
 interface AccountingDashboard {
   totalPurchaseRmb: string;
   totalPurchaseEgp: string;
+  totalDiscountRmb: string;
   totalShippingRmb: string;
   totalShippingEgp: string;
   totalCommissionRmb: string;
@@ -33,9 +42,15 @@ interface AccountingDashboard {
   totalCustomsEgp: string;
   totalTakhreegEgp: string;
   totalCostEgp: string;
+  totalCostRmb: string;
   totalPaidEgp: string;
+  totalPaidRmb: string;
   totalBalanceEgp: string;
+  totalBalanceRmb: string;
+  totalCartons: number;
+  totalPieces: number;
   unsettledShipmentsCount: number;
+  shipmentsCount: number;
 }
 
 function formatCurrency(value: string | number, currency: string = "EGP") {
@@ -47,7 +62,12 @@ function formatCurrency(value: string | number, currency: string = "EGP") {
   return `${formatted} ${currency === "RMB" ? "رممبي" : "جنيه"}`;
 }
 
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("ar-EG").format(value || 0);
+}
+
 export default function AccountingPage() {
+  const { toast } = useToast();
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [supplierId, setSupplierId] = useState<string>("");
@@ -55,6 +75,7 @@ export default function AccountingPage() {
   const [shipmentStatus, setShipmentStatus] = useState<string>("all");
   const [paymentStatus, setPaymentStatus] = useState<string>("all");
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [discountNotes, setDiscountNotes] = useState("");
 
   const queryParams = new URLSearchParams();
   if (dateFrom) queryParams.append("dateFrom", dateFrom);
@@ -78,6 +99,27 @@ export default function AccountingPage() {
 
   const { data: suppliers } = useQuery<Supplier[]>({
     queryKey: ["/api/suppliers"],
+  });
+
+  const { data: exchangeRates } = useQuery<ExchangeRate[]>({
+    queryKey: ["/api/exchange-rates"],
+  });
+
+  const latestRmbRate = exchangeRates?.find(
+    (rate) => rate.fromCurrency === "RMB" && rate.toCurrency === "EGP",
+  );
+
+  const refreshRatesMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/exchange-rates/refresh", {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/exchange-rates"] });
+      toast({ title: "تم تحديث سعر الصرف بنجاح" });
+    },
+    onError: () => {
+      toast({ title: "تعذر تحديث سعر الصرف", variant: "destructive" });
+    },
   });
 
   const clearFilters = () => {
@@ -133,7 +175,7 @@ export default function AccountingPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2">
               <Label>رقم الشحنة</Label>
               <Input
@@ -227,181 +269,323 @@ export default function AccountingPage() {
         </CardContent>
       </Card>
 
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <TrendingUp className="w-5 h-5 text-primary" />
-          ملخص التكاليف
-        </h2>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <StatCard
-            title="إجمالي قيمة الفواتير"
-            valueRmb={stats?.totalPurchaseRmb}
-            valueEgp={stats?.totalPurchaseEgp}
-            icon={Package}
-            tooltip="إجمالي تكلفة البضاعة من جميع الشحنات"
-          />
-          <StatCard
-            title="إجمالي تكلفة الشحن"
-            valueRmb={stats?.totalShippingRmb}
-            valueEgp={stats?.totalShippingEgp}
-            icon={Truck}
-            tooltip="إجمالي تكلفة الشحن من الصين"
-          />
-          <StatCard
-            title="إجمالي قيمة العمولة"
-            valueRmb={stats?.totalCommissionRmb}
-            valueEgp={stats?.totalCommissionEgp}
-            icon={DollarSign}
-            tooltip="إجمالي العمولات المدفوعة"
-          />
-          <StatCard
-            title="إجمالي قيمة الجمرك"
-            valueEgp={stats?.totalCustomsEgp}
-            icon={FileText}
-            tooltip="إجمالي الرسوم الجمركية"
-          />
-          <StatCard
-            title="إجمالي قيمة التخريج"
-            valueEgp={stats?.totalTakhreegEgp}
-            icon={Ship}
-            tooltip="إجمالي تكلفة تخريج البضاعة من الميناء"
-          />
-          <Card className="bg-primary/5 border-primary/20">
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                إجمالي تكلفة الشحنات
-                <Tooltip>
-                  <TooltipTrigger>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    مجموع جميع التكاليف (بضاعة + شحن + عمولة + جمرك + تخريج)
-                  </TooltipContent>
-                </Tooltip>
-              </CardTitle>
-              <Calculator className="h-5 w-5 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-primary" data-testid="text-total-cost">
-                {formatCurrency(stats?.totalCostEgp || "0")}
+      <Card className="bg-muted/30">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Package className="w-5 h-5" />
+              بيانات الشحنة
+            </CardTitle>
+            <div className="flex items-center gap-4">
+              <div className="text-sm text-muted-foreground">
+                سعر الصرف الحالي: <span className="font-bold">{latestRmbRate?.rateValue || "غير متوفر"}</span>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <TrendingDown className="w-5 h-5 text-green-600" />
-          المدفوعات والأرصدة
-        </h2>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <Card className="bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900">
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                إجمالي المدفوع
-                <Tooltip>
-                  <TooltipTrigger>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    مجموع جميع الدفعات التي تم تسديدها
-                  </TooltipContent>
-                </Tooltip>
-              </CardTitle>
-              <TrendingDown className="h-5 w-5 text-green-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600" data-testid="text-total-paid">
-                {formatCurrency(stats?.totalPaidEgp || "0")}
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => refreshRatesMutation.mutate()}
+                disabled={refreshRatesMutation.isPending}
+                data-testid="button-refresh-exchange-rate"
+              >
+                <RefreshCw className={`w-4 h-4 ml-2 ${refreshRatesMutation.isPending ? "animate-spin" : ""}`} />
+                {refreshRatesMutation.isPending ? "جاري التحديث..." : "تحديث سعر الصرف"}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="bg-background p-4 rounded-md border">
+              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                <Ship className="w-4 h-4" />
+                عدد الشحنات
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900">
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                إجمالي المتبقي
-                <Tooltip>
-                  <TooltipTrigger>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    المبلغ المتبقي من الشحنات غير المسددة بالكامل
-                  </TooltipContent>
-                </Tooltip>
-              </CardTitle>
-              <AlertCircle className="h-5 w-5 text-amber-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-amber-600" data-testid="text-total-balance">
-                {formatCurrency(stats?.totalBalanceEgp || "0")}
+              <div className="text-2xl font-bold" data-testid="text-shipments-count">
+                {formatNumber(stats?.shipmentsCount || 0)}
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
+            </div>
+            <div className="bg-background p-4 rounded-md border">
+              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                <Boxes className="w-4 h-4" />
+                إجمالي الكراتين
+              </div>
+              <div className="text-2xl font-bold" data-testid="text-total-cartons">
+                {formatNumber(stats?.totalCartons || 0)}
+              </div>
+            </div>
+            <div className="bg-background p-4 rounded-md border">
+              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                <Package className="w-4 h-4" />
+                إجمالي القطع
+              </div>
+              <div className="text-2xl font-bold" data-testid="text-total-pieces">
+                {formatNumber(stats?.totalPieces || 0)}
+              </div>
+            </div>
+            <div className="bg-amber-50 dark:bg-amber-950/30 p-4 rounded-md border border-amber-200 dark:border-amber-900">
+              <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 text-sm mb-1">
+                <AlertCircle className="w-4 h-4" />
                 شحنات غير مسددة
-                <Tooltip>
-                  <TooltipTrigger>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    عدد الشحنات التي لم يتم سداد كامل تكلفتها
-                  </TooltipContent>
-                </Tooltip>
-              </CardTitle>
-              <Ship className="h-5 w-5 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold" data-testid="text-unsettled-count">
-                {stats?.unsettledShipmentsCount || 0} شحنة
               </div>
-            </CardContent>
-          </Card>
-        </div>
+              <div className="text-2xl font-bold text-amber-600" data-testid="text-unsettled-count">
+                {stats?.unsettledShipmentsCount || 0}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Receipt className="w-5 h-5 text-primary" />
+              التكاليف بالرممبي (RMB)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <CostItemCard
+              title="قيمة الفواتير"
+              icon={Package}
+              value={stats?.totalPurchaseRmb || "0"}
+              currency="RMB"
+              paid={stats?.totalPaidRmb || "0"}
+              remaining={stats?.totalBalanceRmb || "0"}
+            />
+            <CostItemCard
+              title="تكلفة الشحن"
+              icon={Truck}
+              value={stats?.totalShippingRmb || "0"}
+              currency="RMB"
+            />
+            <CostItemCard
+              title="العمولة"
+              icon={DollarSign}
+              value={stats?.totalCommissionRmb || "0"}
+              currency="RMB"
+            />
+            <div className="border-t pt-4 mt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Percent className="w-4 h-4 text-green-600" />
+                <span className="font-medium">الخصم (رممبي)</span>
+              </div>
+              <div className="flex items-start gap-4">
+                <div className="flex-1">
+                  <div className="text-lg font-bold text-green-600">
+                    - {formatCurrency(stats?.totalDiscountRmb || "0", "RMB")}
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <Label className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
+                    <StickyNote className="w-3 h-3" />
+                    ملاحظات الخصم
+                  </Label>
+                  <Textarea
+                    placeholder="أضف ملاحظة..."
+                    value={discountNotes}
+                    onChange={(e) => setDiscountNotes(e.target.value)}
+                    className="min-h-[60px] text-sm"
+                    data-testid="textarea-discount-notes"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="bg-primary/10 p-4 rounded-md border border-primary/20 mt-4">
+              <div className="flex items-center justify-between">
+                <span className="font-bold">إجمالي التكاليف (RMB)</span>
+                <span className="text-xl font-bold text-primary" data-testid="text-total-cost-rmb">
+                  {formatCurrency(stats?.totalCostRmb || "0", "RMB")}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Receipt className="w-5 h-5 text-primary" />
+              التكاليف بالجنيه (EGP)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <CostItemCard
+              title="قيمة الفواتير"
+              icon={Package}
+              value={stats?.totalPurchaseEgp || "0"}
+              currency="EGP"
+              paid={stats?.totalPaidEgp || "0"}
+              remaining={stats?.totalBalanceEgp || "0"}
+            />
+            <CostItemCard
+              title="تكلفة الشحن"
+              icon={Truck}
+              value={stats?.totalShippingEgp || "0"}
+              currency="EGP"
+            />
+            <CostItemCard
+              title="العمولة"
+              icon={DollarSign}
+              value={stats?.totalCommissionEgp || "0"}
+              currency="EGP"
+            />
+            <CostItemCard
+              title="الجمارك"
+              icon={FileText}
+              value={stats?.totalCustomsEgp || "0"}
+              currency="EGP"
+            />
+            <CostItemCard
+              title="التخريج"
+              icon={Ship}
+              value={stats?.totalTakhreegEgp || "0"}
+              currency="EGP"
+            />
+            <div className="bg-primary/10 p-4 rounded-md border border-primary/20 mt-4">
+              <div className="flex items-center justify-between">
+                <span className="font-bold">إجمالي التكاليف (EGP)</span>
+                <span className="text-xl font-bold text-primary" data-testid="text-total-cost-egp">
+                  {formatCurrency(stats?.totalCostEgp || "0")}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <TrendingDown className="w-5 h-5 text-green-600" />
+            ملخص المدفوعات والأرصدة
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card className="bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  إجمالي المدفوع (RMB)
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <HelpCircle className="w-4 h-4 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      مجموع المدفوعات بالرممبي
+                    </TooltipContent>
+                  </Tooltip>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-xl font-bold text-green-600" data-testid="text-total-paid-rmb">
+                  {formatCurrency(stats?.totalPaidRmb || "0", "RMB")}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  إجمالي المدفوع (EGP)
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <HelpCircle className="w-4 h-4 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      مجموع المدفوعات بالجنيه
+                    </TooltipContent>
+                  </Tooltip>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-xl font-bold text-green-600" data-testid="text-total-paid-egp">
+                  {formatCurrency(stats?.totalPaidEgp || "0")}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  إجمالي المتبقي (RMB)
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <HelpCircle className="w-4 h-4 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      المبلغ المتبقي بالرممبي
+                    </TooltipContent>
+                  </Tooltip>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-xl font-bold text-amber-600" data-testid="text-total-balance-rmb">
+                  {formatCurrency(stats?.totalBalanceRmb || "0", "RMB")}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  إجمالي المتبقي (EGP)
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <HelpCircle className="w-4 h-4 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      المبلغ المتبقي بالجنيه
+                    </TooltipContent>
+                  </Tooltip>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-xl font-bold text-amber-600" data-testid="text-total-balance-egp">
+                  {formatCurrency(stats?.totalBalanceEgp || "0")}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-function StatCard({
+function CostItemCard({
   title,
-  valueRmb,
-  valueEgp,
   icon: Icon,
-  tooltip,
+  value,
+  currency,
+  paid,
+  remaining,
 }: {
   title: string;
-  valueRmb?: string;
-  valueEgp?: string;
   icon: React.ComponentType<{ className?: string }>;
-  tooltip: string;
+  value: string;
+  currency: "RMB" | "EGP";
+  paid?: string;
+  remaining?: string;
 }) {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
+    <div className="bg-muted/50 p-3 rounded-md">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Icon className="w-4 h-4" />
           {title}
-          <Tooltip>
-            <TooltipTrigger>
-              <HelpCircle className="w-4 h-4 text-muted-foreground" />
-            </TooltipTrigger>
-            <TooltipContent>{tooltip}</TooltipContent>
-          </Tooltip>
-        </CardTitle>
-        <Icon className="h-5 w-5 text-muted-foreground" />
-      </CardHeader>
-      <CardContent>
-        {valueRmb && (
-          <div className="text-lg font-bold">{formatCurrency(valueRmb, "RMB")}</div>
-        )}
-        <div className={valueRmb ? "text-sm text-muted-foreground" : "text-lg font-bold"}>
-          {formatCurrency(valueEgp || "0")}
         </div>
-      </CardContent>
-    </Card>
+        <span className="font-bold">{formatCurrency(value, currency)}</span>
+      </div>
+      {paid !== undefined && remaining !== undefined && (
+        <div className="flex items-center justify-between text-xs mt-2 pt-2 border-t border-border/50">
+          <span className="text-green-600">
+            مدفوع: {formatCurrency(paid, currency)}
+          </span>
+          <span className="text-amber-600">
+            متبقي: {formatCurrency(remaining, currency)}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
