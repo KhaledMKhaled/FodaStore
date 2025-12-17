@@ -99,6 +99,13 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **December 2025**: Shipment Wizard and Inventory Improvements
+  - Made shipment details section sticky in Add Item step (Step 1) with real-time totals
+  - Added items list pagination (10 items per page) with auto-scroll to newly added items
+  - Changed customs calculation from per-carton to per-piece basis
+  - Added partial discount field for purchase cost in Step 1
+  - Added inventory page pagination (25 items per page) with page navigation
+  - Added CSV export functionality for inventory movements
 - **December 2025**: Implemented comprehensive accounting layer
   - New accounting dashboard with cost totals and payment summaries
   - Supplier balances page showing debts/credits per supplier with detailed statements
