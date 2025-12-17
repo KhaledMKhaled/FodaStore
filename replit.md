@@ -99,6 +99,13 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **December 2025**: Inventory Cost Calculation Enhancement
+  - Added per-piece cost breakdown in inventory: purchase price (RMB), shipping share (RMB), customs (EGP), clearance (EGP)
+  - Shipping share formula: Total shipping cost RMB ÷ Total pieces in shipment
+  - Clearance share formula: Total takhreeg cost ÷ Item pieces
+  - Customs formula: Total customs cost ÷ Item pieces
+  - Final cost: ((Purchase price + Shipping share) × Exchange rate) + Customs + Clearance
+  - Enhanced inventory API to include shipping details and total shipment pieces
 - **December 2025**: Shipment Wizard and Inventory Improvements
   - Made shipment details section sticky in Add Item step (Step 1) with real-time totals
   - Added items list pagination (10 items per page) with auto-scroll to newly added items
