@@ -85,6 +85,8 @@ export const shipments = pgTable("shipments", {
   finalTotalCostEgp: decimal("final_total_cost_egp", { precision: 15, scale: 2 }).default("0"),
   totalPaidEgp: decimal("total_paid_egp", { precision: 15, scale: 2 }).default("0"),
   balanceEgp: decimal("balance_egp", { precision: 15, scale: 2 }).default("0"),
+  partialDiscountRmb: decimal("partial_discount_rmb", { precision: 15, scale: 2 }).default("0"),
+  discountNotes: text("discount_notes"),
   lastPaymentDate: timestamp("last_payment_date"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

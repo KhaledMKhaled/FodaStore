@@ -396,11 +396,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/inventory", isAuthenticated, async (req, res) => {
     try {
       const movements = await storage.getAllInventoryMovements();
-      // Include shipment and item info
+      // Include shipment, shipping details and item info for cost calculations
       const movementsWithDetails = await Promise.all(
         movements.map(async (movement) => {
           const shipment = movement.shipmentId
             ? await storage.getShipment(movement.shipmentId)
+            : null;
+          const shippingDetails = movement.shipmentId
+            ? await storage.getShippingDetails(movement.shipmentId)
             : null;
           const shipmentItems = movement.shipmentId
             ? await storage.getShipmentItems(movement.shipmentId)
@@ -408,7 +411,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const shipmentItem = shipmentItems.find(
             (item) => item.id === movement.shipmentItemId
           );
-          return { ...movement, shipment, shipmentItem };
+          // Calculate total pieces in shipment for cost distribution
+          const totalShipmentPieces = shipmentItems.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
+          return { ...movement, shipment, shipmentItem, shippingDetails, totalShipmentPieces };
         })
       );
       res.json(movementsWithDetails);

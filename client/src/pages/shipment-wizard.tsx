@@ -65,7 +65,8 @@ export default function ShipmentWizard() {
     purchaseDate: new Date().toISOString().split("T")[0],
     status: "جديدة",
     purchaseRmbToEgpRate: "",
-    purchaseDiscount: "0",
+    partialDiscountRmb: "0",
+    discountNotes: "",
   });
 
   const [items, setItems] = useState<Partial<ShipmentItem>[]>([
@@ -120,7 +121,8 @@ export default function ShipmentWizard() {
         status: existingShipment.status,
         purchaseRmbToEgpRate:
           existingShipment.purchaseRmbToEgpRate?.toString() || shipmentData.purchaseRmbToEgpRate,
-        purchaseDiscount: (existingShipment as any).purchaseDiscount?.toString() || "0",
+        partialDiscountRmb: existingShipment.partialDiscountRmb?.toString() || "0",
+        discountNotes: existingShipment.discountNotes || "",
       });
     }
   }, [existingShipment]);
@@ -390,8 +392,9 @@ export default function ShipmentWizard() {
   const purchaseRate = parseFloat(shipmentData.purchaseRmbToEgpRate || "0");
   const shippingRmbToEgp = parseFloat(shippingData.rmbToEgpRate);
   const purchaseCostEgp = totalPurchaseCostRmb * purchaseRate;
-  const purchaseDiscount = parseFloat(shipmentData.purchaseDiscount || "0");
-  const discountedPurchaseCostEgp = purchaseCostEgp - purchaseDiscount;
+  const partialDiscountRmb = parseFloat(shipmentData.partialDiscountRmb || "0");
+  const partialDiscountEgp = partialDiscountRmb * purchaseRate;
+  const discountedPurchaseCostEgp = purchaseCostEgp - partialDiscountEgp;
   const commissionEgp = commissionRmb * shippingRmbToEgp;
   const shippingCostEgp = shippingCostRmb * shippingRmbToEgp;
 
@@ -485,7 +488,10 @@ export default function ShipmentWizard() {
               currentItemsPage={currentItemsPage}
               setCurrentItemsPage={setCurrentItemsPage}
               totalCartons={totalCartons}
+              totalPieces={totalPieces}
               newItemRef={newItemRef}
+              refreshRates={refreshShippingRates}
+              isRefreshing={refreshRatesMutation.isPending}
             />
           )}
 
@@ -520,7 +526,8 @@ export default function ShipmentWizard() {
               totalPurchaseCostRmb={totalPurchaseCostRmb}
               purchaseCostEgp={purchaseCostEgp}
               discountedPurchaseCostEgp={discountedPurchaseCostEgp}
-              purchaseDiscount={purchaseDiscount}
+              partialDiscountRmb={partialDiscountRmb}
+              partialDiscountEgp={partialDiscountEgp}
               commissionRmb={commissionRmb}
               commissionEgp={commissionEgp}
               shippingCostRmb={shippingCostRmb}
@@ -546,11 +553,15 @@ export default function ShipmentWizard() {
               label="تكلفة الشراء (ج.م)"
               value={`${formatCurrency(purchaseCostEgp)} ج.م`}
             />
-            {purchaseDiscount > 0 && (
+            {partialDiscountRmb > 0 && (
               <>
                 <SummaryRow
+                  label="الخصم (RMB)"
+                  value={`- ¥ ${formatCurrency(partialDiscountRmb)}`}
+                />
+                <SummaryRow
                   label="الخصم (ج.م)"
-                  value={`- ${formatCurrency(purchaseDiscount)} ج.م`}
+                  value={`- ${formatCurrency(partialDiscountEgp)} ج.م`}
                 />
                 <SummaryRow
                   label="بعد الخصم (ج.م)"
@@ -655,7 +666,10 @@ function Step1Import({
   currentItemsPage,
   setCurrentItemsPage,
   totalCartons,
+  totalPieces,
   newItemRef,
+  refreshRates,
+  isRefreshing,
 }: {
   shipmentData: {
     shipmentCode: string;
@@ -663,7 +677,8 @@ function Step1Import({
     purchaseDate: string;
     status: string;
     purchaseRmbToEgpRate: string;
-    purchaseDiscount: string;
+    partialDiscountRmb: string;
+    discountNotes: string;
   };
   setShipmentData: (data: {
     shipmentCode: string;
@@ -671,7 +686,8 @@ function Step1Import({
     purchaseDate: string;
     status: string;
     purchaseRmbToEgpRate: string;
-    purchaseDiscount: string;
+    partialDiscountRmb: string;
+    discountNotes: string;
   }) => void;
   items: Partial<ShipmentItem>[];
   updateItem: (index: number, field: string, value: string | number) => void;
@@ -685,7 +701,10 @@ function Step1Import({
   currentItemsPage: number;
   setCurrentItemsPage: (page: number) => void;
   totalCartons: number;
+  totalPieces: number;
   newItemRef: React.RefObject<HTMLDivElement>;
+  refreshRates: () => void;
+  isRefreshing: boolean;
 }) {
   const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
   const startIndex = (currentItemsPage - 1) * ITEMS_PER_PAGE;
@@ -709,6 +728,19 @@ function Step1Import({
               <Badge variant="secondary" className="text-sm">
                 إجمالي الكراتين: {totalCartons}
               </Badge>
+              <Badge variant="secondary" className="text-sm">
+                إجمالي القطع: {totalPieces}
+              </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshRates}
+                disabled={isRefreshing}
+                data-testid="button-refresh-exchange-rate"
+              >
+                <RefreshCw className={`w-4 h-4 ml-2 ${isRefreshing ? "animate-spin" : ""}`} />
+                {isRefreshing ? "جاري التحديث..." : "تحديث سعر الصرف"}
+              </Button>
               <Button size="sm" onClick={addItem} data-testid="button-add-item">
                 <Plus className="w-4 h-4 ml-2" />
                 إضافة بند
@@ -770,21 +802,38 @@ function Step1Import({
                 placeholder="7.0000"
               />
             </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t">
             <div className="space-y-2">
-              <Label htmlFor="purchaseDiscount">خصم جزئي (ج.م)</Label>
+              <Label htmlFor="partialDiscountRmb">خصم جزئي (رممبي)</Label>
               <Input
-                id="purchaseDiscount"
+                id="partialDiscountRmb"
                 type="number"
                 step="0.01"
-                value={shipmentData.purchaseDiscount || "0"}
+                value={shipmentData.partialDiscountRmb || "0"}
                 onChange={(e) =>
                   setShipmentData({
                     ...shipmentData,
-                    purchaseDiscount: e.target.value,
+                    partialDiscountRmb: e.target.value,
                   })
                 }
                 placeholder="0.00"
-                data-testid="input-purchase-discount"
+                data-testid="input-partial-discount-rmb"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="discountNotes">ملاحظات الخصم</Label>
+              <Input
+                id="discountNotes"
+                value={shipmentData.discountNotes || ""}
+                onChange={(e) =>
+                  setShipmentData({
+                    ...shipmentData,
+                    discountNotes: e.target.value,
+                  })
+                }
+                placeholder="ملاحظات اختيارية..."
+                data-testid="input-discount-notes"
               />
             </div>
           </div>
@@ -1375,7 +1424,8 @@ function Step4Summary({
   totalPurchaseCostRmb,
   purchaseCostEgp,
   discountedPurchaseCostEgp,
-  purchaseDiscount,
+  partialDiscountRmb,
+  partialDiscountEgp,
   commissionRmb,
   commissionEgp,
   shippingCostRmb,
@@ -1384,12 +1434,13 @@ function Step4Summary({
   totalTakhreegCostEgp,
   finalTotalCostEgp,
 }: {
-  shipmentData: { shipmentCode: string; shipmentName: string; purchaseDate: string; status: string; purchaseDiscount?: string };
+  shipmentData: { shipmentCode: string; shipmentName: string; purchaseDate: string; status: string };
   items: Partial<ShipmentItem>[];
   totalPurchaseCostRmb: number;
   purchaseCostEgp: number;
   discountedPurchaseCostEgp: number;
-  purchaseDiscount: number;
+  partialDiscountRmb: number;
+  partialDiscountEgp: number;
   commissionRmb: number;
   commissionEgp: number;
   shippingCostRmb: number;
@@ -1475,12 +1526,12 @@ function Step4Summary({
             rmbValue={`¥ ${formatCurrency(totalPurchaseCostRmb)}`}
             egpValue={`${formatCurrency(purchaseCostEgp)} ج.م`}
           />
-          {purchaseDiscount > 0 && (
+          {partialDiscountRmb > 0 && (
             <>
               <CostRow
                 label="الخصم"
-                rmbValue="-"
-                egpValue={`- ${formatCurrency(purchaseDiscount)} ج.م`}
+                rmbValue={`- ¥ ${formatCurrency(partialDiscountRmb)}`}
+                egpValue={`- ${formatCurrency(partialDiscountEgp)} ج.م`}
               />
               <CostRow
                 label="بعد الخصم"

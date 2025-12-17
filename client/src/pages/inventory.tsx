@@ -28,13 +28,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { InventoryMovement, ShipmentItem, Shipment } from "@shared/schema";
+import type { InventoryMovement, ShipmentItem, Shipment, ShipmentShippingDetails } from "@shared/schema";
 
 interface InventoryStats {
   totalPieces: number;
   totalCostEgp: string;
   totalItems: number;
   avgUnitCostEgp: string;
+}
+
+interface ExtendedInventoryMovement extends InventoryMovement {
+  shipmentItem?: ShipmentItem;
+  shipment?: Shipment;
+  shippingDetails?: ShipmentShippingDetails;
+  totalShipmentPieces?: number;
 }
 
 export default function Inventory() {
@@ -49,10 +56,53 @@ export default function Inventory() {
   });
 
   const { data: movements, isLoading: loadingMovements } = useQuery<
-    (InventoryMovement & { shipmentItem?: ShipmentItem; shipment?: Shipment })[]
+    ExtendedInventoryMovement[]
   >({
     queryKey: ["/api/inventory"],
   });
+
+  // Calculate cost per piece based on the formulas
+  const calculateCostPerPiece = (movement: ExtendedInventoryMovement) => {
+    const item = movement.shipmentItem;
+    const shipment = movement.shipment;
+    const shippingDetails = movement.shippingDetails;
+    const totalShipmentPieces = movement.totalShipmentPieces || 0;
+
+    if (!item || !shipment) {
+      return { purchasePriceRmb: 0, shippingShareRmb: 0, clearanceShareEgp: 0, customsPerPieceEgp: 0, finalCostEgp: 0, exchangeRate: 0 };
+    }
+
+    // Exchange rate from shipment
+    const exchangeRate = parseFloat(shipment.purchaseRmbToEgpRate?.toString() || "0");
+    
+    // Purchase price per piece in RMB
+    const purchasePriceRmb = parseFloat(item.purchasePricePerPiecePriRmb?.toString() || "0");
+    
+    // Shipping share per piece = Total shipping cost RMB / Total pieces in shipment
+    const totalShippingCostRmb = parseFloat(shippingDetails?.totalShippingCostRmb?.toString() || "0");
+    const shippingShareRmb = totalShipmentPieces > 0 ? totalShippingCostRmb / totalShipmentPieces : 0;
+    
+    // Clearance (Takhreeg) share per piece = Total Takhreeg Cost / Total pieces for item
+    const totalTakhreegCost = parseFloat(item.totalTakhreegCostEgp?.toString() || "0");
+    const itemPieces = item.totalPiecesCou || 0;
+    const clearanceShareEgp = itemPieces > 0 ? totalTakhreegCost / itemPieces : 0;
+    
+    // Customs per piece = Total Customs Cost / Total pieces for item
+    const totalCustomsCost = parseFloat(item.totalCustomsCostEgp?.toString() || "0");
+    const customsPerPieceEgp = itemPieces > 0 ? totalCustomsCost / itemPieces : 0;
+    
+    // Final formula: (Purchase price in RMB + Shipping share in RMB) × Exchange rate + Customs + Clearance share in EGP
+    const finalCostEgp = ((purchasePriceRmb + shippingShareRmb) * exchangeRate) + customsPerPieceEgp + clearanceShareEgp;
+    
+    return {
+      purchasePriceRmb,
+      shippingShareRmb,
+      clearanceShareEgp,
+      customsPerPieceEgp,
+      finalCostEgp,
+      exchangeRate,
+    };
+  };
 
   const formatCurrency = (value: string | number | null) => {
     const num = typeof value === "string" ? parseFloat(value) : value;
@@ -303,49 +353,58 @@ export default function Inventory() {
                       <TableHead className="text-right">الشحنة</TableHead>
                       <TableHead className="text-right">المنتج</TableHead>
                       <TableHead className="text-right">عدد القطع</TableHead>
-                      <TableHead className="text-right">تكلفة الوحدة (RMB)</TableHead>
-                      <TableHead className="text-right">تكلفة الوحدة (ج.م)</TableHead>
-                      <TableHead className="text-right">إجمالي التكلفة (ج.م)</TableHead>
+                      <TableHead className="text-right">سعر الشراء (RMB)</TableHead>
+                      <TableHead className="text-right">نصيب الشحن (RMB)</TableHead>
+                      <TableHead className="text-right">الجمرك (ج.م)</TableHead>
+                      <TableHead className="text-right">التخريج (ج.م)</TableHead>
+                      <TableHead className="text-right">تكلفة القطعة (ج.م)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {paginatedMovements?.map((movement) => (
-                      <TableRow
-                        key={movement.id}
-                        data-testid={`row-inventory-${movement.id}`}
-                      >
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-muted-foreground" />
-                            {formatDate(movement.movementDate)}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {movement.shipment?.shipmentCode || "-"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {movement.shipmentItem?.productName || "-"}
-                        </TableCell>
-                        <TableCell>
-                          {new Intl.NumberFormat("ar-EG").format(
-                            movement.totalPiecesIn || 0
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {movement.unitCostRmb
-                            ? `¥ ${formatCurrency(movement.unitCostRmb)}`
-                            : "-"}
-                        </TableCell>
-                        <TableCell>
-                          {formatCurrency(movement.unitCostEgp)} ج.م
-                        </TableCell>
-                        <TableCell className="font-bold">
-                          {formatCurrency(movement.totalCostEgp)} ج.م
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {paginatedMovements?.map((movement) => {
+                      const costs = calculateCostPerPiece(movement);
+                      return (
+                        <TableRow
+                          key={movement.id}
+                          data-testid={`row-inventory-${movement.id}`}
+                        >
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Calendar className="w-4 h-4 text-muted-foreground" />
+                              {formatDate(movement.movementDate)}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {movement.shipment?.shipmentCode || "-"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {movement.shipmentItem?.productName || "-"}
+                          </TableCell>
+                          <TableCell>
+                            {new Intl.NumberFormat("ar-EG").format(
+                              movement.totalPiecesIn || 0
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            ¥ {formatCurrency(costs.purchasePriceRmb || 0)}
+                          </TableCell>
+                          <TableCell>
+                            ¥ {formatCurrency(costs.shippingShareRmb)}
+                          </TableCell>
+                          <TableCell>
+                            {formatCurrency(costs.customsPerPieceEgp)} ج.م
+                          </TableCell>
+                          <TableCell>
+                            {formatCurrency(costs.clearanceShareEgp)} ج.م
+                          </TableCell>
+                          <TableCell className="font-bold text-primary">
+                            {formatCurrency(costs.finalCostEgp)} ج.م
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>

@@ -26,8 +26,6 @@ import {
   RefreshCw,
   Boxes,
   Receipt,
-  Percent,
-  StickyNote,
 } from "lucide-react";
 import type { Supplier, ExchangeRate } from "@shared/schema";
 
@@ -75,7 +73,6 @@ export default function AccountingPage() {
   const [shipmentStatus, setShipmentStatus] = useState<string>("all");
   const [paymentStatus, setPaymentStatus] = useState<string>("all");
   const [includeArchived, setIncludeArchived] = useState(false);
-  const [discountNotes, setDiscountNotes] = useState("");
 
   const queryParams = new URLSearchParams();
   if (dateFrom) queryParams.append("dateFrom", dateFrom);
@@ -364,32 +361,6 @@ export default function AccountingPage() {
               value={stats?.totalCommissionRmb || "0"}
               currency="RMB"
             />
-            <div className="border-t pt-4 mt-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Percent className="w-4 h-4 text-green-600" />
-                <span className="font-medium">الخصم (رممبي)</span>
-              </div>
-              <div className="flex items-start gap-4">
-                <div className="flex-1">
-                  <div className="text-lg font-bold text-green-600">
-                    - {formatCurrency(stats?.totalDiscountRmb || "0", "RMB")}
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <Label className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
-                    <StickyNote className="w-3 h-3" />
-                    ملاحظات الخصم
-                  </Label>
-                  <Textarea
-                    placeholder="أضف ملاحظة..."
-                    value={discountNotes}
-                    onChange={(e) => setDiscountNotes(e.target.value)}
-                    className="min-h-[60px] text-sm"
-                    data-testid="textarea-discount-notes"
-                  />
-                </div>
-              </div>
-            </div>
             <div className="bg-primary/10 p-4 rounded-md border border-primary/20 mt-4">
               <div className="flex items-center justify-between">
                 <span className="font-bold">إجمالي التكاليف (RMB)</span>
