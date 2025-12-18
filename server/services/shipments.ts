@@ -180,12 +180,23 @@ export const shipmentService = {
           return sum + (item.cartonsCtn || 0) * parseNumber(item.takhreegCostPerCartonEgp);
         }, 0);
 
+        // CRITICAL FIX: When items are updated, must recalculate purchaseCostEgp (convert RMB→EGP)
+        const rmbToEgpRate = await getLatestRmbToEgpRate(tx);
+        const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgpRate;
+
         await tx
           .update(shipments)
           .set({
             purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
+            purchaseCostEgp: purchaseCostEgp.toFixed(2),
+            purchaseRmbToEgpRate: rmbToEgpRate.toFixed(4),
             customsCostEgp: totalCustomsCostEgp.toFixed(2),
             takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
+            // Initialize optional fields to "0.00" (prevent NULL in calculations)
+            commissionCostRmb: "0.00",
+            commissionCostEgp: "0.00",
+            shippingCostRmb: "0.00",
+            shippingCostEgp: "0.00",
             updatedAt: new Date(),
           })
           .where(eq(shipments.id, shipmentId));
@@ -266,7 +277,9 @@ export const shipmentService = {
         purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp;
 
       const totalPaidEgp = parseNumber(shipment.totalPaidEgp);
-      const balanceEgp = Math.max(0, finalTotalCostEgp - totalPaidEgp);
+      // Use knownTotal (same as payment validation) to calculate balance
+      const knownTotal = finalTotalCostEgp;
+      const balanceEgp = Math.max(0, knownTotal - totalPaidEgp);
 
       let newStatus = shipment.status;
       if (step === 1) {
@@ -279,11 +292,15 @@ export const shipmentService = {
         newStatus = "مستلمة بنجاح";
       }
 
+      // Ensure totalPaidEgp is set (initialize if missing to prevent NULL calculations in payments)
+      const safelySetTotalPaid = shipment.totalPaidEgp || "0.00";
+
       await tx
         .update(shipments)
         .set({
           finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
           balanceEgp: balanceEgp.toFixed(2),
+          totalPaidEgp: safelySetTotalPaid,
           status: newStatus,
           updatedAt: new Date(),
         })
