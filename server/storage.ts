@@ -602,11 +602,35 @@ export class DatabaseStorage implements IStorage {
 codex/refactor-invoice-summary-calculations
       const amountOriginal = parseAmountOrZero(data.amountOriginal as any);
       const amountOriginal = parseAmount(data.amountOriginal as any);
+      let exchangeRate = data.exchangeRateToEgp
+        ? parseAmount(data.exchangeRateToEgp as any)
 main
       const exchangeRate = data.exchangeRateToEgp
         ? parseAmountOrZero(data.exchangeRateToEgp as any)
         : null;
 
+      if (data.paymentCurrency === "RMB" && !exchangeRate) {
+        const [latestRate] = await tx
+          .select()
+          .from(exchangeRates)
+          .where(
+            and(
+              eq(exchangeRates.fromCurrency, "RMB"),
+              eq(exchangeRates.toCurrency, "EGP"),
+            ),
+          )
+          .orderBy(desc(exchangeRates.rateDate))
+          .limit(1);
+
+        if (latestRate?.rateValue) {
+          exchangeRate = parseAmount(latestRate.rateValue);
+        } else {
+          throw new ApiError("PAYMENT_RATE_MISSING", undefined, 400, {
+            shipmentId: data.shipmentId,
+            currency: data.paymentCurrency,
+          });
+        }
+      }
 
       let normalizedAmounts;
       try {

@@ -49,187 +49,31 @@ const uploadItemImage = multer({
   },
 });
 
-type PaymentHandlerDeps = {
-codex/verify-payment-api-audit-log-entry
-  storage: Pick<IStorage, "createPayment">;
-  logAuditEvent: typeof logAuditEvent;
-};
-
-export function createPaymentHandler({ storage, logAuditEvent }: PaymentHandlerDeps): RequestHandler {
-  storage: typeof storage;
-  logAuditEvent: typeof logAuditEvent;
-};
-
-export function createPaymentHandler(deps: PaymentHandlerDeps): RequestHandler {
-main
-  return async (req, res) => {
-    try {
-      const body = req.body;
-      const userId = (req.user as any)?.id;
-
-      if (!userId) {
-        throw new ApiError("AUTH_REQUIRED", undefined, 401);
-      }
-codex/verify-payment-api-audit-log-entry
-      
-      // Pre-process paymentDate: convert string/Date to proper Date object
-
-      // Validate and coerce date
-main
-      let paymentDate: Date;
-      if (body.paymentDate) {
-        paymentDate = new Date(body.paymentDate);
-        if (Number.isNaN(paymentDate.getTime())) {
-          throw new ApiError("PAYMENT_DATE_INVALID");
-        }
-      } else {
-        throw new ApiError("PAYMENT_DATE_INVALID");
-      }
-codex/verify-payment-api-audit-log-entry
-      
-      // Prepare data with proper type coercion for schema validation
-      const preparedBody = {
-        ...body,
-        paymentDate,
-        shipmentId: body.shipmentId ? Number(body.shipmentId) : undefined,
-        amountOriginal: body.amountOriginal ? String(body.amountOriginal) : undefined,
-        amountEgp: body.amountEgp ? String(body.amountEgp) : undefined,
-        exchangeRateToEgp: body.exchangeRateToEgp ? String(body.exchangeRateToEgp) : null,
-      };
-      
-      // Validate with schema
-      const parseResult = insertShipmentPaymentSchema.safeParse(preparedBody);
-      
-      if (!parseResult.success) {
-        // Map Zod errors to Arabic messages
-
-      // Validate numeric fields
-      const shipmentId = Number(body.shipmentId);
-      if (Number.isNaN(shipmentId)) {
-        throw new ApiError("PAYMENT_PAYLOAD_INVALID", "معرّف الشحنة يجب أن يكون رقمًا صالحًا", 400, {
-          field: "shipmentId",
-        });
-      }
-
-      const amountOriginalNumber = Number(body.amountOriginal);
-      if (!Number.isFinite(amountOriginalNumber)) {
-        throw new ApiError(
-          "PAYMENT_PAYLOAD_INVALID",
-          "المبلغ الأصلي يجب أن يكون رقمًا صحيحًا",
-          400,
-          { field: "amountOriginal" },
-        );
-      }
-
-      let exchangeRateToEgpNumber: number | null = body.exchangeRateToEgp ?? null;
-      if (body.paymentCurrency === "RMB") {
-        exchangeRateToEgpNumber = Number(body.exchangeRateToEgp);
-        if (!Number.isFinite(exchangeRateToEgpNumber)) {
-          throw new ApiError(
-            "PAYMENT_RATE_MISSING",
-            "سعر الصرف لليوان يجب أن يكون رقمًا صحيحًا",
-            400,
-            { field: "exchangeRateToEgp" },
-          );
-        }
-
-        if (exchangeRateToEgpNumber <= 0) {
-          throw new ApiError(
-            "PAYMENT_RATE_MISSING",
-            "سعر الصرف لليوان يجب أن يكون أكبر من صفر",
-            400,
-            { field: "exchangeRateToEgp" },
-          );
-        }
-      } else if (exchangeRateToEgpNumber !== null && !Number.isFinite(Number(exchangeRateToEgpNumber))) {
-        throw new ApiError(
-          "PAYMENT_PAYLOAD_INVALID",
-          "سعر الصرف يجب أن يكون رقمًا صحيحًا",
-          400,
-          { field: "exchangeRateToEgp" },
-        );
-      }
-
-      const preparedBody = {
-        ...body,
-        paymentDate,
-        shipmentId,
-        amountOriginal: amountOriginalNumber.toString(),
-        amountEgp: body.amountEgp ? String(body.amountEgp) : undefined,
-        exchangeRateToEgp:
-          exchangeRateToEgpNumber !== null && exchangeRateToEgpNumber !== undefined
-            ? exchangeRateToEgpNumber.toString()
-            : null,
-      };
-
-      const parseResult = insertShipmentPaymentSchema.safeParse(preparedBody);
-
-      if (!parseResult.success) {
-main
-        const firstError = parseResult.error.errors[0];
-        const fieldMessages: Record<string, string> = {
-          shipmentId: "يجب اختيار الشحنة",
-          paymentDate: "تاريخ الدفع مطلوب",
-          paymentCurrency: "عملة الدفع مطلوبة",
-          amountOriginal: "المبلغ مطلوب",
-          amountEgp: "المبلغ بالجنيه المصري مطلوب",
-          costComponent: "يجب اختيار بند التكلفة",
-          paymentMethod: "يجب اختيار طريقة الدفع",
-        };
-        const fieldName = firstError?.path?.[0]?.toString() || "";
-        const message = fieldMessages[fieldName] || firstError?.message || "بيانات غير صالحة";
-        throw new ApiError("PAYMENT_PAYLOAD_INVALID", message, 400, {
-          field: fieldName || undefined,
-        });
-      }
-codex/verify-payment-api-audit-log-entry
-      
-      const data = parseResult.data;
-      
-      const payment = await storage.createPayment({
-
-      const data = parseResult.data;
-
-      const payment = await deps.storage.createPayment({
-main
-        ...data,
-        createdByUserId: userId,
-      });
-
-codex/verify-payment-api-audit-log-entry
-      logAuditEvent({
-      deps.logAuditEvent({
-main
-        userId,
-        entityType: "PAYMENT",
-        entityId: payment.id,
-        actionType: "CREATE",
-codex/verify-payment-api-audit-log-entry
-        details: { 
-        details: {
-main
-          shipmentId: payment.shipmentId,
-          amount: payment.amountEgp,
-          currency: payment.paymentCurrency,
-          method: payment.paymentMethod,
-        },
-      });
-      
-      res.json(success(payment));
-    } catch (error) {
-      console.error("Error creating payment:", error);
-      const { status, body } = formatError(error, {
-        code: "UNKNOWN_ERROR",
-        status: (error as any)?.status || 500,
-      });
-      res.status(status).json(body);
-    }
+type RouteDependencies = {
+  storage?: IStorage;
+  auditLogger?: typeof logAuditEvent;
+  auth?: {
+    setupAuth: (app: Express) => Promise<void>;
+    isAuthenticated: RequestHandler;
+    requireRole: (roles: string[]) => RequestHandler;
   };
-}
+};
 
-export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
+export async function registerRoutes(
+  httpServer: Server,
+  app: Express,
+  deps: RouteDependencies = {},
+): Promise<void> {
+  const routeStorage = deps.storage ?? storage;
+  const auth = deps.auth ?? { setupAuth, isAuthenticated, requireRole };
+  const auditLogger = deps.auditLogger ?? ((event) => logAuditEvent(event, routeStorage));
+  const storage = routeStorage;
+  const isAuthenticated = auth.isAuthenticated;
+  const requireRole = auth.requireRole;
+  const logAuditEvent = auditLogger;
+
   // Setup authentication
-  await setupAuth(app);
+  await auth.setupAuth(app);
 
   // Auth routes
   app.get("/api/auth/user", async (req, res) => {
