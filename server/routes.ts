@@ -10,6 +10,7 @@ import { ApiError, formatError, success } from "./errors";
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
+  insertProductTypeSchema,
   insertExchangeRateSchema,
   insertShipmentPaymentSchema,
 } from "@shared/schema";
@@ -261,6 +262,47 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ message: "Error deleting supplier" });
+    }
+  });
+
+  // Product Types
+  app.get("/api/product-types", isAuthenticated, async (req, res) => {
+    try {
+      const types = await routeStorage.getAllProductTypes();
+      res.json(types);
+    } catch (error) {
+      res.status(500).json({ message: "Error fetching product types" });
+    }
+  });
+
+  app.post("/api/product-types", requireRole(["مدير", "محاسب"]), async (req, res) => {
+    try {
+      const data = insertProductTypeSchema.parse(req.body);
+      const type = await routeStorage.createProductType(data);
+      res.json(type);
+    } catch (error) {
+      res.status(400).json({ message: "Invalid data" });
+    }
+  });
+
+  app.patch("/api/product-types/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
+    try {
+      const type = await routeStorage.updateProductType(parseInt(req.params.id), req.body);
+      if (!type) {
+        return res.status(404).json({ message: "Product type not found" });
+      }
+      res.json(type);
+    } catch (error) {
+      res.status(500).json({ message: "Error updating product type" });
+    }
+  });
+
+  app.delete("/api/product-types/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
+    try {
+      await routeStorage.deleteProductType(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Error deleting product type" });
     }
   });
 

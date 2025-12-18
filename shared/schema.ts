@@ -52,6 +52,16 @@ export const suppliers = pgTable("suppliers", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Product Types table (أنواع الأصناف)
+export const productTypes = pgTable("product_types", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: varchar("name", { length: 255 }).unique().notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Products table (الأصناف)
 export const products = pgTable("products", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -98,7 +108,7 @@ export const shipmentItems = pgTable("shipment_items", {
   shipmentId: integer("shipment_id").references(() => shipments.id).notNull(),
   supplierId: integer("supplier_id").references(() => suppliers.id),
   productId: integer("product_id").references(() => products.id),
-  productType: varchar("product_type", { length: 100 }),
+  productTypeId: integer("product_type_id").references(() => productTypes.id),
   productName: varchar("product_name", { length: 255 }).notNull(),
   description: text("description"),
   countryOfOrigin: varchar("country_of_origin", { length: 100 }).default("الصين"),
@@ -217,6 +227,10 @@ export const suppliersRelations = relations(suppliers, ({ many }) => ({
   shipmentItems: many(shipmentItems),
 }));
 
+export const productTypesRelations = relations(productTypes, ({ many }) => ({
+  shipmentItems: many(shipmentItems),
+}));
+
 export const productsRelations = relations(products, ({ one, many }) => ({
   defaultSupplier: one(suppliers, {
     fields: [products.defaultSupplierId],
@@ -250,6 +264,10 @@ export const shipmentItemsRelations = relations(shipmentItems, ({ one }) => ({
   product: one(products, {
     fields: [shipmentItems.productId],
     references: [products.id],
+  }),
+  productType: one(productTypes, {
+    fields: [shipmentItems.productTypeId],
+    references: [productTypes.id],
   }),
 }));
 
@@ -303,6 +321,7 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users).omit({ createdAt: true, updatedAt: true });
 export const insertSupplierSchema = createInsertSchema(suppliers).omit({ createdAt: true, updatedAt: true });
+export const insertProductTypeSchema = createInsertSchema(productTypes).omit({ createdAt: true, updatedAt: true });
 export const insertProductSchema = createInsertSchema(products).omit({ createdAt: true, updatedAt: true });
 export const insertShipmentSchema = createInsertSchema(shipments).omit({ createdAt: true, updatedAt: true });
 export const insertShipmentItemSchema = createInsertSchema(shipmentItems).omit({ createdAt: true, updatedAt: true });
@@ -318,6 +337,8 @@ export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
 export type Supplier = typeof suppliers.$inferSelect;
+export type InsertProductType = z.infer<typeof insertProductTypeSchema>;
+export type ProductType = typeof productTypes.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
 export type Product = typeof products.$inferSelect;
 export type InsertShipment = z.infer<typeof insertShipmentSchema>;

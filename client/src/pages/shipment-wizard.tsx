@@ -39,6 +39,7 @@ import type {
   ShipmentItem,
   ShipmentShippingDetails,
   Supplier,
+  ProductType,
   ExchangeRate,
 } from "@shared/schema";
 
@@ -109,6 +110,10 @@ export default function ShipmentWizard() {
 
   const { data: suppliers } = useQuery<Supplier[]>({
     queryKey: ["/api/suppliers"],
+  });
+
+  const { data: productTypes } = useQuery<ProductType[]>({
+    queryKey: ["/api/product-types"],
   });
 
   // Load existing data
@@ -895,11 +900,23 @@ function Step1Import({
                   </div>
                   <div className="space-y-2">
                     <Label>نوع الصنف (TYP)</Label>
-                    <Input
-                      value={item.productType || ""}
-                      onChange={(e) => updateItem(actualIndex, "productType", e.target.value)}
-                      placeholder="ملابس"
-                    />
+                    <Select
+                      value={item.productTypeId?.toString() || ""}
+                      onValueChange={(value) =>
+                        updateItem(actualIndex, "productTypeId", parseInt(value))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="اختر نوع الصنف" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {productTypes?.map((type) => (
+                          <SelectItem key={type.id} value={type.id.toString()}>
+                            {type.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2 md:col-span-2">
                     <Label>اسم المنتج *</Label>

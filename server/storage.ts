@@ -3,6 +3,7 @@ import { db } from "./db";
 import {
   users,
   suppliers,
+  productTypes,
   products,
   shipments,
   shipmentItems,
@@ -16,6 +17,8 @@ import {
   type UpsertUser,
   type Supplier,
   type InsertSupplier,
+  type ProductType,
+  type InsertProductType,
   type Product,
   type InsertProduct,
   type Shipment,
@@ -243,6 +246,13 @@ export interface IStorage {
   createSupplier(data: InsertSupplier): Promise<Supplier>;
   updateSupplier(id: number, data: Partial<InsertSupplier>): Promise<Supplier | undefined>;
   deleteSupplier(id: number): Promise<boolean>;
+
+  // Product Types
+  getAllProductTypes(): Promise<ProductType[]>;
+  getProductType(id: number): Promise<ProductType | undefined>;
+  createProductType(data: InsertProductType): Promise<ProductType>;
+  updateProductType(id: number, data: Partial<InsertProductType>): Promise<ProductType | undefined>;
+  deleteProductType(id: number): Promise<boolean>;
 
   // Products
   getAllProducts(): Promise<Product[]>;
@@ -494,6 +504,35 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSupplier(id: number): Promise<boolean> {
     const result = await db.delete(suppliers).where(eq(suppliers.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Product Types
+  async getAllProductTypes(): Promise<ProductType[]> {
+    return db.select().from(productTypes).orderBy(desc(productTypes.createdAt));
+  }
+
+  async getProductType(id: number): Promise<ProductType | undefined> {
+    const [type] = await db.select().from(productTypes).where(eq(productTypes.id, id));
+    return type;
+  }
+
+  async createProductType(data: InsertProductType): Promise<ProductType> {
+    const [type] = await db.insert(productTypes).values(data).returning();
+    return type;
+  }
+
+  async updateProductType(id: number, data: Partial<InsertProductType>): Promise<ProductType | undefined> {
+    const [type] = await db
+      .update(productTypes)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(productTypes.id, id))
+      .returning();
+    return type;
+  }
+
+  async deleteProductType(id: number): Promise<boolean> {
+    const result = await db.delete(productTypes).where(eq(productTypes.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 
