@@ -13,5 +13,7 @@
 [x] 13. Verify application running on port 5000
 [x] 14. Re-install npm dependencies and restart workflow after migration
 [x] 15. Confirm application successfully running
+[x] 16. Add invoice summary button to shipments table
 
 IMPORT COMPLETED SUCCESSFULLY - Application is now running on port 5000
+FEATURE ADDED: Invoice Summary Quick Access Button - Users can now view shipment invoice summaries directly from the payments table

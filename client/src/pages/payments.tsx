@@ -720,18 +720,34 @@ export default function Payments() {
                                   {formatDate(shipment.lastPaymentDate)}
                                 </TableCell>
                                 <TableCell>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedShipmentId(shipment.id);
-                                      setIsDialogOpen(true);
-                                    }}
-                                  >
-                                    <Plus className="w-4 h-4 ml-1" />
-                                    دفعة
-                                  </Button>
+                                  <div className="flex gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedShipmentId(shipment.id);
+                                        setShowInvoiceSummary(true);
+                                      }}
+                                      data-testid={`button-invoice-summary-${shipment.id}`}
+                                    >
+                                      <Receipt className="w-4 h-4 ml-1" />
+                                      ملخص
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedShipmentId(shipment.id);
+                                        setIsDialogOpen(true);
+                                      }}
+                                      data-testid={`button-add-payment-${shipment.id}`}
+                                    >
+                                      <Plus className="w-4 h-4 ml-1" />
+                                      دفعة
+                                    </Button>
+                                  </div>
                                 </TableCell>
                               </TableRow>
                               {isExpanded && (
