@@ -488,27 +488,17 @@ export class DatabaseStorage implements IStorage {
         return Number.isFinite(parsed) ? parsed : 0;
       };
 
-      const computeFinalCost = (s: Shipment): { total: number; breakdown: Record<string, number> } => {
+      // Compute the "known total" - sum of cost components that are available/entered
+      // This allows partial payments at any stage of the shipment lifecycle
+      const computeKnownTotal = (s: Shipment): number => {
         const purchase = parseAmount(s.purchaseCostEgp);
         const commission = parseAmount(s.commissionCostEgp);
         const shipping = parseAmount(s.shippingCostEgp);
         const customs = parseAmount(s.customsCostEgp);
         const takhreeg = parseAmount(s.takhreegCostEgp);
 
-        const existingTotal = parseAmount(s.finalTotalCostEgp);
-        if (existingTotal > 0) {
-          return { 
-            total: existingTotal,
-            breakdown: { purchase, commission, shipping, customs, takhreeg }
-          };
-        }
-
-        const derivedTotal = purchase + commission + shipping + customs + takhreeg;
-
-        return {
-          total: derivedTotal,
-          breakdown: { purchase, commission, shipping, customs, takhreeg }
-        };
+        // Sum all available components - allows payment even if some components are 0 or not yet entered
+        return purchase + commission + shipping + customs + takhreeg;
       };
 
       const amountOriginal = parseAmount(data.amountOriginal as any);
@@ -545,35 +535,30 @@ export class DatabaseStorage implements IStorage {
       const { amountEgp, exchangeRateToEgp } = normalizedAmounts;
 
       const currentPaid = parseAmount(shipment.totalPaidEgp);
-      const { total: effectiveFinalCost, breakdown } = computeFinalCost(shipment);
+      const knownTotal = computeKnownTotal(shipment);
 
-      if (effectiveFinalCost <= 0) {
-        // Provide specific error about missing components
-        const missing = [];
-        if (breakdown.purchase <= 0) missing.push("تكلفة البضائع");
-        if (breakdown.customs <= 0) missing.push("الجمارك");
-        if (breakdown.takhreeg <= 0) missing.push("التخريج");
-        if (breakdown.shipping <= 0) missing.push("الشحن");
-        if (breakdown.commission <= 0) missing.push("العمولة");
-
-        const detailMsg = missing.length > 0 
-          ? `البيانات المفقودة: ${missing.join(', ')}`
-          : "لم يتم حساب إجمالي التكلفة";
-
-        throw new ApiError("PAYMENT_TOTAL_MISSING", detailMsg, 400, { 
+      // FIX: Allow payment if known total > 0 OR at minimum allow first deposit with known total = 0
+      // Check overpayment only: don't allow paying more than (knownTotal - already paid)
+      if (knownTotal <= 0 && currentPaid <= 0) {
+        // First payment required: shipment must have at least some cost data (e.g., goods cost)
+        throw new ApiError("PAYMENT_TOTAL_MISSING", 
+          "لا يمكن تسجيل دفعة للشحنة - لم يتم إدخال بيانات التكلفة بعد", 400, { 
           shipmentId: data.shipmentId,
-          missing,
-          total: effectiveFinalCost
+          knownTotal
         });
       }
 
-      const remainingBefore = Math.max(0, effectiveFinalCost - currentPaid);
+      const remainingAllowed = Math.max(0, knownTotal - currentPaid);
 
-      if (amountEgp > remainingBefore + 0.0001) {
-        throw new ApiError("PAYMENT_OVERPAY", undefined, 409, {
+      // Overpayment check: payment must not exceed remaining allowed based on known total
+      if (amountEgp > remainingAllowed + 0.0001) {
+        throw new ApiError("PAYMENT_OVERPAY", 
+          `لا يمكن دفع هذا المبلغ - الحد المسموح به هو ${remainingAllowed.toFixed(2)} جنيه`, 409, {
           shipmentId: data.shipmentId,
+          knownTotal,
+          alreadyPaid: currentPaid,
+          remainingAllowed,
           attempted: amountEgp,
-          remaining: remainingBefore,
         });
       }
 
@@ -596,14 +581,15 @@ export class DatabaseStorage implements IStorage {
         .where(eq(shipmentPayments.shipmentId, data.shipmentId));
 
       const totalPaidNumber = roundAmount(parseFloat(paymentTotals?.totalPaid || "0"));
-      const balance = roundAmount(Math.max(0, effectiveFinalCost - totalPaidNumber));
+      // Use known total for balance calculation (allows partial payments)
+      const balance = roundAmount(Math.max(0, knownTotal - totalPaidNumber));
       const latestPaymentDate =
         paymentTotals?.lastPaymentDate || data.paymentDate || new Date();
 
+      // Update shipment with new totals atomically
       await tx
         .update(shipments)
         .set({
-          finalTotalCostEgp: roundAmount(effectiveFinalCost, 2).toFixed(2),
           totalPaidEgp: totalPaidNumber.toFixed(2),
           balanceEgp: balance.toFixed(2),
           lastPaymentDate: latestPaymentDate,
