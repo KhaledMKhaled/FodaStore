@@ -506,6 +506,19 @@ export class DatabaseStorage implements IStorage {
         ? parseAmount(data.exchangeRateToEgp as any)
         : null;
 
+      // DEBUG: Log shipment costs to understand the issue
+      console.log(`[PAYMENT DEBUG] Shipment ${data.shipmentId}:`, {
+        purchaseCostEgp: shipment.purchaseCostEgp,
+        purchaseCostRmb: shipment.purchaseCostRmb,
+        commissionCostEgp: shipment.commissionCostEgp,
+        shippingCostEgp: shipment.shippingCostEgp,
+        customsCostEgp: shipment.customsCostEgp,
+        takhreegCostEgp: shipment.takhreegCostEgp,
+        finalTotalCostEgp: shipment.finalTotalCostEgp,
+        balanceEgp: shipment.balanceEgp,
+        totalPaidEgp: shipment.totalPaidEgp,
+      });
+
       let normalizedAmounts;
       try {
         normalizedAmounts = normalizePaymentAmounts({
@@ -535,7 +548,78 @@ export class DatabaseStorage implements IStorage {
       const { amountEgp, exchangeRateToEgp } = normalizedAmounts;
 
       const currentPaid = parseAmount(shipment.totalPaidEgp);
-      const knownTotal = computeKnownTotal(shipment);
+      let knownTotal = computeKnownTotal(shipment);
+
+      // EMERGENCY FIX: If knownTotal = 0 but shipment has items, recalculate costs from items
+      if (knownTotal === 0) {
+        console.log(`[PAYMENT RECOVERY] Shipment ${data.shipmentId}: knownTotal=0, checking for items...`);
+        
+        // Fetch all items for this shipment
+        const itemsList = await tx
+          .select()
+          .from(shipmentItems)
+          .where(eq(shipmentItems.shipmentId, data.shipmentId));
+        
+        console.log(`[PAYMENT RECOVERY] Found ${itemsList.length} items for shipment ${data.shipmentId}`);
+        
+        if (itemsList.length > 0) {
+          // Recalculate costs from items
+          const totalPurchaseCostRmb = itemsList.reduce(
+            (sum: number, item: any) => sum + parseAmount(item.totalPurchaseCostRmb),
+            0
+          );
+          
+          const totalCustomsCostEgp = itemsList.reduce((sum: number, item: any) => {
+            return sum + (item.cartonsCtn || 0) * parseAmount(item.customsCostPerCartonEgp);
+          }, 0);
+          
+          const totalTakhreegCostEgp = itemsList.reduce((sum: number, item: any) => {
+            return sum + (item.cartonsCtn || 0) * parseAmount(item.takhreegCostPerCartonEgp);
+          }, 0);
+          
+          // Get current exchange rate
+          const rateResult = await tx
+            .select()
+            .from(exchangeRates)
+            .where(and(
+              eq(exchangeRates.fromCurrency, "RMB"),
+              eq(exchangeRates.toCurrency, "EGP")
+            ))
+            .orderBy(desc(exchangeRates.rateDate))
+            .limit(1);
+          
+          const rmbToEgpRate = rateResult.length > 0 ? parseAmount(rateResult[0].rateValue) : 7.15;
+          const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgpRate;
+          const recoveredTotal = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
+          
+          console.log(`[PAYMENT RECOVERY] Recalculated costs:`, {
+            purchaseCostRmb: totalPurchaseCostRmb,
+            purchaseCostEgp,
+            customsCostEgp: totalCustomsCostEgp,
+            takhreegCostEgp: totalTakhreegCostEgp,
+            recoveredTotal,
+          });
+          
+          // Update shipment with recovered costs
+          if (recoveredTotal > 0) {
+            knownTotal = recoveredTotal;
+            await tx
+              .update(shipments)
+              .set({
+                purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
+                purchaseCostEgp: purchaseCostEgp.toFixed(2),
+                customsCostEgp: totalCustomsCostEgp.toFixed(2),
+                takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
+                finalTotalCostEgp: recoveredTotal.toFixed(2),
+                balanceEgp: Math.max(0, recoveredTotal - currentPaid).toFixed(2),
+                updatedAt: new Date(),
+              })
+              .where(eq(shipments.id, data.shipmentId));
+            
+            console.log(`[PAYMENT RECOVERY] Shipment ${data.shipmentId} costs recovered and updated`);
+          }
+        }
+      }
 
       // RADICAL FIX: Allow payments based on KNOWN total costs at any time
       // Known total = sum of currently available cost components
@@ -543,8 +627,22 @@ export class DatabaseStorage implements IStorage {
       
       const remainingAllowed = Math.max(0, knownTotal - currentPaid);
 
+      console.log(`[PAYMENT CALC] Shipment ${data.shipmentId}:`, {
+        knownTotal,
+        currentPaid,
+        remainingAllowed,
+        paymentAmountEgp: amountEgp,
+        allowed: amountEgp <= remainingAllowed + 0.0001,
+      });
+
       // ONLY block if payment exceeds what's currently known/allowed
       if (amountEgp > remainingAllowed + 0.0001) {
+        console.log(`[PAYMENT BLOCKED] Shipment ${data.shipmentId}: Overpayment attempt`, {
+          attempted: amountEgp,
+          allowed: remainingAllowed,
+          knownTotal,
+          paid: currentPaid,
+        });
         throw new ApiError("PAYMENT_OVERPAY", 
           `لا يمكن دفع هذا المبلغ - الحد المسموح به هو ${remainingAllowed.toFixed(2)} جنيه`, 409, {
           shipmentId: data.shipmentId,
