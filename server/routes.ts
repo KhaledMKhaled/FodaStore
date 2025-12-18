@@ -12,6 +12,7 @@ import {
   insertExchangeRateSchema,
   insertShipmentPaymentSchema,
 } from "@shared/schema";
+import { calculatePaymentSnapshot, parseAmountOrZero } from "./services/paymentCalculations";
 import bcrypt from "bcryptjs";
 import multer from "multer";
 import path from "path";
@@ -49,11 +50,18 @@ const uploadItemImage = multer({
 });
 
 type PaymentHandlerDeps = {
+codex/verify-payment-api-audit-log-entry
   storage: Pick<IStorage, "createPayment">;
   logAuditEvent: typeof logAuditEvent;
 };
 
 export function createPaymentHandler({ storage, logAuditEvent }: PaymentHandlerDeps): RequestHandler {
+  storage: typeof storage;
+  logAuditEvent: typeof logAuditEvent;
+};
+
+export function createPaymentHandler(deps: PaymentHandlerDeps): RequestHandler {
+main
   return async (req, res) => {
     try {
       const body = req.body;
@@ -62,8 +70,12 @@ export function createPaymentHandler({ storage, logAuditEvent }: PaymentHandlerD
       if (!userId) {
         throw new ApiError("AUTH_REQUIRED", undefined, 401);
       }
+codex/verify-payment-api-audit-log-entry
       
       // Pre-process paymentDate: convert string/Date to proper Date object
+
+      // Validate and coerce date
+main
       let paymentDate: Date;
       if (body.paymentDate) {
         paymentDate = new Date(body.paymentDate);
@@ -73,6 +85,7 @@ export function createPaymentHandler({ storage, logAuditEvent }: PaymentHandlerD
       } else {
         throw new ApiError("PAYMENT_DATE_INVALID");
       }
+codex/verify-payment-api-audit-log-entry
       
       // Prepare data with proper type coercion for schema validation
       const preparedBody = {
@@ -89,6 +102,70 @@ export function createPaymentHandler({ storage, logAuditEvent }: PaymentHandlerD
       
       if (!parseResult.success) {
         // Map Zod errors to Arabic messages
+
+      // Validate numeric fields
+      const shipmentId = Number(body.shipmentId);
+      if (Number.isNaN(shipmentId)) {
+        throw new ApiError("PAYMENT_PAYLOAD_INVALID", "معرّف الشحنة يجب أن يكون رقمًا صالحًا", 400, {
+          field: "shipmentId",
+        });
+      }
+
+      const amountOriginalNumber = Number(body.amountOriginal);
+      if (!Number.isFinite(amountOriginalNumber)) {
+        throw new ApiError(
+          "PAYMENT_PAYLOAD_INVALID",
+          "المبلغ الأصلي يجب أن يكون رقمًا صحيحًا",
+          400,
+          { field: "amountOriginal" },
+        );
+      }
+
+      let exchangeRateToEgpNumber: number | null = body.exchangeRateToEgp ?? null;
+      if (body.paymentCurrency === "RMB") {
+        exchangeRateToEgpNumber = Number(body.exchangeRateToEgp);
+        if (!Number.isFinite(exchangeRateToEgpNumber)) {
+          throw new ApiError(
+            "PAYMENT_RATE_MISSING",
+            "سعر الصرف لليوان يجب أن يكون رقمًا صحيحًا",
+            400,
+            { field: "exchangeRateToEgp" },
+          );
+        }
+
+        if (exchangeRateToEgpNumber <= 0) {
+          throw new ApiError(
+            "PAYMENT_RATE_MISSING",
+            "سعر الصرف لليوان يجب أن يكون أكبر من صفر",
+            400,
+            { field: "exchangeRateToEgp" },
+          );
+        }
+      } else if (exchangeRateToEgpNumber !== null && !Number.isFinite(Number(exchangeRateToEgpNumber))) {
+        throw new ApiError(
+          "PAYMENT_PAYLOAD_INVALID",
+          "سعر الصرف يجب أن يكون رقمًا صحيحًا",
+          400,
+          { field: "exchangeRateToEgp" },
+        );
+      }
+
+      const preparedBody = {
+        ...body,
+        paymentDate,
+        shipmentId,
+        amountOriginal: amountOriginalNumber.toString(),
+        amountEgp: body.amountEgp ? String(body.amountEgp) : undefined,
+        exchangeRateToEgp:
+          exchangeRateToEgpNumber !== null && exchangeRateToEgpNumber !== undefined
+            ? exchangeRateToEgpNumber.toString()
+            : null,
+      };
+
+      const parseResult = insertShipmentPaymentSchema.safeParse(preparedBody);
+
+      if (!parseResult.success) {
+main
         const firstError = parseResult.error.errors[0];
         const fieldMessages: Record<string, string> = {
           shipmentId: "يجب اختيار الشحنة",
@@ -105,20 +182,32 @@ export function createPaymentHandler({ storage, logAuditEvent }: PaymentHandlerD
           field: fieldName || undefined,
         });
       }
+codex/verify-payment-api-audit-log-entry
       
       const data = parseResult.data;
       
       const payment = await storage.createPayment({
+
+      const data = parseResult.data;
+
+      const payment = await deps.storage.createPayment({
+main
         ...data,
         createdByUserId: userId,
       });
 
+codex/verify-payment-api-audit-log-entry
       logAuditEvent({
+      deps.logAuditEvent({
+main
         userId,
         entityType: "PAYMENT",
         entityId: payment.id,
         actionType: "CREATE",
+codex/verify-payment-api-audit-log-entry
         details: { 
+        details: {
+main
           shipmentId: payment.shipmentId,
           amount: payment.amountEgp,
           currency: payment.paymentCurrency,
@@ -361,34 +450,60 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       
       const payments = await storage.getShipmentPayments(shipmentId);
-      const shippingDetails = await storage.getShippingDetails(shipmentId);
-      
-      // Calculate paid amounts by currency
-      const paidRmb = payments
-        .filter(p => p.paymentCurrency === "RMB")
-        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
-      
-      const paidEgp = payments
-        .filter(p => p.paymentCurrency === "EGP")
-        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
-      
+      const paymentSnapshot = await calculatePaymentSnapshot({
+        shipment,
+        payments,
+        loadRecoveryData: async () => {
+          const items = await storage.getShipmentItems(shipmentId);
+          const rate = await storage.getLatestRate("RMB", "EGP");
+
+          return {
+            items,
+            rmbToEgpRate: rate ? parseAmountOrZero(rate.rateValue) : undefined,
+          };
+        },
+      });
+
+      const paidRmb = paymentSnapshot.paidByCurrency.RMB?.original ?? 0;
+      const paidEgp = paymentSnapshot.paidByCurrency.EGP?.original ?? 0;
+
       // RMB costs breakdown
-      const goodsTotalRmb = parseFloat(shipment.purchaseCostRmb || "0");
-      const shippingTotalRmb = parseFloat(shipment.shippingCostRmb || "0");
-      const commissionTotalRmb = parseFloat(shipment.commissionCostRmb || "0");
+      const goodsTotalRmb = parseAmountOrZero(shipment.purchaseCostRmb || "0");
+      const shippingTotalRmb = parseAmountOrZero(
+        shipment.shippingCostRmb || "0",
+      );
+      const commissionTotalRmb = parseAmountOrZero(
+        shipment.commissionCostRmb || "0",
+      );
       const rmbSubtotal = goodsTotalRmb + shippingTotalRmb + commissionTotalRmb;
       const rmbRemaining = Math.max(0, rmbSubtotal - paidRmb);
       
       // EGP costs breakdown
-      const customsTotalEgp = parseFloat(shipment.customsCostEgp || "0");
-      const takhreegTotalEgp = parseFloat(shipment.takhreegCostEgp || "0");
+      const customsTotalEgp = parseAmountOrZero(shipment.customsCostEgp || "0");
+      const takhreegTotalEgp = parseAmountOrZero(
+        shipment.takhreegCostEgp || "0",
+      );
       const egpSubtotal = customsTotalEgp + takhreegTotalEgp;
       const egpRemaining = Math.max(0, egpSubtotal - paidEgp);
-      
+
+      const paidByCurrency = Object.fromEntries(
+        Object.entries(paymentSnapshot.paidByCurrency).map(([currency, values]) => [
+          currency,
+          {
+            original: values.original.toFixed(2),
+            convertedToEgp: values.convertedToEgp.toFixed(2),
+          },
+        ]),
+      );
+
       res.json({
         shipmentId,
         shipmentCode: shipment.shipmentCode,
         shipmentName: shipment.shipmentName,
+        knownTotalCost: paymentSnapshot.knownTotalCost.toFixed(2),
+        totalPaidEgp: paymentSnapshot.totalPaidEgp.toFixed(2),
+        remainingAllowed: paymentSnapshot.remainingAllowed.toFixed(2),
+        paidByCurrency,
         rmb: {
           goodsTotal: goodsTotalRmb.toFixed(2),
           shippingTotal: shippingTotalRmb.toFixed(2),
