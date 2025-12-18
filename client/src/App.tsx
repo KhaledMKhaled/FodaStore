@@ -13,6 +13,7 @@ import Dashboard from "@/pages/dashboard";
 import Shipments from "@/pages/shipments";
 import ShipmentWizard from "@/pages/shipment-wizard";
 import Suppliers from "@/pages/suppliers";
+import ProductTypes from "@/pages/product-types";
 import ExchangeRates from "@/pages/exchange-rates";
 import Payments from "@/pages/payments";
 import Inventory from "@/pages/inventory";
@@ -32,6 +33,7 @@ function AuthenticatedRouter() {
       <Route path="/shipments/:id" component={ShipmentWizard} />
       <Route path="/shipments/:id/edit" component={ShipmentWizard} />
       <Route path="/suppliers" component={Suppliers} />
+      <Route path="/product-types" component={ProductTypes} />
       <Route path="/exchange-rates" component={ExchangeRates} />
       <Route path="/payments" component={Payments} />
       <Route path="/inventory" component={Inventory} />

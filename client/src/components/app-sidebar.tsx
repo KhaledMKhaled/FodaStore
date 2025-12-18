@@ -10,6 +10,7 @@ import {
   Calculator,
   FileSpreadsheet,
   Banknote,
+  Tag,
 } from "lucide-react";
 import {
   Sidebar,
@@ -53,6 +54,12 @@ const menuItems = [
     url: "/suppliers",
     icon: Users,
     tooltip: "إضافة وتعديل بيانات الموردين المرتبطين بكل صنف",
+  },
+  {
+    title: "أنواع الأصناف",
+    url: "/product-types",
+    icon: Tag,
+    tooltip: "إدارة أنواع الأصناف المستخدمة في الشحنات",
   },
   {
     title: "أسعار الصرف",
