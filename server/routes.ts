@@ -1,6 +1,6 @@
-import type { Express } from "express";
+import type { Express, RequestHandler } from "express";
 import type { Server } from "http";
-import { storage } from "./storage";
+import { storage, type IStorage } from "./storage";
 import { setupAuth, isAuthenticated, requireRole } from "./auth";
 import { logAuditEvent } from "./audit";
 import { getPaymentsWithShipments } from "./payments";
@@ -48,9 +48,31 @@ const uploadItemImage = multer({
   },
 });
 
-export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
+type RouteDependencies = {
+  storage?: IStorage;
+  auditLogger?: typeof logAuditEvent;
+  auth?: {
+    setupAuth: (app: Express) => Promise<void>;
+    isAuthenticated: RequestHandler;
+    requireRole: (roles: string[]) => RequestHandler;
+  };
+};
+
+export async function registerRoutes(
+  httpServer: Server,
+  app: Express,
+  deps: RouteDependencies = {},
+): Promise<void> {
+  const routeStorage = deps.storage ?? storage;
+  const auth = deps.auth ?? { setupAuth, isAuthenticated, requireRole };
+  const auditLogger = deps.auditLogger ?? ((event) => logAuditEvent(event, routeStorage));
+  const storage = routeStorage;
+  const isAuthenticated = auth.isAuthenticated;
+  const requireRole = auth.requireRole;
+  const logAuditEvent = auditLogger;
+
   // Setup authentication
-  await setupAuth(app);
+  await auth.setupAuth(app);
 
   // Auth routes
   app.get("/api/auth/user", async (req, res) => {

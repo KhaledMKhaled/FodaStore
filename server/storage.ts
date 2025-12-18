@@ -502,10 +502,32 @@ export class DatabaseStorage implements IStorage {
       };
 
       const amountOriginal = parseAmount(data.amountOriginal as any);
-      const exchangeRate = data.exchangeRateToEgp
+      let exchangeRate = data.exchangeRateToEgp
         ? parseAmount(data.exchangeRateToEgp as any)
         : null;
 
+      if (data.paymentCurrency === "RMB" && !exchangeRate) {
+        const [latestRate] = await tx
+          .select()
+          .from(exchangeRates)
+          .where(
+            and(
+              eq(exchangeRates.fromCurrency, "RMB"),
+              eq(exchangeRates.toCurrency, "EGP"),
+            ),
+          )
+          .orderBy(desc(exchangeRates.rateDate))
+          .limit(1);
+
+        if (latestRate?.rateValue) {
+          exchangeRate = parseAmount(latestRate.rateValue);
+        } else {
+          throw new ApiError("PAYMENT_RATE_MISSING", undefined, 400, {
+            shipmentId: data.shipmentId,
+            currency: data.paymentCurrency,
+          });
+        }
+      }
 
       let normalizedAmounts;
       try {
