@@ -299,7 +299,7 @@ export default function ShipmentWizard() {
   function createEmptyItem(): Partial<ShipmentItem> {
     return {
       productName: "",
-      productType: "",
+      productTypeId: undefined,
       countryOfOrigin: "الصين",
       cartonsCtn: 0,
       piecesPerCartonPcs: 0,
@@ -486,6 +486,7 @@ export default function ShipmentWizard() {
               addItem={addItem}
               removeItem={removeItem}
               suppliers={suppliers || []}
+              productTypes={productTypes}
               isNew={isNew}
               handleImageUpload={handleImageUpload}
               removeItemImage={removeItemImage}
@@ -658,6 +659,7 @@ function Step1Import({
   addItem,
   removeItem,
   suppliers,
+  productTypes,
   isNew,
   handleImageUpload,
   removeItemImage,
@@ -693,6 +695,7 @@ function Step1Import({
   addItem: () => void;
   removeItem: (index: number) => void;
   suppliers: Supplier[];
+  productTypes: ProductType[] | undefined;
   isNew: boolean;
   handleImageUpload: (index: number, file: File) => Promise<void>;
   removeItemImage: (index: number) => void;
