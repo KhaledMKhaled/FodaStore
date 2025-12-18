@@ -537,20 +537,13 @@ export class DatabaseStorage implements IStorage {
       const currentPaid = parseAmount(shipment.totalPaidEgp);
       const knownTotal = computeKnownTotal(shipment);
 
-      // FIX: Allow payment if known total > 0 OR at minimum allow first deposit with known total = 0
-      // Check overpayment only: don't allow paying more than (knownTotal - already paid)
-      if (knownTotal <= 0 && currentPaid <= 0) {
-        // First payment required: shipment must have at least some cost data (e.g., goods cost)
-        throw new ApiError("PAYMENT_TOTAL_MISSING", 
-          "لا يمكن تسجيل دفعة للشحنة - لم يتم إدخال بيانات التكلفة بعد", 400, { 
-          shipmentId: data.shipmentId,
-          knownTotal
-        });
-      }
-
+      // RADICAL FIX: Allow payments based on KNOWN total costs at any time
+      // Known total = sum of currently available cost components
+      // Payments allowed as long as they don't exceed (knownTotal - alreadyPaid)
+      
       const remainingAllowed = Math.max(0, knownTotal - currentPaid);
 
-      // Overpayment check: payment must not exceed remaining allowed based on known total
+      // ONLY block if payment exceeds what's currently known/allowed
       if (amountEgp > remainingAllowed + 0.0001) {
         throw new ApiError("PAYMENT_OVERPAY", 
           `لا يمكن دفع هذا المبلغ - الحد المسموح به هو ${remainingAllowed.toFixed(2)} جنيه`, 409, {

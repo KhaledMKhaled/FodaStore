@@ -88,17 +88,27 @@ export const shipmentService = {
 
       const rmbToEgp = await getLatestRmbToEgpRate(tx);
       const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgp;
-      const finalTotalCostEgp = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
+      const knownTotalCostEgp = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
 
+      // Initialize all cost and balance fields to support immediate payments
+      // Note: commissionCostEgp, shippingCostEgp default to 0 (added later when shipping details entered)
       await tx
         .update(shipments)
         .set({
           purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
           purchaseCostEgp: purchaseCostEgp.toFixed(2),
+          purchaseRmbToEgpRate: rmbToEgp.toFixed(4),
           customsCostEgp: totalCustomsCostEgp.toFixed(2),
           takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
-          finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
-          balanceEgp: finalTotalCostEgp.toFixed(2),
+          // Initialize optional cost fields to 0 (not NULL) for payment calculations
+          commissionCostRmb: "0.00",
+          commissionCostEgp: "0.00",
+          shippingCostRmb: "0.00",
+          shippingCostEgp: "0.00",
+          // Set both final and known totals consistently
+          finalTotalCostEgp: knownTotalCostEgp.toFixed(2),
+          balanceEgp: knownTotalCostEgp.toFixed(2),
+          totalPaidEgp: "0.00",
           updatedAt: new Date(),
         })
         .where(eq(shipments.id, shipment.id));
