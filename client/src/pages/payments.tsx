@@ -15,6 +15,7 @@ import {
   Filter,
   ChevronDown,
   ChevronUp,
+  Receipt,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,6 +73,28 @@ interface PaymentsStats {
   lastPayment: ShipmentPayment | null;
 }
 
+interface InvoiceSummary {
+  shipmentId: number;
+  shipmentCode: string;
+  shipmentName: string;
+  rmb: {
+    goodsTotal: string;
+    shippingTotal: string;
+    commissionTotal: string;
+    subtotal: string;
+    paid: string;
+    remaining: string;
+  };
+  egp: {
+    customsTotal: string;
+    takhreegTotal: string;
+    subtotal: string;
+    paid: string;
+    remaining: string;
+  };
+  computedAt: string;
+}
+
 export default function Payments() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -83,6 +106,7 @@ export default function Payments() {
   const [paymentMethod, setPaymentMethod] = useState("");
   const [costComponent, setCostComponent] = useState("");
   const [expandedShipments, setExpandedShipments] = useState<Set<number>>(new Set());
+  const [showInvoiceSummary, setShowInvoiceSummary] = useState(false);
   const { toast } = useToast();
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
@@ -99,6 +123,11 @@ export default function Payments() {
     (ShipmentPayment & { shipment?: Shipment })[]
   >({
     queryKey: ["/api/payments"],
+  });
+
+  const { data: invoiceSummary, isLoading: loadingInvoiceSummary, isError: invoiceSummaryError } = useQuery<InvoiceSummary>({
+    queryKey: ["/api/shipments", selectedShipmentId, "invoice-summary"],
+    enabled: !!selectedShipmentId && showInvoiceSummary,
   });
 
   const createMutation = useMutation({
@@ -131,6 +160,7 @@ export default function Payments() {
     setPaymentCurrency("EGP");
     setPaymentMethod("");
     setCostComponent("");
+    setShowInvoiceSummary(false);
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -272,21 +302,34 @@ export default function Payments() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label>اختر الشحنة *</Label>
-                <Select
-                  value={selectedShipmentId?.toString() || ""}
-                  onValueChange={(v) => setSelectedShipmentId(parseInt(v))}
-                >
-                  <SelectTrigger data-testid="select-shipment">
-                    <SelectValue placeholder="اختر الشحنة" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeShipments?.map((s) => (
-                      <SelectItem key={s.id} value={s.id.toString()}>
-                        {s.shipmentCode} - {s.shipmentName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex gap-2">
+                  <Select
+                    value={selectedShipmentId?.toString() || ""}
+                    onValueChange={(v) => setSelectedShipmentId(parseInt(v))}
+                  >
+                    <SelectTrigger data-testid="select-shipment" className="flex-1">
+                      <SelectValue placeholder="اختر الشحنة" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activeShipments?.map((s) => (
+                        <SelectItem key={s.id} value={s.id.toString()}>
+                          {s.shipmentCode} - {s.shipmentName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    disabled={!selectedShipmentId}
+                    onClick={() => setShowInvoiceSummary(true)}
+                    data-testid="button-invoice-summary"
+                    title="ملخص الفاتورة"
+                  >
+                    <Receipt className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -813,6 +856,93 @@ export default function Payments() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Invoice Summary Modal - at root level for proper focus management */}
+      <Dialog open={showInvoiceSummary} onOpenChange={setShowInvoiceSummary}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="w-5 h-5" />
+              ملخص فاتورة الشحنة
+            </DialogTitle>
+          </DialogHeader>
+          {loadingInvoiceSummary ? (
+            <div className="space-y-3">
+              <Skeleton className="h-6 w-full" />
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : invoiceSummaryError ? (
+            <div className="text-center py-4">
+              <div className="text-destructive mb-2">حدث خطأ أثناء تحميل البيانات</div>
+              <Button variant="outline" size="sm" onClick={() => setShowInvoiceSummary(false)}>
+                إغلاق
+              </Button>
+            </div>
+          ) : invoiceSummary ? (
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                {invoiceSummary.shipmentCode} - {invoiceSummary.shipmentName}
+              </div>
+              
+              {/* RMB Section */}
+              <div className="border rounded-md p-3 space-y-2">
+                <h4 className="font-medium text-sm flex items-center gap-2">
+                  <span className="text-lg">¥</span>
+                  تكاليف اليوان الصيني (RMB)
+                </h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <span className="text-muted-foreground">تكلفة البضاعة:</span>
+                  <span className="text-left font-mono">{formatCurrency(invoiceSummary.rmb.goodsTotal)} ¥</span>
+                  
+                  <span className="text-muted-foreground">تكلفة الشحن:</span>
+                  <span className="text-left font-mono">{formatCurrency(invoiceSummary.rmb.shippingTotal)} ¥</span>
+                  
+                  <span className="text-muted-foreground">العمولة:</span>
+                  <span className="text-left font-mono">{formatCurrency(invoiceSummary.rmb.commissionTotal)} ¥</span>
+                  
+                  <span className="font-medium border-t pt-1">الإجمالي:</span>
+                  <span className="text-left font-mono font-medium border-t pt-1">{formatCurrency(invoiceSummary.rmb.subtotal)} ¥</span>
+                  
+                  <span className="text-green-600 dark:text-green-400">المدفوع:</span>
+                  <span className="text-left font-mono text-green-600 dark:text-green-400">{formatCurrency(invoiceSummary.rmb.paid)} ¥</span>
+                  
+                  <span className="text-red-600 dark:text-red-400">المتبقي:</span>
+                  <span className="text-left font-mono text-red-600 dark:text-red-400">{formatCurrency(invoiceSummary.rmb.remaining)} ¥</span>
+                </div>
+              </div>
+              
+              {/* EGP Section */}
+              <div className="border rounded-md p-3 space-y-2">
+                <h4 className="font-medium text-sm flex items-center gap-2">
+                  <span className="text-lg">ج.م</span>
+                  تكاليف الجنيه المصري (EGP)
+                </h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <span className="text-muted-foreground">الجمارك:</span>
+                  <span className="text-left font-mono">{formatCurrency(invoiceSummary.egp.customsTotal)} ج.م</span>
+                  
+                  <span className="text-muted-foreground">التخريج:</span>
+                  <span className="text-left font-mono">{formatCurrency(invoiceSummary.egp.takhreegTotal)} ج.م</span>
+                  
+                  <span className="font-medium border-t pt-1">الإجمالي:</span>
+                  <span className="text-left font-mono font-medium border-t pt-1">{formatCurrency(invoiceSummary.egp.subtotal)} ج.م</span>
+                  
+                  <span className="text-green-600 dark:text-green-400">المدفوع:</span>
+                  <span className="text-left font-mono text-green-600 dark:text-green-400">{formatCurrency(invoiceSummary.egp.paid)} ج.م</span>
+                  
+                  <span className="text-red-600 dark:text-red-400">المتبقي:</span>
+                  <span className="text-left font-mono text-red-600 dark:text-red-400">{formatCurrency(invoiceSummary.egp.remaining)} ج.م</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center text-muted-foreground py-4">
+              لا توجد بيانات
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

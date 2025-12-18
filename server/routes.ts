@@ -259,6 +259,68 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Invoice Summary - breakdown by currency
+  app.get("/api/shipments/:id/invoice-summary", isAuthenticated, async (req, res) => {
+    try {
+      const shipmentId = parseInt(req.params.id);
+      const shipment = await storage.getShipment(shipmentId);
+      
+      if (!shipment) {
+        return res.status(404).json({ message: "الشحنة غير موجودة" });
+      }
+      
+      const payments = await storage.getShipmentPayments(shipmentId);
+      const shippingDetails = await storage.getShippingDetails(shipmentId);
+      
+      // Calculate paid amounts by currency
+      const paidRmb = payments
+        .filter(p => p.paymentCurrency === "RMB")
+        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
+      
+      const paidEgp = payments
+        .filter(p => p.paymentCurrency === "EGP")
+        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
+      
+      // RMB costs breakdown
+      const goodsTotalRmb = parseFloat(shipment.purchaseCostRmb || "0");
+      const shippingTotalRmb = parseFloat(shipment.shippingCostRmb || "0");
+      const commissionTotalRmb = parseFloat(shipment.commissionCostRmb || "0");
+      const rmbSubtotal = goodsTotalRmb + shippingTotalRmb + commissionTotalRmb;
+      const rmbRemaining = Math.max(0, rmbSubtotal - paidRmb);
+      
+      // EGP costs breakdown
+      const customsTotalEgp = parseFloat(shipment.customsCostEgp || "0");
+      const takhreegTotalEgp = parseFloat(shipment.takhreegCostEgp || "0");
+      const egpSubtotal = customsTotalEgp + takhreegTotalEgp;
+      const egpRemaining = Math.max(0, egpSubtotal - paidEgp);
+      
+      res.json({
+        shipmentId,
+        shipmentCode: shipment.shipmentCode,
+        shipmentName: shipment.shipmentName,
+        rmb: {
+          goodsTotal: goodsTotalRmb.toFixed(2),
+          shippingTotal: shippingTotalRmb.toFixed(2),
+          commissionTotal: commissionTotalRmb.toFixed(2),
+          subtotal: rmbSubtotal.toFixed(2),
+          paid: paidRmb.toFixed(2),
+          remaining: rmbRemaining.toFixed(2),
+        },
+        egp: {
+          customsTotal: customsTotalEgp.toFixed(2),
+          takhreegTotal: takhreegTotalEgp.toFixed(2),
+          subtotal: egpSubtotal.toFixed(2),
+          paid: paidEgp.toFixed(2),
+          remaining: egpRemaining.toFixed(2),
+        },
+        computedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error fetching invoice summary:", error);
+      res.status(500).json({ message: "خطأ في جلب ملخص الفاتورة" });
+    }
+  });
+
   // Exchange Rates
   app.get("/api/exchange-rates", isAuthenticated, async (req, res) => {
     try {
@@ -357,20 +419,52 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/payments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
-      // Convert paymentDate string to Date object and validate
-      let paymentDate: Date | undefined;
-      if (req.body.paymentDate) {
-        paymentDate = new Date(req.body.paymentDate);
+      const body = req.body;
+      
+      // Pre-process paymentDate: convert string/Date to proper Date object
+      let paymentDate: Date;
+      if (body.paymentDate) {
+        paymentDate = new Date(body.paymentDate);
         if (Number.isNaN(paymentDate.getTime())) {
           return res.status(400).json({ message: "تاريخ الدفع غير صالح" });
         }
+      } else {
+        return res.status(400).json({ message: "تاريخ الدفع مطلوب" });
       }
-      const bodyWithDate = {
-        ...req.body,
+      
+      // Prepare data with proper type coercion for schema validation
+      const preparedBody = {
+        ...body,
         paymentDate,
+        shipmentId: body.shipmentId ? Number(body.shipmentId) : undefined,
+        amountOriginal: body.amountOriginal ? String(body.amountOriginal) : undefined,
+        amountEgp: body.amountEgp ? String(body.amountEgp) : undefined,
+        exchangeRateToEgp: body.exchangeRateToEgp ? String(body.exchangeRateToEgp) : null,
       };
-      const data = insertShipmentPaymentSchema.parse(bodyWithDate);
+      
+      // Validate with schema
+      const parseResult = insertShipmentPaymentSchema.safeParse(preparedBody);
+      
+      if (!parseResult.success) {
+        // Map Zod errors to Arabic messages
+        const firstError = parseResult.error.errors[0];
+        const fieldMessages: Record<string, string> = {
+          shipmentId: "يجب اختيار الشحنة",
+          paymentDate: "تاريخ الدفع مطلوب",
+          paymentCurrency: "عملة الدفع مطلوبة",
+          amountOriginal: "المبلغ مطلوب",
+          amountEgp: "المبلغ بالجنيه المصري مطلوب",
+          costComponent: "يجب اختيار بند التكلفة",
+          paymentMethod: "يجب اختيار طريقة الدفع",
+        };
+        const fieldName = firstError?.path?.[0]?.toString() || "";
+        const message = fieldMessages[fieldName] || firstError?.message || "بيانات غير صالحة";
+        return res.status(400).json({ message });
+      }
+      
+      const data = parseResult.data;
       const userId = (req.user as any)?.id;
+      
       const payment = await storage.createPayment({
         ...data,
         createdByUserId: userId,
@@ -381,13 +475,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         entityType: "PAYMENT",
         entityId: payment.id,
         actionType: "CREATE",
-        details: { shipmentId: payment.shipmentId },
+        details: { 
+          shipmentId: payment.shipmentId,
+          amount: payment.amountEgp,
+          currency: payment.paymentCurrency,
+          method: payment.paymentMethod,
+        },
       });
       
       res.json(payment);
     } catch (error) {
       console.error("Error creating payment:", error);
-      const message = (error as Error)?.message || "Invalid data";
+      const message = (error as Error)?.message || "حدث خطأ أثناء حفظ الدفعة";
       res.status(400).json({ message });
     }
   });
