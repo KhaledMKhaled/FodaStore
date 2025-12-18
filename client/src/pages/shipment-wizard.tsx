@@ -890,7 +890,7 @@ function Step1Import({
                         <SelectValue placeholder="اختر المورد" />
                       </SelectTrigger>
                       <SelectContent>
-                        {suppliers.map((supplier) => (
+                        {(suppliers || []).map((supplier) => (
                           <SelectItem key={supplier.id} value={supplier.id.toString()}>
                             {supplier.name}
                           </SelectItem>
@@ -910,7 +910,7 @@ function Step1Import({
                         <SelectValue placeholder="اختر نوع الصنف" />
                       </SelectTrigger>
                       <SelectContent>
-                        {productTypes?.map((type) => (
+                        {(productTypes || []).map((type) => (
                           <SelectItem key={type.id} value={type.id.toString()}>
                             {type.name}
                           </SelectItem>
