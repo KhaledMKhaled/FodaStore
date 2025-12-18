@@ -57,6 +57,10 @@ interface AccountingDashboard {
   totalBalanceCommissionRmb: string;
   totalPaidCommissionEgp: string;
   totalBalanceCommissionEgp: string;
+  totalPaidPurchaseRmb: string;
+  totalBalancePurchaseRmb: string;
+  totalPaidPurchaseEgp: string;
+  totalBalancePurchaseEgp: string;
   totalPaidCustomsEgp: string;
   totalBalanceCustomsEgp: string;
   totalPaidTakhreegEgp: string;
@@ -360,8 +364,8 @@ export default function AccountingPage() {
               icon={Package}
               value={stats?.totalPurchaseRmb || "0"}
               currency="RMB"
-              paid={stats?.totalPaidRmb || "0"}
-              remaining={stats?.totalBalanceRmb || "0"}
+              paid={stats?.totalPaidPurchaseRmb || "0"}
+              remaining={stats?.totalBalancePurchaseRmb || "0"}
             />
             <CostItemCard
               title="تكلفة الشحن"
@@ -403,8 +407,8 @@ export default function AccountingPage() {
               icon={Package}
               value={stats?.totalPurchaseEgp || "0"}
               currency="EGP"
-              paid={stats?.totalPaidEgp || "0"}
-              remaining={stats?.totalBalanceEgp || "0"}
+              paid={stats?.totalPaidPurchaseEgp || "0"}
+              remaining={stats?.totalBalancePurchaseEgp || "0"}
             />
             <CostItemCard
               title="تكلفة الشحن"

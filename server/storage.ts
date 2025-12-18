@@ -1286,6 +1286,16 @@ export class DatabaseStorage implements IStorage {
       return sum + Math.max(0, cost - paid);
     }, 0);
 
+    // Calculate paid and remaining for purchase cost
+    const totalPaidPurchaseRmb = filteredPayments
+      .filter(p => p.costComponent === "تكلفة البضاعة" && p.paymentCurrency === "RMB")
+      .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
+    const totalPaidPurchaseEgp = filteredPayments
+      .filter(p => p.costComponent === "تكلفة البضاعة")
+      .reduce((sum, p) => sum + parseFloat(p.amountEgp || "0"), 0);
+    const totalBalancePurchaseRmb = Math.max(0, totalPurchaseRmb - totalPaidPurchaseRmb);
+    const totalBalancePurchaseEgp = Math.max(0, totalPurchaseEgp - totalPaidPurchaseEgp);
+
     // Calculate paid and remaining for shipping
     const totalPaidShippingRmb = filteredPayments
       .filter(p => p.costComponent === "الشحن" && p.paymentCurrency === "RMB")
@@ -1365,6 +1375,10 @@ export class DatabaseStorage implements IStorage {
       totalBalanceCommissionRmb: totalBalanceCommissionRmb.toFixed(2),
       totalPaidCommissionEgp: totalPaidCommissionEgp.toFixed(2),
       totalBalanceCommissionEgp: totalBalanceCommissionEgp.toFixed(2),
+      totalPaidPurchaseRmb: totalPaidPurchaseRmb.toFixed(2),
+      totalBalancePurchaseRmb: totalBalancePurchaseRmb.toFixed(2),
+      totalPaidPurchaseEgp: totalPaidPurchaseEgp.toFixed(2),
+      totalBalancePurchaseEgp: totalBalancePurchaseEgp.toFixed(2),
       totalPaidCustomsEgp: totalPaidCustomsEgp.toFixed(2),
       totalBalanceCustomsEgp: totalBalanceCustomsEgp.toFixed(2),
       totalPaidTakhreegEgp: totalPaidTakhreegEgp.toFixed(2),
