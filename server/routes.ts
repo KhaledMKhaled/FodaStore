@@ -12,6 +12,7 @@ import {
   insertExchangeRateSchema,
   insertShipmentPaymentSchema,
 } from "@shared/schema";
+import { calculatePaymentSnapshot, parseAmountOrZero } from "./services/paymentCalculations";
 import bcrypt from "bcryptjs";
 import multer from "multer";
 import path from "path";
@@ -408,34 +409,60 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       
       const payments = await storage.getShipmentPayments(shipmentId);
-      const shippingDetails = await storage.getShippingDetails(shipmentId);
-      
-      // Calculate paid amounts by currency
-      const paidRmb = payments
-        .filter(p => p.paymentCurrency === "RMB")
-        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
-      
-      const paidEgp = payments
-        .filter(p => p.paymentCurrency === "EGP")
-        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
-      
+      const paymentSnapshot = await calculatePaymentSnapshot({
+        shipment,
+        payments,
+        loadRecoveryData: async () => {
+          const items = await storage.getShipmentItems(shipmentId);
+          const rate = await storage.getLatestRate("RMB", "EGP");
+
+          return {
+            items,
+            rmbToEgpRate: rate ? parseAmountOrZero(rate.rateValue) : undefined,
+          };
+        },
+      });
+
+      const paidRmb = paymentSnapshot.paidByCurrency.RMB?.original ?? 0;
+      const paidEgp = paymentSnapshot.paidByCurrency.EGP?.original ?? 0;
+
       // RMB costs breakdown
-      const goodsTotalRmb = parseFloat(shipment.purchaseCostRmb || "0");
-      const shippingTotalRmb = parseFloat(shipment.shippingCostRmb || "0");
-      const commissionTotalRmb = parseFloat(shipment.commissionCostRmb || "0");
+      const goodsTotalRmb = parseAmountOrZero(shipment.purchaseCostRmb || "0");
+      const shippingTotalRmb = parseAmountOrZero(
+        shipment.shippingCostRmb || "0",
+      );
+      const commissionTotalRmb = parseAmountOrZero(
+        shipment.commissionCostRmb || "0",
+      );
       const rmbSubtotal = goodsTotalRmb + shippingTotalRmb + commissionTotalRmb;
       const rmbRemaining = Math.max(0, rmbSubtotal - paidRmb);
       
       // EGP costs breakdown
-      const customsTotalEgp = parseFloat(shipment.customsCostEgp || "0");
-      const takhreegTotalEgp = parseFloat(shipment.takhreegCostEgp || "0");
+      const customsTotalEgp = parseAmountOrZero(shipment.customsCostEgp || "0");
+      const takhreegTotalEgp = parseAmountOrZero(
+        shipment.takhreegCostEgp || "0",
+      );
       const egpSubtotal = customsTotalEgp + takhreegTotalEgp;
       const egpRemaining = Math.max(0, egpSubtotal - paidEgp);
-      
+
+      const paidByCurrency = Object.fromEntries(
+        Object.entries(paymentSnapshot.paidByCurrency).map(([currency, values]) => [
+          currency,
+          {
+            original: values.original.toFixed(2),
+            convertedToEgp: values.convertedToEgp.toFixed(2),
+          },
+        ]),
+      );
+
       res.json({
         shipmentId,
         shipmentCode: shipment.shipmentCode,
         shipmentName: shipment.shipmentName,
+        knownTotalCost: paymentSnapshot.knownTotalCost.toFixed(2),
+        totalPaidEgp: paymentSnapshot.totalPaidEgp.toFixed(2),
+        remainingAllowed: paymentSnapshot.remainingAllowed.toFixed(2),
+        paidByCurrency,
         rmb: {
           goodsTotal: goodsTotalRmb.toFixed(2),
           shippingTotal: shippingTotalRmb.toFixed(2),

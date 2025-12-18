@@ -36,6 +36,10 @@ import {
   type InsertAuditLog,
 } from "@shared/schema";
 import { normalizePaymentAmounts, roundAmount } from "./services/currency";
+import {
+  calculatePaymentSnapshot,
+  parseAmountOrZero,
+} from "./services/paymentCalculations";
 import { ApiError } from "./errors";
 
 const parseAmount = (value: unknown): number => {
@@ -595,9 +599,12 @@ export class DatabaseStorage implements IStorage {
         throw new ApiError("SHIPMENT_LOCKED", undefined, 409, { shipmentId: data.shipmentId, status: shipment.status });
       }
 
+codex/refactor-invoice-summary-calculations
+      const amountOriginal = parseAmountOrZero(data.amountOriginal as any);
       const amountOriginal = parseAmount(data.amountOriginal as any);
+main
       const exchangeRate = data.exchangeRateToEgp
-        ? parseAmount(data.exchangeRateToEgp as any)
+        ? parseAmountOrZero(data.exchangeRateToEgp as any)
         : null;
 
 
@@ -629,6 +636,74 @@ export class DatabaseStorage implements IStorage {
 
       const { amountEgp, exchangeRateToEgp } = normalizedAmounts;
 
+codex/refactor-invoice-summary-calculations
+      const existingPayments = await tx
+        .select()
+        .from(shipmentPayments)
+        .where(eq(shipmentPayments.shipmentId, data.shipmentId));
+
+      const paymentSnapshot = await calculatePaymentSnapshot({
+        shipment,
+        payments: existingPayments,
+        loadRecoveryData: async () => {
+          const itemsList = await tx
+            .select()
+            .from(shipmentItems)
+            .where(eq(shipmentItems.shipmentId, data.shipmentId));
+
+          const rateResult = await tx
+            .select()
+            .from(exchangeRates)
+            .where(
+              and(
+                eq(exchangeRates.fromCurrency, "RMB"),
+                eq(exchangeRates.toCurrency, "EGP"),
+              ),
+            )
+            .orderBy(desc(exchangeRates.rateDate))
+            .limit(1);
+
+          return {
+            items: itemsList,
+            rmbToEgpRate:
+              rateResult.length > 0
+                ? parseAmountOrZero(rateResult[0].rateValue)
+                : 7.15,
+          };
+        },
+      });
+
+      if (paymentSnapshot.recoveredTotals) {
+        try {
+          await tx
+            .update(shipments)
+            .set({
+              purchaseCostRmb: paymentSnapshot.recoveredTotals.purchaseCostRmb.toFixed(
+                2,
+              ),
+              purchaseCostEgp: paymentSnapshot.recoveredTotals.purchaseCostEgp.toFixed(
+                2,
+              ),
+              customsCostEgp: paymentSnapshot.recoveredTotals.customsCostEgp.toFixed(
+                2,
+              ),
+              takhreegCostEgp: paymentSnapshot.recoveredTotals.takhreegCostEgp.toFixed(
+                2,
+              ),
+              finalTotalCostEgp:
+                paymentSnapshot.recoveredTotals.finalTotalCostEgp.toFixed(2),
+              balanceEgp: Math.max(
+                0,
+                paymentSnapshot.recoveredTotals.finalTotalCostEgp -
+                  paymentSnapshot.totalPaidEgp,
+              ).toFixed(2),
+            })
+            .where(eq(shipments.id, data.shipmentId));
+        } catch (error) {
+          console.error(
+            `[PAYMENT RECOVERY ERROR] Failed to recover costs for shipment ${data.shipmentId}:`,
+            error,
+          );
       const currentPaid = parseAmount(shipment.totalPaidEgp);
       const defaultRmbRate = parseAmount(process.env.DEFAULT_RMB_TO_EGP_RATE);
 
@@ -679,24 +754,19 @@ export class DatabaseStorage implements IStorage {
             shipmentId: data.shipmentId,
             currency: "RMB",
           });
+main
         }
         throw error;
       }
 
-      // RADICAL FIX: Allow payments based on KNOWN total costs at any time
-      // Known total = sum of currently available cost components
-      // Payments allowed as long as they don't exceed (knownTotal - alreadyPaid)
-      
-      const remainingAllowed = Math.max(0, knownTotal - currentPaid);
-
       // ONLY block if payment exceeds what's currently known/allowed
-      if (amountEgp > remainingAllowed + 0.0001) {
+      if (amountEgp > paymentSnapshot.remainingAllowed + 0.0001) {
         throw new ApiError("PAYMENT_OVERPAY", 
-          `لا يمكن دفع هذا المبلغ - الحد المسموح به هو ${remainingAllowed.toFixed(2)} جنيه`, 409, {
+          `لا يمكن دفع هذا المبلغ - الحد المسموح به هو ${paymentSnapshot.remainingAllowed.toFixed(2)} جنيه`, 409, {
           shipmentId: data.shipmentId,
-          knownTotal,
-          alreadyPaid: currentPaid,
-          remainingAllowed,
+          knownTotal: paymentSnapshot.knownTotalCost,
+          alreadyPaid: paymentSnapshot.totalPaidEgp,
+          remainingAllowed: paymentSnapshot.remainingAllowed,
           attempted: amountEgp,
         });
       }
@@ -721,7 +791,9 @@ export class DatabaseStorage implements IStorage {
 
       const totalPaidNumber = roundAmount(parseFloat(paymentTotals?.totalPaid || "0"));
       // Use known total for balance calculation (allows partial payments)
-      const balance = roundAmount(Math.max(0, knownTotal - totalPaidNumber));
+      const balance = roundAmount(
+        Math.max(0, paymentSnapshot.knownTotalCost - totalPaidNumber),
+      );
       const latestPaymentDate =
         paymentTotals?.lastPaymentDate || data.paymentDate || new Date();
 
