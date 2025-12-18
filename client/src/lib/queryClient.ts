@@ -1,10 +1,54 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+type ApiErrorResponse = {
+  ok?: boolean;
+  error?: { code?: string; message?: string; details?: unknown };
+  message?: string;
+};
+
+function buildError(message: string, status: number, code?: string, details?: unknown) {
+  const error = new Error(message);
+  (error as any).status = status;
+  (error as any).code = code;
+  (error as any).details = details;
+  return error;
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    const contentType = res.headers.get("content-type") || "";
+    let bodyText = "";
+    let parsed: ApiErrorResponse | undefined;
+
+    try {
+      bodyText = await res.text();
+      if (bodyText) {
+        if (contentType.includes("application/json")) {
+          parsed = JSON.parse(bodyText);
+        } else {
+          parsed = JSON.parse(bodyText);
+        }
+      }
+    } catch {
+      // ignore parse errors
+    }
+
+    const code = parsed?.error?.code;
+    const details = parsed?.error?.details;
+    const message =
+      parsed?.error?.message ||
+      parsed?.message ||
+      bodyText ||
+      res.statusText ||
+      `Request failed with status ${res.status}`;
+
+    throw buildError(message, res.status, code, details);
   }
+}
+
+export function getErrorMessage(error: unknown): string {
+  const err = error as any;
+  return err?.message || "حدث خطأ";
 }
 
 export async function apiRequest(

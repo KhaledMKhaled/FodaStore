@@ -52,7 +52,7 @@ test("viewer role receives 403 with Arabic message", () => {
   const result = runMiddleware("مشاهد");
 
   assert.strictEqual(result.status, 403);
-  assert.deepStrictEqual(result.body, { message: "ليست لديك صلاحية للقيام بهذا الإجراء" });
+  assert.deepStrictEqual(result.body, { message: "لا تملك صلاحية لتنفيذ هذا الإجراء" });
   assert.strictEqual(result.nextCalled, false);
 });
 
@@ -60,7 +60,7 @@ test("inventory manager role receives 403 with Arabic message", () => {
   const result = runMiddleware("مسؤول مخزون");
 
   assert.strictEqual(result.status, 403);
-  assert.deepStrictEqual(result.body, { message: "ليست لديك صلاحية للقيام بهذا الإجراء" });
+  assert.deepStrictEqual(result.body, { message: "لا تملك صلاحية لتنفيذ هذا الإجراء" });
   assert.strictEqual(result.nextCalled, false);
 });
 

@@ -48,7 +48,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
 import { shipmentStatusColors } from "@/lib/colorMaps";
 import type { Shipment, ShipmentPayment, InsertShipmentPayment } from "@shared/schema";
 
@@ -143,15 +143,7 @@ export default function Payments() {
       resetForm();
     },
     onError: (error: Error) => {
-      const [, serverMessage] = error.message.split(":");
-      let parsed = serverMessage ? serverMessage.trim() : "";
-      try {
-        const json = JSON.parse(parsed);
-        parsed = json?.message || parsed;
-      } catch {
-        // ignore parse failures
-      }
-      toast({ title: parsed || "حدث خطأ", variant: "destructive" });
+      toast({ title: getErrorMessage(error), variant: "destructive" });
     },
   });
 

@@ -36,6 +36,7 @@ import {
   type InsertAuditLog,
 } from "@shared/schema";
 import { normalizePaymentAmounts, roundAmount } from "./services/currency";
+import { ApiError } from "./errors";
 
 export interface IStorage {
   // Users
@@ -474,26 +475,81 @@ export class DatabaseStorage implements IStorage {
       const shipment = (lockedShipment.rows?.[0] as Shipment | undefined) || undefined;
 
       if (!shipment) {
-        throw new Error("الشحنة غير موجودة");
+        throw new ApiError("SHIPMENT_NOT_FOUND", undefined, 404, { shipmentId: data.shipmentId });
       }
 
-      const amountOriginal = parseFloat(data.amountOriginal as any);
+      if (shipment.status === "مؤرشفة") {
+        throw new ApiError("SHIPMENT_LOCKED", undefined, 409, { shipmentId: data.shipmentId, status: shipment.status });
+      }
+
+      const parseAmount = (value: unknown): number => {
+        if (value === null || value === undefined) return 0;
+        const parsed = typeof value === "number" ? value : parseFloat(value as any);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+
+      const computeFinalCost = (s: Shipment): number => {
+        const existingTotal = parseAmount(s.finalTotalCostEgp);
+        if (existingTotal > 0) return existingTotal;
+
+        const derivedTotal =
+          parseAmount(s.purchaseCostEgp) +
+          parseAmount(s.commissionCostEgp) +
+          parseAmount(s.shippingCostEgp) +
+          parseAmount(s.customsCostEgp) +
+          parseAmount(s.takhreegCostEgp);
+
+        return derivedTotal;
+      };
+
+      const amountOriginal = parseAmount(data.amountOriginal as any);
       const exchangeRate = data.exchangeRateToEgp
-        ? parseFloat(data.exchangeRateToEgp as any)
+        ? parseAmount(data.exchangeRateToEgp as any)
         : null;
 
-      const { amountEgp, exchangeRateToEgp } = normalizePaymentAmounts({
-        paymentCurrency: data.paymentCurrency,
-        amountOriginal,
-        exchangeRateToEgp: exchangeRate,
-      });
+      let normalizedAmounts;
+      try {
+        normalizedAmounts = normalizePaymentAmounts({
+          paymentCurrency: data.paymentCurrency,
+          amountOriginal,
+          exchangeRateToEgp: exchangeRate,
+        });
+      } catch (error) {
+        const message = (error as Error)?.message || "";
 
-      const currentPaid = parseFloat(shipment.totalPaidEgp || "0");
-      const finalCost = parseFloat(shipment.finalTotalCostEgp || "0");
-      const remainingBefore = Math.max(0, finalCost - currentPaid);
+        if (message.includes("سعر الصرف")) {
+          throw new ApiError("PAYMENT_RATE_MISSING", undefined, 400, {
+            shipmentId: data.shipmentId,
+            currency: data.paymentCurrency,
+          });
+        }
+
+        if (message.includes("عملة الدفع")) {
+          throw new ApiError("PAYMENT_CURRENCY_UNSUPPORTED", undefined, 400, {
+            currency: data.paymentCurrency,
+          });
+        }
+
+        throw new ApiError("PAYMENT_PAYLOAD_INVALID", message, 400);
+      }
+
+      const { amountEgp, exchangeRateToEgp } = normalizedAmounts;
+
+      const currentPaid = parseAmount(shipment.totalPaidEgp);
+      const effectiveFinalCost = computeFinalCost(shipment);
+
+      if (effectiveFinalCost <= 0) {
+        throw new ApiError("PAYMENT_TOTAL_MISSING", undefined, 400, { shipmentId: data.shipmentId });
+      }
+
+      const remainingBefore = Math.max(0, effectiveFinalCost - currentPaid);
 
       if (amountEgp > remainingBefore + 0.0001) {
-        throw new Error("لا يمكن دفع مبلغ أكبر من المتبقي على الشحنة.");
+        throw new ApiError("PAYMENT_OVERPAY", undefined, 409, {
+          shipmentId: data.shipmentId,
+          attempted: amountEgp,
+          remaining: remainingBefore,
+        });
       }
 
       const [payment] = await tx
@@ -515,13 +571,14 @@ export class DatabaseStorage implements IStorage {
         .where(eq(shipmentPayments.shipmentId, data.shipmentId));
 
       const totalPaidNumber = roundAmount(parseFloat(paymentTotals?.totalPaid || "0"));
-      const balance = roundAmount(Math.max(0, finalCost - totalPaidNumber));
+      const balance = roundAmount(Math.max(0, effectiveFinalCost - totalPaidNumber));
       const latestPaymentDate =
         paymentTotals?.lastPaymentDate || data.paymentDate || new Date();
 
       await tx
         .update(shipments)
         .set({
+          finalTotalCostEgp: roundAmount(effectiveFinalCost, 2).toFixed(2),
           totalPaidEgp: totalPaidNumber.toFixed(2),
           balanceEgp: balance.toFixed(2),
           lastPaymentDate: latestPaymentDate,
