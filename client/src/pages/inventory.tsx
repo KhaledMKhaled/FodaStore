@@ -212,7 +212,6 @@ export default function Inventory() {
           متابعة الأصناف المستلمة وتكلفتها في المخزون
         </p>
       </div>
-
       {/* Stats Cards */}
       {loadingStats ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -244,7 +243,6 @@ export default function Inventory() {
           />
         </div>
       )}
-
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
@@ -321,7 +319,6 @@ export default function Inventory() {
           </div>
         </CardContent>
       </Card>
-
       {/* Inventory Table */}
       <Card>
         <CardHeader className="pb-4 flex flex-row items-center justify-between gap-4">
@@ -359,7 +356,7 @@ export default function Inventory() {
                       <TableHead className="text-right">المنتج</TableHead>
                       <TableHead className="text-right">عدد القطع</TableHead>
                       <TableHead className="text-right">سعر الشراء (RMB)</TableHead>
-                      <TableHead className="text-right">نصيب الشحن (RMB)</TableHead>
+                      <TableHead className="text-right">الشحن (RMB)</TableHead>
                       <TableHead className="text-right">العمولة (RMB)</TableHead>
                       <TableHead className="text-right">الجمرك (ج.م)</TableHead>
                       <TableHead className="text-right">التخريج (ج.م)</TableHead>
