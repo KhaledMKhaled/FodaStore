@@ -76,6 +76,27 @@ interface PaymentsStats {
   totalCostEgp: string;
   totalPaidEgp: string;
   totalBalanceEgp: string;
+  totalCostRmb: string;
+  totalPaidRmb: string;
+  totalBalanceRmb: string;
+  totalPaidPurchaseRmb: string;
+  totalBalancePurchaseRmb: string;
+  totalPaidPurchaseEgp: string;
+  totalBalancePurchaseEgp: string;
+  totalPaidShippingRmb: string;
+  totalBalanceShippingRmb: string;
+  totalPaidShippingEgp: string;
+  totalBalanceShippingEgp: string;
+  totalPaidCommissionRmb: string;
+  totalBalanceCommissionRmb: string;
+  totalPaidCommissionEgp: string;
+  totalBalanceCommissionEgp: string;
+  totalPaidCustomsEgp: string;
+  totalBalanceCustomsEgp: string;
+  totalPaidTakhreegEgp: string;
+  totalBalanceTakhreegEgp: string;
+  totalPaidOtherEgp: string;
+  totalBalanceOtherEgp: string;
   lastPayment: ShipmentPayment | null;
 }
 
@@ -435,6 +456,92 @@ export default function Payments() {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label>تحت حساب أي جزء؟ *</Label>
+                <Select value={costComponent} onValueChange={setCostComponent}>
+                  <SelectTrigger data-testid="select-cost-component">
+                    <SelectValue placeholder="اختر البند" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COST_COMPONENTS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {costComponent && stats && (
+                  <div className="mt-2 p-2 bg-muted/50 rounded text-sm">
+                    {costComponent === "تكلفة البضاعة" && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
+                        <span className="font-semibold">{formatCurrency(stats.totalPaidPurchaseRmb)} ¥</span>
+                      </div>
+                    )}
+                    {costComponent === "تكلفة البضاعة" && (
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-muted-foreground">المتبقي</span>
+                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalancePurchaseRmb)} ¥</span>
+                      </div>
+                    )}
+                    {costComponent === "الشحن" && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
+                        <span className="font-semibold">{formatCurrency(stats.totalPaidShippingRmb)} ¥</span>
+                      </div>
+                    )}
+                    {costComponent === "الشحن" && (
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-muted-foreground">المتبقي</span>
+                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalanceShippingRmb)} ¥</span>
+                      </div>
+                    )}
+                    {costComponent === "العمولة" && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
+                        <span className="font-semibold">{formatCurrency(stats.totalPaidCommissionRmb)} ¥</span>
+                      </div>
+                    )}
+                    {costComponent === "العمولة" && (
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-muted-foreground">المتبقي</span>
+                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalanceCommissionRmb)} ¥</span>
+                      </div>
+                    )}
+                    {costComponent === "الجمرك" && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
+                        <span className="font-semibold">{formatCurrency(stats.totalPaidCustomsEgp)} ج.م</span>
+                      </div>
+                    )}
+                    {costComponent === "الجمرك" && (
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-muted-foreground">المتبقي</span>
+                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalanceCustomsEgp)} ج.م</span>
+                      </div>
+                    )}
+                    {costComponent === "التخريج" && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
+                        <span className="font-semibold">{formatCurrency(stats.totalPaidTakhreegEgp)} ج.م</span>
+                      </div>
+                    )}
+                    {costComponent === "التخريج" && (
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-muted-foreground">المتبقي</span>
+                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalanceTakhreegEgp)} ج.م</span>
+                      </div>
+                    )}
+                    {costComponent === "دفعات اخري" && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
+                        <span className="font-semibold">{formatCurrency(stats.totalPaidOtherEgp)} ج.م</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="amountOriginal">المبلغ *</Label>
@@ -478,22 +585,6 @@ export default function Payments() {
                     />
                   </div>
                 )}
-              </div>
-
-              <div className="space-y-2">
-                <Label>تحت حساب أي جزء؟ *</Label>
-                <Select value={costComponent} onValueChange={setCostComponent}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="اختر البند" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {COST_COMPONENTS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
 
               <div className="space-y-2">
