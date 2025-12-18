@@ -1,6 +1,6 @@
-import type { Express } from "express";
+import type { Express, RequestHandler } from "express";
 import type { Server } from "http";
-import { storage } from "./storage";
+import { storage, type IStorage } from "./storage";
 import { setupAuth, isAuthenticated, requireRole } from "./auth";
 import { logAuditEvent } from "./audit";
 import { getPaymentsWithShipments } from "./payments";
@@ -47,6 +47,96 @@ const uploadItemImage = multer({
     }
   },
 });
+
+type PaymentHandlerDeps = {
+  storage: Pick<IStorage, "createPayment">;
+  logAuditEvent: typeof logAuditEvent;
+};
+
+export function createPaymentHandler({ storage, logAuditEvent }: PaymentHandlerDeps): RequestHandler {
+  return async (req, res) => {
+    try {
+      const body = req.body;
+      const userId = (req.user as any)?.id;
+
+      if (!userId) {
+        throw new ApiError("AUTH_REQUIRED", undefined, 401);
+      }
+      
+      // Pre-process paymentDate: convert string/Date to proper Date object
+      let paymentDate: Date;
+      if (body.paymentDate) {
+        paymentDate = new Date(body.paymentDate);
+        if (Number.isNaN(paymentDate.getTime())) {
+          throw new ApiError("PAYMENT_DATE_INVALID");
+        }
+      } else {
+        throw new ApiError("PAYMENT_DATE_INVALID");
+      }
+      
+      // Prepare data with proper type coercion for schema validation
+      const preparedBody = {
+        ...body,
+        paymentDate,
+        shipmentId: body.shipmentId ? Number(body.shipmentId) : undefined,
+        amountOriginal: body.amountOriginal ? String(body.amountOriginal) : undefined,
+        amountEgp: body.amountEgp ? String(body.amountEgp) : undefined,
+        exchangeRateToEgp: body.exchangeRateToEgp ? String(body.exchangeRateToEgp) : null,
+      };
+      
+      // Validate with schema
+      const parseResult = insertShipmentPaymentSchema.safeParse(preparedBody);
+      
+      if (!parseResult.success) {
+        // Map Zod errors to Arabic messages
+        const firstError = parseResult.error.errors[0];
+        const fieldMessages: Record<string, string> = {
+          shipmentId: "يجب اختيار الشحنة",
+          paymentDate: "تاريخ الدفع مطلوب",
+          paymentCurrency: "عملة الدفع مطلوبة",
+          amountOriginal: "المبلغ مطلوب",
+          amountEgp: "المبلغ بالجنيه المصري مطلوب",
+          costComponent: "يجب اختيار بند التكلفة",
+          paymentMethod: "يجب اختيار طريقة الدفع",
+        };
+        const fieldName = firstError?.path?.[0]?.toString() || "";
+        const message = fieldMessages[fieldName] || firstError?.message || "بيانات غير صالحة";
+        throw new ApiError("PAYMENT_PAYLOAD_INVALID", message, 400, {
+          field: fieldName || undefined,
+        });
+      }
+      
+      const data = parseResult.data;
+      
+      const payment = await storage.createPayment({
+        ...data,
+        createdByUserId: userId,
+      });
+
+      logAuditEvent({
+        userId,
+        entityType: "PAYMENT",
+        entityId: payment.id,
+        actionType: "CREATE",
+        details: { 
+          shipmentId: payment.shipmentId,
+          amount: payment.amountEgp,
+          currency: payment.paymentCurrency,
+          method: payment.paymentMethod,
+        },
+      });
+      
+      res.json(success(payment));
+    } catch (error) {
+      console.error("Error creating payment:", error);
+      const { status, body } = formatError(error, {
+        code: "UNKNOWN_ERROR",
+        status: (error as any)?.status || 500,
+      });
+      res.status(status).json(body);
+    }
+  };
+}
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // Setup authentication
@@ -426,88 +516,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/payments", requireRole(["مدير", "محاسب"]), async (req, res) => {
-    try {
-      const body = req.body;
-      const userId = (req.user as any)?.id;
-
-      if (!userId) {
-        throw new ApiError("AUTH_REQUIRED", undefined, 401);
-      }
-      
-      // Pre-process paymentDate: convert string/Date to proper Date object
-      let paymentDate: Date;
-      if (body.paymentDate) {
-        paymentDate = new Date(body.paymentDate);
-        if (Number.isNaN(paymentDate.getTime())) {
-          throw new ApiError("PAYMENT_DATE_INVALID");
-        }
-      } else {
-        throw new ApiError("PAYMENT_DATE_INVALID");
-      }
-      
-      // Prepare data with proper type coercion for schema validation
-      const preparedBody = {
-        ...body,
-        paymentDate,
-        shipmentId: body.shipmentId ? Number(body.shipmentId) : undefined,
-        amountOriginal: body.amountOriginal ? String(body.amountOriginal) : undefined,
-        amountEgp: body.amountEgp ? String(body.amountEgp) : undefined,
-        exchangeRateToEgp: body.exchangeRateToEgp ? String(body.exchangeRateToEgp) : null,
-      };
-      
-      // Validate with schema
-      const parseResult = insertShipmentPaymentSchema.safeParse(preparedBody);
-      
-      if (!parseResult.success) {
-        // Map Zod errors to Arabic messages
-        const firstError = parseResult.error.errors[0];
-        const fieldMessages: Record<string, string> = {
-          shipmentId: "يجب اختيار الشحنة",
-          paymentDate: "تاريخ الدفع مطلوب",
-          paymentCurrency: "عملة الدفع مطلوبة",
-          amountOriginal: "المبلغ مطلوب",
-          amountEgp: "المبلغ بالجنيه المصري مطلوب",
-          costComponent: "يجب اختيار بند التكلفة",
-          paymentMethod: "يجب اختيار طريقة الدفع",
-        };
-        const fieldName = firstError?.path?.[0]?.toString() || "";
-        const message = fieldMessages[fieldName] || firstError?.message || "بيانات غير صالحة";
-        throw new ApiError("PAYMENT_PAYLOAD_INVALID", message, 400, {
-          field: fieldName || undefined,
-        });
-      }
-      
-      const data = parseResult.data;
-      
-      const payment = await storage.createPayment({
-        ...data,
-        createdByUserId: userId,
-      });
-
-      logAuditEvent({
-        userId,
-        entityType: "PAYMENT",
-        entityId: payment.id,
-        actionType: "CREATE",
-        details: { 
-          shipmentId: payment.shipmentId,
-          amount: payment.amountEgp,
-          currency: payment.paymentCurrency,
-          method: payment.paymentMethod,
-        },
-      });
-      
-      res.json(success(payment));
-    } catch (error) {
-      console.error("Error creating payment:", error);
-      const { status, body } = formatError(error, {
-        code: "UNKNOWN_ERROR",
-        status: (error as any)?.status || 500,
-      });
-      res.status(status).json(body);
-    }
-  });
+  app.post(
+    "/api/payments",
+    requireRole(["مدير", "محاسب"]),
+    createPaymentHandler({ storage, logAuditEvent }),
+  );
 
   // Inventory
   app.get("/api/inventory", isAuthenticated, async (req, res) => {
