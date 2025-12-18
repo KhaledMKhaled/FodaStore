@@ -1,4 +1,4 @@
-import { useState, Fragment } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -51,6 +51,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
 import { shipmentStatusColors } from "@/lib/colorMaps";
 import type { Shipment, ShipmentPayment, InsertShipmentPayment } from "@shared/schema";
+import { deriveAmountEgp, validateRemainingAllowance } from "./paymentValidation";
 
 const PAYMENT_METHODS = [
   { value: "نقدي", label: "نقدي" },
@@ -92,6 +93,12 @@ interface InvoiceSummary {
     paid: string;
     remaining: string;
   };
+  paymentAllowance?: {
+    knownTotalEgp: string;
+    alreadyPaidEgp: string;
+    remainingAllowedEgp: string;
+    source: "declared" | "recovered";
+  };
   computedAt: string;
 }
 
@@ -107,6 +114,7 @@ export default function Payments() {
   const [costComponent, setCostComponent] = useState("");
   const [expandedShipments, setExpandedShipments] = useState<Set<number>>(new Set());
   const [showInvoiceSummary, setShowInvoiceSummary] = useState(false);
+  const [clientValidationError, setClientValidationError] = useState<string | null>(null);
   const { toast } = useToast();
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
@@ -127,18 +135,27 @@ export default function Payments() {
 
   const { data: invoiceSummary, isLoading: loadingInvoiceSummary, isError: invoiceSummaryError } = useQuery<InvoiceSummary>({
     queryKey: ["/api/shipments", selectedShipmentId, "invoice-summary"],
-    enabled: !!selectedShipmentId && showInvoiceSummary,
+    enabled: !!selectedShipmentId,
   });
+
+  useEffect(() => {
+    setClientValidationError(null);
+  }, [selectedShipmentId, paymentCurrency, invoiceSummary?.paymentAllowance?.remainingAllowedEgp]);
 
   const createMutation = useMutation({
     mutationFn: async (data: InsertShipmentPayment) => {
       return apiRequest("POST", "/api/payments", data);
     },
-    onSuccess: () => {
+    onSuccess: (_response, variables) => {
       toast({ title: "تم تسجيل الدفعة بنجاح" });
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/shipments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/payments/stats"] });
+      if (variables?.shipmentId) {
+        queryClient.invalidateQueries({
+          queryKey: ["/api/shipments", variables.shipmentId, "invoice-summary"],
+        });
+      }
       setIsDialogOpen(false);
       resetForm();
     },
@@ -153,10 +170,12 @@ export default function Payments() {
     setPaymentMethod("");
     setCostComponent("");
     setShowInvoiceSummary(false);
+    setClientValidationError(null);
   };
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setClientValidationError(null);
     const formData = new FormData(e.currentTarget);
 
     if (!selectedShipmentId) {
@@ -176,10 +195,48 @@ export default function Payments() {
 
     const amountOriginal = formData.get("amountOriginal") as string;
     const exchangeRate = formData.get("exchangeRateToEgp") as string;
-    const amountEgp =
-      paymentCurrency === "EGP"
-        ? amountOriginal
-        : (parseFloat(amountOriginal) * parseFloat(exchangeRate || "1")).toFixed(2);
+    const amountEgpNumber = deriveAmountEgp({
+      paymentCurrency,
+      amountOriginal,
+      exchangeRate,
+    });
+
+    let latestInvoiceSummary = invoiceSummary;
+    if (!latestInvoiceSummary && selectedShipmentId) {
+      try {
+        latestInvoiceSummary = await queryClient.ensureQueryData<InvoiceSummary>([
+          "/api/shipments",
+          selectedShipmentId,
+          "invoice-summary",
+        ]);
+      } catch (error) {
+        toast({
+          title: "تعذر التحقق من الحد المسموح للدفع",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    const remainingAllowedValue =
+      latestInvoiceSummary?.paymentAllowance?.remainingAllowedEgp !== undefined
+        ? parseFloat(latestInvoiceSummary.paymentAllowance.remainingAllowedEgp)
+        : undefined;
+
+    const validation = validateRemainingAllowance({
+      remainingAllowedEgp: Number.isFinite(remainingAllowedValue) ? remainingAllowedValue : undefined,
+      attemptedAmountEgp: amountEgpNumber,
+      formatter: (value) => formatCurrency(value),
+    });
+
+    if (!validation.allowed) {
+      const message = validation.message || "لا يمكن دفع هذا المبلغ في الوقت الحالي";
+      setClientValidationError(message);
+      toast({ title: message, variant: "destructive" });
+      return;
+    }
+
+    const safeAmountEgp = Number.isFinite(amountEgpNumber) ? amountEgpNumber : 0;
 
     const data: InsertShipmentPayment = {
       shipmentId: selectedShipmentId,
@@ -187,7 +244,10 @@ export default function Payments() {
       paymentCurrency,
       amountOriginal,
       exchangeRateToEgp: paymentCurrency === "RMB" ? exchangeRate : null,
-      amountEgp,
+      amountEgp:
+        paymentCurrency === "EGP"
+          ? amountOriginal
+          : safeAmountEgp.toFixed(2),
       costComponent,
       paymentMethod,
       cashReceiverName: (formData.get("cashReceiverName") as string) || null,
@@ -362,6 +422,22 @@ export default function Payments() {
                     placeholder="0.00"
                     data-testid="input-amount"
                   />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>المتبقي المسموح (ج.م)</span>
+                    {loadingInvoiceSummary ? (
+                      <Skeleton className="h-4 w-24" />
+                    ) : invoiceSummary?.paymentAllowance ? (
+                      <span
+                        className="font-semibold text-foreground"
+                        data-testid="remaining-allowed-value"
+                        data-allowed-value={invoiceSummary.paymentAllowance.remainingAllowedEgp}
+                      >
+                        {formatCurrency(invoiceSummary.paymentAllowance.remainingAllowedEgp)} ج.م
+                      </span>
+                    ) : (
+                      <span data-testid="remaining-allowed-value">-</span>
+                    )}
+                  </div>
                 </div>
                 {paymentCurrency === "RMB" && (
                   <div className="space-y-2">
@@ -443,6 +519,12 @@ export default function Payments() {
                   data-testid="input-note"
                 />
               </div>
+
+              {clientValidationError && (
+                <div className="text-sm text-destructive" data-testid="validation-error">
+                  {clientValidationError}
+                </div>
+              )}
 
               <div className="flex gap-2 pt-4">
                 <Button
@@ -927,6 +1009,29 @@ export default function Payments() {
                   <span className="text-left font-mono text-red-600 dark:text-red-400">{formatCurrency(invoiceSummary.egp.remaining)} ج.م</span>
                 </div>
               </div>
+
+              {invoiceSummary.paymentAllowance && (
+                <div className="border rounded-md p-3 bg-muted/40 space-y-1">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">إجمالي التكاليف المعروفة (ج.م)</span>
+                    <span className="font-mono font-medium">
+                      {formatCurrency(invoiceSummary.paymentAllowance.knownTotalEgp)} ج.م
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">المدفوع حتى الآن (ج.م)</span>
+                    <span className="font-mono">
+                      {formatCurrency(invoiceSummary.paymentAllowance.alreadyPaidEgp)} ج.م
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                    <span>المتبقي المسموح سداده الآن</span>
+                    <span>
+                      {formatCurrency(invoiceSummary.paymentAllowance.remainingAllowedEgp)} ج.م
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center text-muted-foreground py-4">
