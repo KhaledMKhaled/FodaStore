@@ -67,6 +67,8 @@ const COST_COMPONENTS = [
   { value: "الجمرك والتخريج", label: "الجمرك والتخريج" },
 ];
 
+const ITEMS_PER_PAGE = 25;
+
 interface PaymentsStats {
   totalCostEgp: string;
   totalPaidEgp: string;
@@ -119,6 +121,7 @@ export default function Payments() {
   const [expandedShipments, setExpandedShipments] = useState<Set<number>>(new Set());
   const [showInvoiceSummary, setShowInvoiceSummary] = useState(false);
   const [clientValidationError, setClientValidationError] = useState<string | null>(null);
+  const [currentPageShipments, setCurrentPageShipments] = useState(1);
   const { toast } = useToast();
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
@@ -292,6 +295,7 @@ export default function Payments() {
     setDateFrom("");
     setDateTo("");
     setStatusFilter("all");
+    setCurrentPageShipments(1);
   };
 
   const filteredShipments = activeShipments?.filter((s) => {
@@ -312,6 +316,12 @@ export default function Payments() {
     }
     return true;
   });
+
+  // Pagination for shipments
+  const totalPagesShipments = Math.ceil((filteredShipments?.length || 0) / ITEMS_PER_PAGE);
+  const startIndexShipments = (currentPageShipments - 1) * ITEMS_PER_PAGE;
+  const endIndexShipments = startIndexShipments + ITEMS_PER_PAGE;
+  const paginatedShipments = filteredShipments?.slice(startIndexShipments, endIndexShipments);
 
   const filteredPayments = payments?.filter((p) => {
     const shipment = shipments?.find(s => s.id === p.shipmentId);
@@ -678,7 +688,7 @@ export default function Payments() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredShipments.map((shipment) => {
+                        {paginatedShipments?.map((shipment) => {
                           const isExpanded = expandedShipments.has(shipment.id);
                           const shipmentPayments = payments?.filter((p) => p.shipmentId === shipment.id) || [];
                           return (
@@ -801,6 +811,60 @@ export default function Payments() {
                       </TableBody>
                     </Table>
                   </div>
+
+                  {/* Pagination Controls */}
+                  {totalPagesShipments > 1 && (
+                    <div className="flex items-center justify-center gap-2 pt-4 border-t">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPageShipments(Math.max(1, currentPageShipments - 1))}
+                        disabled={currentPageShipments === 1}
+                        data-testid="button-prev-page-shipments"
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                        السابق
+                      </Button>
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: Math.min(totalPagesShipments, 5) }, (_, i) => {
+                          let pageNum: number;
+                          if (totalPagesShipments <= 5) {
+                            pageNum = i + 1;
+                          } else if (currentPageShipments <= 3) {
+                            pageNum = i + 1;
+                          } else if (currentPageShipments >= totalPagesShipments - 2) {
+                            pageNum = totalPagesShipments - 4 + i;
+                          } else {
+                            pageNum = currentPageShipments - 2 + i;
+                          }
+                          return (
+                            <Button
+                              key={pageNum}
+                              variant={currentPageShipments === pageNum ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setCurrentPageShipments(pageNum)}
+                              data-testid={`button-page-shipments-${pageNum}`}
+                            >
+                              {pageNum}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPageShipments(Math.min(totalPagesShipments, currentPageShipments + 1))}
+                        disabled={currentPageShipments === totalPagesShipments}
+                        data-testid="button-next-page-shipments"
+                      >
+                        التالي
+                        <ChevronDown className="w-4 h-4" />
+                      </Button>
+                      <span className="text-sm text-muted-foreground mr-4">
+                        صفحة {currentPageShipments} من {totalPagesShipments}
+                      </span>
+                    </div>
+                  )}
                 </>
               ) : (
                 <EmptyState
