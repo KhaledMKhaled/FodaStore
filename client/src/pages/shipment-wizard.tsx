@@ -545,21 +545,14 @@ export default function ShipmentWizard() {
             <CardTitle className="text-lg">ملخص التكاليف</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {partialDiscountRmb > 0 ? (
-              <>
-                <SummaryRow
-                  label="الخصم (RMB)"
-                  value={`- ¥ ${formatCurrency(partialDiscountRmb)}`}
-                />
-                <SummaryRow
-                  label="تكلفة الشراء (RMB)"
-                  value={`¥ ${formatCurrency(totalPurchaseCostRmb - partialDiscountRmb)}`}
-                />
-              </>
-            ) : (
+            <SummaryRow
+              label="تكلفة الشراء (RMB)"
+              value={`¥ ${formatCurrency(totalPurchaseCostRmb)}`}
+            />
+            {partialDiscountRmb > 0 && (
               <SummaryRow
-                label="تكلفة الشراء (RMB)"
-                value={`¥ ${formatCurrency(totalPurchaseCostRmb)}`}
+                label="الخصم (RMB)"
+                value={`- ¥ ${formatCurrency(partialDiscountRmb)}`}
               />
             )}
             <SummaryRow
