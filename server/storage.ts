@@ -36,6 +36,10 @@ import {
   type InsertAuditLog,
 } from "@shared/schema";
 import { normalizePaymentAmounts, roundAmount } from "./services/currency";
+import {
+  calculatePaymentSnapshot,
+  parseAmountOrZero,
+} from "./services/paymentCalculations";
 import { ApiError } from "./errors";
 
 const RMB_TO_EGP_FALLBACK_RATE = 7.15;
@@ -116,6 +120,112 @@ async function recoverKnownTotalFromItems(
     takhreegCostEgp: totalTakhreegCostEgp,
   };
 }
+export class MissingRmbRateError extends Error {
+  constructor() {
+    super("RMB_RATE_MISSING");
+  }
+}
+
+type KnownTotalContext = {
+  shipment: Shipment;
+  shippingDetails?: ShipmentShippingDetails | null;
+  customsDetails?: ShipmentCustomsDetails | null;
+  items?: ShipmentItem[];
+  latestRmbToEgpRate?: number | null;
+  paymentRmbToEgpRate?: number | null;
+  defaultRmbToEgpRate?: number | null;
+};
+
+export const computeShipmentKnownTotal = (context: KnownTotalContext): number => {
+  const {
+    shipment,
+    shippingDetails,
+    customsDetails,
+    items = [],
+    latestRmbToEgpRate,
+    paymentRmbToEgpRate,
+    defaultRmbToEgpRate,
+  } = context;
+
+  const rateCandidates = [
+    parseAmount(shipment.purchaseRmbToEgpRate),
+    parseAmount(latestRmbToEgpRate),
+    parseAmount(paymentRmbToEgpRate),
+    parseAmount(defaultRmbToEgpRate),
+  ];
+
+  let resolvedRate = rateCandidates.find((rate) => rate > 0) ?? null;
+
+  const requireRate = () => {
+    if (resolvedRate && resolvedRate > 0) return resolvedRate;
+    throw new MissingRmbRateError();
+  };
+
+  const pickComponent = (egpCandidates: number[], rmbCandidates: number[]) => {
+    const egpValue = egpCandidates.find((value) => value > 0) ?? 0;
+    if (egpValue > 0) return egpValue;
+
+    const rmbValue = rmbCandidates.find((value) => value > 0) ?? 0;
+    if (rmbValue > 0) {
+      return rmbValue * requireRate();
+    }
+
+    return 0;
+  };
+
+  const itemPurchaseRmb = items.reduce(
+    (sum, item) => sum + parseAmount(item.totalPurchaseCostRmb),
+    0
+  );
+
+  const itemCustomsEgp = items.reduce((sum, item) => {
+    const totalCustoms = parseAmount(item.totalCustomsCostEgp);
+    if (totalCustoms > 0) return sum + totalCustoms;
+    const cartons = parseAmount(item.cartonsCtn);
+    const perCarton = parseAmount(item.customsCostPerCartonEgp);
+    return sum + cartons * perCarton;
+  }, 0);
+
+  const itemTakhreegEgp = items.reduce((sum, item) => {
+    const totalTakhreeg = parseAmount(item.totalTakhreegCostEgp);
+    if (totalTakhreeg > 0) return sum + totalTakhreeg;
+    const cartons = parseAmount(item.cartonsCtn);
+    const perCarton = parseAmount(item.takhreegCostPerCartonEgp);
+    return sum + cartons * perCarton;
+  }, 0);
+
+  const purchaseTotal = pickComponent(
+    [parseAmount(shipment.purchaseCostEgp)],
+    [
+      parseAmount(shipment.purchaseCostRmb),
+      parseAmount(shippingDetails?.totalPurchaseCostRmb),
+      itemPurchaseRmb,
+    ]
+  );
+
+  const commissionTotal = pickComponent(
+    [parseAmount(shipment.commissionCostEgp), parseAmount(shippingDetails?.commissionValueEgp)],
+    [parseAmount(shipment.commissionCostRmb), parseAmount(shippingDetails?.commissionValueRmb)]
+  );
+
+  const shippingTotal = pickComponent(
+    [parseAmount(shipment.shippingCostEgp), parseAmount(shippingDetails?.totalShippingCostEgp)],
+    [parseAmount(shipment.shippingCostRmb), parseAmount(shippingDetails?.totalShippingCostRmb)]
+  );
+
+  const customsTotal = pickComponent(
+    [parseAmount(shipment.customsCostEgp), parseAmount(customsDetails?.totalCustomsCostEgp), itemCustomsEgp],
+    []
+  );
+
+  const takhreegTotal = pickComponent(
+    [parseAmount(shipment.takhreegCostEgp), parseAmount(customsDetails?.totalTakhreegCostEgp), itemTakhreegEgp],
+    []
+  );
+
+  const total = purchaseTotal + commissionTotal + shippingTotal + customsTotal + takhreegTotal;
+  return roundAmount(total);
+};
 
 export interface IStorage {
   // Users
@@ -570,11 +680,38 @@ export class DatabaseStorage implements IStorage {
         throw new ApiError("SHIPMENT_LOCKED", undefined, 409, { shipmentId: data.shipmentId, status: shipment.status });
       }
 
+codex/refactor-invoice-summary-calculations
+      const amountOriginal = parseAmountOrZero(data.amountOriginal as any);
       const amountOriginal = parseAmount(data.amountOriginal as any);
-      const exchangeRate = data.exchangeRateToEgp
+      let exchangeRate = data.exchangeRateToEgp
         ? parseAmount(data.exchangeRateToEgp as any)
+main
+      const exchangeRate = data.exchangeRateToEgp
+        ? parseAmountOrZero(data.exchangeRateToEgp as any)
         : null;
 
+      if (data.paymentCurrency === "RMB" && !exchangeRate) {
+        const [latestRate] = await tx
+          .select()
+          .from(exchangeRates)
+          .where(
+            and(
+              eq(exchangeRates.fromCurrency, "RMB"),
+              eq(exchangeRates.toCurrency, "EGP"),
+            ),
+          )
+          .orderBy(desc(exchangeRates.rateDate))
+          .limit(1);
+
+        if (latestRate?.rateValue) {
+          exchangeRate = parseAmount(latestRate.rateValue);
+        } else {
+          throw new ApiError("PAYMENT_RATE_MISSING", undefined, 400, {
+            shipmentId: data.shipmentId,
+            currency: data.paymentCurrency,
+          });
+        }
+      }
 
       let normalizedAmounts;
       try {
@@ -604,8 +741,11 @@ export class DatabaseStorage implements IStorage {
 
       const { amountEgp, exchangeRateToEgp } = normalizedAmounts;
 
-      const currentPaid = parseAmount(shipment.totalPaidEgp);
-      let knownTotal = computeKnownTotal(shipment);
+codex/refactor-invoice-summary-calculations
+      const existingPayments = await tx
+        .select()
+        .from(shipmentPayments)
+        .where(eq(shipmentPayments.shipmentId, data.shipmentId));
 
       // EMERGENCY FIX: If knownTotal = 0 but shipment has items, recalculate costs from items
       if (knownTotal === 0) {
@@ -628,26 +768,131 @@ export class DatabaseStorage implements IStorage {
               })
               .where(eq(shipments.id, data.shipmentId));
           }
+      const paymentSnapshot = await calculatePaymentSnapshot({
+        shipment,
+        payments: existingPayments,
+        loadRecoveryData: async () => {
+          const itemsList = await tx
+            .select()
+            .from(shipmentItems)
+            .where(eq(shipmentItems.shipmentId, data.shipmentId));
+
+          const rateResult = await tx
+            .select()
+            .from(exchangeRates)
+            .where(
+              and(
+                eq(exchangeRates.fromCurrency, "RMB"),
+                eq(exchangeRates.toCurrency, "EGP"),
+              ),
+            )
+            .orderBy(desc(exchangeRates.rateDate))
+            .limit(1);
+
+          return {
+            items: itemsList,
+            rmbToEgpRate:
+              rateResult.length > 0
+                ? parseAmountOrZero(rateResult[0].rateValue)
+                : 7.15,
+          };
+        },
+      });
+
+      if (paymentSnapshot.recoveredTotals) {
+        try {
+          await tx
+            .update(shipments)
+            .set({
+              purchaseCostRmb: paymentSnapshot.recoveredTotals.purchaseCostRmb.toFixed(
+                2,
+              ),
+              purchaseCostEgp: paymentSnapshot.recoveredTotals.purchaseCostEgp.toFixed(
+                2,
+              ),
+              customsCostEgp: paymentSnapshot.recoveredTotals.customsCostEgp.toFixed(
+                2,
+              ),
+              takhreegCostEgp: paymentSnapshot.recoveredTotals.takhreegCostEgp.toFixed(
+                2,
+              ),
+              finalTotalCostEgp:
+                paymentSnapshot.recoveredTotals.finalTotalCostEgp.toFixed(2),
+              balanceEgp: Math.max(
+                0,
+                paymentSnapshot.recoveredTotals.finalTotalCostEgp -
+                  paymentSnapshot.totalPaidEgp,
+              ).toFixed(2),
+            })
+            .where(eq(shipments.id, data.shipmentId));
         } catch (error) {
-          console.error(`[PAYMENT RECOVERY ERROR] Failed to recover costs for shipment ${data.shipmentId}:`, error);
-          // Continue anyway - don't block payment if recovery fails
+          console.error(
+            `[PAYMENT RECOVERY ERROR] Failed to recover costs for shipment ${data.shipmentId}:`,
+            error,
+          );
+      const currentPaid = parseAmount(shipment.totalPaidEgp);
+      const defaultRmbRate = parseAmount(process.env.DEFAULT_RMB_TO_EGP_RATE);
+
+      const [shippingDetails, customsDetails, itemsList, latestRateResult] = await Promise.all([
+        tx
+          .select()
+          .from(shipmentShippingDetails)
+          .where(eq(shipmentShippingDetails.shipmentId, data.shipmentId))
+          .limit(1),
+        tx
+          .select()
+          .from(shipmentCustomsDetails)
+          .where(eq(shipmentCustomsDetails.shipmentId, data.shipmentId))
+          .limit(1),
+        tx
+          .select()
+          .from(shipmentItems)
+          .where(eq(shipmentItems.shipmentId, data.shipmentId)),
+        tx
+          .select()
+          .from(exchangeRates)
+          .where(
+            and(eq(exchangeRates.fromCurrency, "RMB"), eq(exchangeRates.toCurrency, "EGP"))
+          )
+          .orderBy(desc(exchangeRates.rateDate))
+          .limit(1),
+      ]);
+
+      const latestRmbRate = latestRateResult?.[0]?.rateValue
+        ? parseAmount(latestRateResult[0].rateValue)
+        : null;
+
+      let knownTotal: number;
+
+      try {
+        knownTotal = computeShipmentKnownTotal({
+          shipment,
+          shippingDetails: shippingDetails?.[0],
+          customsDetails: customsDetails?.[0],
+          items: itemsList,
+          latestRmbToEgpRate: latestRmbRate,
+          paymentRmbToEgpRate: data.paymentCurrency === "RMB" ? exchangeRateToEgp : null,
+          defaultRmbToEgpRate: defaultRmbRate,
+        });
+      } catch (error) {
+        if (error instanceof MissingRmbRateError) {
+          throw new ApiError("PAYMENT_RATE_MISSING", undefined, 400, {
+            shipmentId: data.shipmentId,
+            currency: "RMB",
+          });
+main
         }
+        throw error;
       }
 
-      // RADICAL FIX: Allow payments based on KNOWN total costs at any time
-      // Known total = sum of currently available cost components
-      // Payments allowed as long as they don't exceed (knownTotal - alreadyPaid)
-      
-      const remainingAllowed = Math.max(0, knownTotal - currentPaid);
-
       // ONLY block if payment exceeds what's currently known/allowed
-      if (amountEgp > remainingAllowed + 0.0001) {
+      if (amountEgp > paymentSnapshot.remainingAllowed + 0.0001) {
         throw new ApiError("PAYMENT_OVERPAY", 
-          `لا يمكن دفع هذا المبلغ - الحد المسموح به هو ${remainingAllowed.toFixed(2)} جنيه`, 409, {
+          `لا يمكن دفع هذا المبلغ - الحد المسموح به هو ${paymentSnapshot.remainingAllowed.toFixed(2)} جنيه`, 409, {
           shipmentId: data.shipmentId,
-          knownTotal,
-          alreadyPaid: currentPaid,
-          remainingAllowed,
+          knownTotal: paymentSnapshot.knownTotalCost,
+          alreadyPaid: paymentSnapshot.totalPaidEgp,
+          remainingAllowed: paymentSnapshot.remainingAllowed,
           attempted: amountEgp,
         });
       }
@@ -672,7 +917,9 @@ export class DatabaseStorage implements IStorage {
 
       const totalPaidNumber = roundAmount(parseFloat(paymentTotals?.totalPaid || "0"));
       // Use known total for balance calculation (allows partial payments)
-      const balance = roundAmount(Math.max(0, knownTotal - totalPaidNumber));
+      const balance = roundAmount(
+        Math.max(0, paymentSnapshot.knownTotalCost - totalPaidNumber),
+      );
       const latestPaymentDate =
         paymentTotals?.lastPaymentDate || data.paymentDate || new Date();
 
