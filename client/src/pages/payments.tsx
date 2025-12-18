@@ -67,7 +67,6 @@ const COST_COMPONENTS = [
   { value: "العمولة", label: "العمولة" },
   { value: "الجمرك", label: "الجمرك" },
   { value: "التخريج", label: "التخريج" },
-  { value: "دفعات اخري", label: "دفعات اخري" },
 ];
 
 const ITEMS_PER_PAGE = 25;
@@ -95,8 +94,6 @@ interface PaymentsStats {
   totalBalanceCustomsEgp: string;
   totalPaidTakhreegEgp: string;
   totalBalanceTakhreegEgp: string;
-  totalPaidOtherEgp: string;
-  totalBalanceOtherEgp: string;
   lastPayment: ShipmentPayment | null;
 }
 
@@ -530,12 +527,6 @@ export default function Payments() {
                       <div className="flex items-center justify-between mt-1">
                         <span className="text-muted-foreground">المتبقي</span>
                         <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalanceTakhreegEgp)} ج.م</span>
-                      </div>
-                    )}
-                    {costComponent === "دفعات اخري" && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
-                        <span className="font-semibold">{formatCurrency(stats.totalPaidOtherEgp)} ج.م</span>
                       </div>
                     )}
                   </div>

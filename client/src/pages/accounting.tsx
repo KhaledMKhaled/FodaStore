@@ -65,8 +65,6 @@ interface AccountingDashboard {
   totalBalanceCustomsEgp: string;
   totalPaidTakhreegEgp: string;
   totalBalanceTakhreegEgp: string;
-  totalPaidOtherEgp: string;
-  totalBalanceOtherEgp: string;
 }
 
 function formatCurrency(value: string | number, currency: string = "EGP") {
@@ -441,14 +439,6 @@ export default function AccountingPage() {
               currency="EGP"
               paid={stats?.totalPaidTakhreegEgp || "0"}
               remaining={stats?.totalBalanceTakhreegEgp || "0"}
-            />
-            <CostItemCard
-              title="دفعات اخري"
-              icon={DollarSign}
-              value={stats?.totalPaidOtherEgp || "0"}
-              currency="EGP"
-              paid={stats?.totalPaidOtherEgp || "0"}
-              remaining={stats?.totalBalanceOtherEgp || "0"}
             />
             <div className="bg-primary/10 p-4 rounded-md border border-primary/20 mt-4">
               <div className="flex items-center justify-between">
