@@ -1007,8 +1007,10 @@ export default function Payments() {
                               payment.referenceNumber || "-"
                             )}
                           </TableCell>
-                          <TableCell className="max-w-[200px] truncate">
-                            {payment.note || "-"}
+                          <TableCell className="max-w-xs">
+                            <div className="line-clamp-2 break-words">
+                              {payment.note || "-"}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
