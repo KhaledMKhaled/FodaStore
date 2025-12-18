@@ -11,5 +11,7 @@
 [x] 11. Install npm dependencies after environment migration
 [x] 12. Push database schema to create tables
 [x] 13. Verify application running on port 5000
+[x] 14. Re-install npm dependencies and restart workflow after migration
+[x] 15. Confirm application successfully running
 
 IMPORT COMPLETED SUCCESSFULLY - Application is now running on port 5000
