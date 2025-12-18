@@ -723,7 +723,7 @@ function Step1Import({
             </CardTitle>
             <div className="flex items-center gap-3">
               <Badge variant="secondary" className="text-sm">
-                عدد الموديلات: {items.length}
+                عدد البنود: {items.length}
               </Badge>
               <Badge variant="secondary" className="text-sm">
                 إجمالي الكراتين: {totalCartons}
