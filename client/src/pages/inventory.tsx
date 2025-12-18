@@ -355,7 +355,7 @@ export default function Inventory() {
                       <TableHead className="text-right">الشحنة</TableHead>
                       <TableHead className="text-right">المنتج</TableHead>
                       <TableHead className="text-right">عدد القطع</TableHead>
-                      <TableHead className="text-right">سعر الشراء (RMB)</TableHead>
+                      <TableHead className="text-right">الشراء (RMB)</TableHead>
                       <TableHead className="text-right">الشحن (RMB)</TableHead>
                       <TableHead className="text-right">العمولة (RMB)</TableHead>
                       <TableHead className="text-right">الجمرك (ج.م)</TableHead>
