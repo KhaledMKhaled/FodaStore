@@ -122,6 +122,7 @@ export default function Payments() {
   const [showInvoiceSummary, setShowInvoiceSummary] = useState(false);
   const [clientValidationError, setClientValidationError] = useState<string | null>(null);
   const [currentPageShipments, setCurrentPageShipments] = useState(1);
+  const [currentPagePayments, setCurrentPagePayments] = useState(1);
   const { toast } = useToast();
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
@@ -296,6 +297,7 @@ export default function Payments() {
     setDateTo("");
     setStatusFilter("all");
     setCurrentPageShipments(1);
+    setCurrentPagePayments(1);
   };
 
   const filteredShipments = activeShipments?.filter((s) => {
@@ -343,6 +345,12 @@ export default function Payments() {
     }
     return true;
   });
+
+  // Pagination for payments ledger
+  const totalPagesPayments = Math.ceil((filteredPayments?.length || 0) / ITEMS_PER_PAGE);
+  const startIndexPayments = (currentPagePayments - 1) * ITEMS_PER_PAGE;
+  const endIndexPayments = startIndexPayments + ITEMS_PER_PAGE;
+  const paginatedPayments = filteredPayments?.slice(startIndexPayments, endIndexPayments);
 
   return (
     <div className="p-6 space-y-6">
@@ -943,22 +951,23 @@ export default function Payments() {
               {loadingPayments ? (
                 <TableSkeleton />
               ) : filteredPayments && filteredPayments.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-right">التاريخ</TableHead>
-                        <TableHead className="text-right">الشحنة</TableHead>
-                        <TableHead className="text-right">تحت حساب</TableHead>
-                        <TableHead className="text-right">المبلغ الأصلي</TableHead>
-                        <TableHead className="text-right">المبلغ (ج.م)</TableHead>
-                        <TableHead className="text-right">طريقة الدفع</TableHead>
-                        <TableHead className="text-right">المستلم/المرجع</TableHead>
-                        <TableHead className="text-right">ملاحظات</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredPayments.map((payment) => (
+                <div className="space-y-4">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-right">التاريخ</TableHead>
+                          <TableHead className="text-right">الشحنة</TableHead>
+                          <TableHead className="text-right">تحت حساب</TableHead>
+                          <TableHead className="text-right">المبلغ الأصلي</TableHead>
+                          <TableHead className="text-right">المبلغ (ج.م)</TableHead>
+                          <TableHead className="text-right">طريقة الدفع</TableHead>
+                          <TableHead className="text-right">المستلم/المرجع</TableHead>
+                          <TableHead className="text-right">ملاحظات</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedPayments?.map((payment) => (
                         <TableRow
                           key={payment.id}
                           data-testid={`row-ledger-${payment.id}`}
@@ -1000,8 +1009,63 @@ export default function Payments() {
                           </TableCell>
                         </TableRow>
                       ))}
-                    </TableBody>
-                  </Table>
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* Pagination Controls */}
+                  {totalPagesPayments > 1 && (
+                    <div className="flex items-center justify-center gap-2 pt-4 border-t">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPagePayments(Math.max(1, currentPagePayments - 1))}
+                        disabled={currentPagePayments === 1}
+                        data-testid="button-prev-page-payments-ledger"
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                        السابق
+                      </Button>
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: Math.min(totalPagesPayments, 5) }, (_, i) => {
+                          let pageNum: number;
+                          if (totalPagesPayments <= 5) {
+                            pageNum = i + 1;
+                          } else if (currentPagePayments <= 3) {
+                            pageNum = i + 1;
+                          } else if (currentPagePayments >= totalPagesPayments - 2) {
+                            pageNum = totalPagesPayments - 4 + i;
+                          } else {
+                            pageNum = currentPagePayments - 2 + i;
+                          }
+                          return (
+                            <Button
+                              key={pageNum}
+                              variant={currentPagePayments === pageNum ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setCurrentPagePayments(pageNum)}
+                              data-testid={`button-page-payments-ledger-${pageNum}`}
+                            >
+                              {pageNum}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPagePayments(Math.min(totalPagesPayments, currentPagePayments + 1))}
+                        disabled={currentPagePayments === totalPagesPayments}
+                        data-testid="button-next-page-payments-ledger"
+                      >
+                        التالي
+                        <ChevronDown className="w-4 h-4" />
+                      </Button>
+                      <span className="text-sm text-muted-foreground mr-4">
+                        صفحة {currentPagePayments} من {totalPagesPayments}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <EmptyState
