@@ -69,7 +69,7 @@ export default function Inventory() {
     const totalShipmentPieces = movement.totalShipmentPieces || 0;
 
     if (!item || !shipment) {
-      return { purchasePriceRmb: 0, shippingShareRmb: 0, clearanceShareEgp: 0, customsPerPieceEgp: 0, finalCostEgp: 0, exchangeRate: 0 };
+      return { purchasePriceRmb: 0, shippingShareRmb: 0, commissionShareRmb: 0, clearanceShareEgp: 0, customsPerPieceEgp: 0, finalCostEgp: 0, exchangeRate: 0 };
     }
 
     // Exchange rate from shipment
@@ -82,6 +82,10 @@ export default function Inventory() {
     const totalShippingCostRmb = parseFloat(shippingDetails?.totalShippingCostRmb?.toString() || "0");
     const shippingShareRmb = totalShipmentPieces > 0 ? totalShippingCostRmb / totalShipmentPieces : 0;
     
+    // Commission share per piece = Total commission cost RMB / Total pieces in shipment
+    const commissionValueRmb = parseFloat(shippingDetails?.commissionValueRmb?.toString() || "0");
+    const commissionShareRmb = totalShipmentPieces > 0 ? commissionValueRmb / totalShipmentPieces : 0;
+    
     // Clearance (Takhreeg) share per piece = Total Takhreeg Cost / Total pieces for item
     const totalTakhreegCost = parseFloat(item.totalTakhreegCostEgp?.toString() || "0");
     const itemPieces = item.totalPiecesCou || 0;
@@ -91,12 +95,13 @@ export default function Inventory() {
     const totalCustomsCost = parseFloat(item.totalCustomsCostEgp?.toString() || "0");
     const customsPerPieceEgp = itemPieces > 0 ? totalCustomsCost / itemPieces : 0;
     
-    // Final formula: (Purchase price in RMB + Shipping share in RMB) × Exchange rate + Customs + Clearance share in EGP
-    const finalCostEgp = ((purchasePriceRmb + shippingShareRmb) * exchangeRate) + customsPerPieceEgp + clearanceShareEgp;
+    // Final formula: (Purchase price in RMB + Shipping share in RMB + Commission share in RMB) × Exchange rate + Customs + Clearance share in EGP
+    const finalCostEgp = ((purchasePriceRmb + shippingShareRmb + commissionShareRmb) * exchangeRate) + customsPerPieceEgp + clearanceShareEgp;
     
     return {
       purchasePriceRmb,
       shippingShareRmb,
+      commissionShareRmb,
       clearanceShareEgp,
       customsPerPieceEgp,
       finalCostEgp,
@@ -355,6 +360,7 @@ export default function Inventory() {
                       <TableHead className="text-right">عدد القطع</TableHead>
                       <TableHead className="text-right">سعر الشراء (RMB)</TableHead>
                       <TableHead className="text-right">نصيب الشحن (RMB)</TableHead>
+                      <TableHead className="text-right">العمولة (RMB)</TableHead>
                       <TableHead className="text-right">الجمرك (ج.م)</TableHead>
                       <TableHead className="text-right">التخريج (ج.م)</TableHead>
                       <TableHead className="text-right">تكلفة القطعة (ج.م)</TableHead>
@@ -388,10 +394,16 @@ export default function Inventory() {
                             )}
                           </TableCell>
                           <TableCell>
-                            ¥ {formatCurrency(costs.purchasePriceRmb || 0)}
+                            <div className="flex flex-col gap-1">
+                              <span>¥ {formatCurrency(costs.purchasePriceRmb || 0)}</span>
+                              <span className="text-xs text-muted-foreground">السعر: {formatCurrency(costs.exchangeRate)}</span>
+                            </div>
                           </TableCell>
                           <TableCell>
                             ¥ {formatCurrency(costs.shippingShareRmb)}
+                          </TableCell>
+                          <TableCell>
+                            ¥ {formatCurrency(costs.commissionShareRmb)}
                           </TableCell>
                           <TableCell>
                             {formatCurrency(costs.customsPerPieceEgp)} ج.م
