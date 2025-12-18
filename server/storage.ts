@@ -36,6 +36,10 @@ import {
   type InsertAuditLog,
 } from "@shared/schema";
 import { normalizePaymentAmounts, roundAmount } from "./services/currency";
+import {
+  calculatePaymentSnapshot,
+  parseAmountOrZero,
+} from "./services/paymentCalculations";
 import { ApiError } from "./errors";
 
 export interface IStorage {
@@ -482,28 +486,9 @@ export class DatabaseStorage implements IStorage {
         throw new ApiError("SHIPMENT_LOCKED", undefined, 409, { shipmentId: data.shipmentId, status: shipment.status });
       }
 
-      const parseAmount = (value: unknown): number => {
-        if (value === null || value === undefined) return 0;
-        const parsed = typeof value === "number" ? value : parseFloat(value as any);
-        return Number.isFinite(parsed) ? parsed : 0;
-      };
-
-      // Compute the "known total" - sum of cost components that are available/entered
-      // This allows partial payments at any stage of the shipment lifecycle
-      const computeKnownTotal = (s: Shipment): number => {
-        const purchase = parseAmount(s.purchaseCostEgp);
-        const commission = parseAmount(s.commissionCostEgp);
-        const shipping = parseAmount(s.shippingCostEgp);
-        const customs = parseAmount(s.customsCostEgp);
-        const takhreeg = parseAmount(s.takhreegCostEgp);
-
-        // Sum all available components - allows payment even if some components are 0 or not yet entered
-        return purchase + commission + shipping + customs + takhreeg;
-      };
-
-      const amountOriginal = parseAmount(data.amountOriginal as any);
+      const amountOriginal = parseAmountOrZero(data.amountOriginal as any);
       const exchangeRate = data.exchangeRateToEgp
-        ? parseAmount(data.exchangeRateToEgp as any)
+        ? parseAmountOrZero(data.exchangeRateToEgp as any)
         : null;
 
 
@@ -535,86 +520,84 @@ export class DatabaseStorage implements IStorage {
 
       const { amountEgp, exchangeRateToEgp } = normalizedAmounts;
 
-      const currentPaid = parseAmount(shipment.totalPaidEgp);
-      let knownTotal = computeKnownTotal(shipment);
+      const existingPayments = await tx
+        .select()
+        .from(shipmentPayments)
+        .where(eq(shipmentPayments.shipmentId, data.shipmentId));
 
-      // EMERGENCY FIX: If knownTotal = 0 but shipment has items, recalculate costs from items
-      if (knownTotal === 0) {
-        try {
-          // Fetch all items for this shipment
+      const paymentSnapshot = await calculatePaymentSnapshot({
+        shipment,
+        payments: existingPayments,
+        loadRecoveryData: async () => {
           const itemsList = await tx
             .select()
             .from(shipmentItems)
             .where(eq(shipmentItems.shipmentId, data.shipmentId));
-          
-          if (itemsList.length > 0) {
-            // Recalculate costs from items
-            const totalPurchaseCostRmb = itemsList.reduce(
-              (sum: number, item: any) => sum + parseAmount(item.totalPurchaseCostRmb),
-              0
-            );
-            
-            const totalCustomsCostEgp = itemsList.reduce((sum: number, item: any) => {
-              return sum + (item.cartonsCtn || 0) * parseAmount(item.customsCostPerCartonEgp);
-            }, 0);
-            
-            const totalTakhreegCostEgp = itemsList.reduce((sum: number, item: any) => {
-              return sum + (item.cartonsCtn || 0) * parseAmount(item.takhreegCostPerCartonEgp);
-            }, 0);
-            
-            // Get current exchange rate
-            const rateResult = await tx
-              .select()
-              .from(exchangeRates)
-              .where(and(
+
+          const rateResult = await tx
+            .select()
+            .from(exchangeRates)
+            .where(
+              and(
                 eq(exchangeRates.fromCurrency, "RMB"),
-                eq(exchangeRates.toCurrency, "EGP")
-              ))
-              .orderBy(desc(exchangeRates.rateDate))
-              .limit(1);
-            
-            const rmbToEgpRate = rateResult.length > 0 ? parseAmount(rateResult[0].rateValue) : 7.15;
-            const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgpRate;
-            const recoveredTotal = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
-            
-            // Update shipment with recovered costs ONLY if we calculated something positive
-            if (recoveredTotal > 0) {
-              knownTotal = recoveredTotal;
-              const updateTime = new Date().toISOString();
-              
-              await tx
-                .update(shipments)
-                .set({
-                  purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
-                  purchaseCostEgp: purchaseCostEgp.toFixed(2),
-                  customsCostEgp: totalCustomsCostEgp.toFixed(2),
-                  takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
-                  finalTotalCostEgp: recoveredTotal.toFixed(2),
-                  balanceEgp: Math.max(0, recoveredTotal - currentPaid).toFixed(2),
-                })
-                .where(eq(shipments.id, data.shipmentId));
-            }
-          }
+                eq(exchangeRates.toCurrency, "EGP"),
+              ),
+            )
+            .orderBy(desc(exchangeRates.rateDate))
+            .limit(1);
+
+          return {
+            items: itemsList,
+            rmbToEgpRate:
+              rateResult.length > 0
+                ? parseAmountOrZero(rateResult[0].rateValue)
+                : 7.15,
+          };
+        },
+      });
+
+      if (paymentSnapshot.recoveredTotals) {
+        try {
+          await tx
+            .update(shipments)
+            .set({
+              purchaseCostRmb: paymentSnapshot.recoveredTotals.purchaseCostRmb.toFixed(
+                2,
+              ),
+              purchaseCostEgp: paymentSnapshot.recoveredTotals.purchaseCostEgp.toFixed(
+                2,
+              ),
+              customsCostEgp: paymentSnapshot.recoveredTotals.customsCostEgp.toFixed(
+                2,
+              ),
+              takhreegCostEgp: paymentSnapshot.recoveredTotals.takhreegCostEgp.toFixed(
+                2,
+              ),
+              finalTotalCostEgp:
+                paymentSnapshot.recoveredTotals.finalTotalCostEgp.toFixed(2),
+              balanceEgp: Math.max(
+                0,
+                paymentSnapshot.recoveredTotals.finalTotalCostEgp -
+                  paymentSnapshot.totalPaidEgp,
+              ).toFixed(2),
+            })
+            .where(eq(shipments.id, data.shipmentId));
         } catch (error) {
-          console.error(`[PAYMENT RECOVERY ERROR] Failed to recover costs for shipment ${data.shipmentId}:`, error);
-          // Continue anyway - don't block payment if recovery fails
+          console.error(
+            `[PAYMENT RECOVERY ERROR] Failed to recover costs for shipment ${data.shipmentId}:`,
+            error,
+          );
         }
       }
 
-      // RADICAL FIX: Allow payments based on KNOWN total costs at any time
-      // Known total = sum of currently available cost components
-      // Payments allowed as long as they don't exceed (knownTotal - alreadyPaid)
-      
-      const remainingAllowed = Math.max(0, knownTotal - currentPaid);
-
       // ONLY block if payment exceeds what's currently known/allowed
-      if (amountEgp > remainingAllowed + 0.0001) {
+      if (amountEgp > paymentSnapshot.remainingAllowed + 0.0001) {
         throw new ApiError("PAYMENT_OVERPAY", 
-          `لا يمكن دفع هذا المبلغ - الحد المسموح به هو ${remainingAllowed.toFixed(2)} جنيه`, 409, {
+          `لا يمكن دفع هذا المبلغ - الحد المسموح به هو ${paymentSnapshot.remainingAllowed.toFixed(2)} جنيه`, 409, {
           shipmentId: data.shipmentId,
-          knownTotal,
-          alreadyPaid: currentPaid,
-          remainingAllowed,
+          knownTotal: paymentSnapshot.knownTotalCost,
+          alreadyPaid: paymentSnapshot.totalPaidEgp,
+          remainingAllowed: paymentSnapshot.remainingAllowed,
           attempted: amountEgp,
         });
       }
@@ -639,7 +622,9 @@ export class DatabaseStorage implements IStorage {
 
       const totalPaidNumber = roundAmount(parseFloat(paymentTotals?.totalPaid || "0"));
       // Use known total for balance calculation (allows partial payments)
-      const balance = roundAmount(Math.max(0, knownTotal - totalPaidNumber));
+      const balance = roundAmount(
+        Math.max(0, paymentSnapshot.knownTotalCost - totalPaidNumber),
+      );
       const latestPaymentDate =
         paymentTotals?.lastPaymentDate || data.paymentDate || new Date();
 
