@@ -1,6 +1,6 @@
-import type { Express } from "express";
+import type { Express, RequestHandler } from "express";
 import type { Server } from "http";
-import { storage } from "./storage";
+import { storage, type IStorage } from "./storage";
 import { setupAuth, isAuthenticated, requireRole } from "./auth";
 import { logAuditEvent } from "./audit";
 import { getPaymentsWithShipments } from "./payments";
@@ -12,6 +12,7 @@ import {
   insertExchangeRateSchema,
   insertShipmentPaymentSchema,
 } from "@shared/schema";
+import { calculatePaymentSnapshot, parseAmountOrZero } from "./services/paymentCalculations";
 import bcrypt from "bcryptjs";
 import multer from "multer";
 import path from "path";
@@ -48,9 +49,31 @@ const uploadItemImage = multer({
   },
 });
 
-export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
+type RouteDependencies = {
+  storage?: IStorage;
+  auditLogger?: typeof logAuditEvent;
+  auth?: {
+    setupAuth: (app: Express) => Promise<void>;
+    isAuthenticated: RequestHandler;
+    requireRole: (roles: string[]) => RequestHandler;
+  };
+};
+
+export async function registerRoutes(
+  httpServer: Server,
+  app: Express,
+  deps: RouteDependencies = {},
+): Promise<void> {
+  const routeStorage = deps.storage ?? storage;
+  const auth = deps.auth ?? { setupAuth, isAuthenticated, requireRole };
+  const auditLogger = deps.auditLogger ?? ((event) => logAuditEvent(event, routeStorage));
+  const storage = routeStorage;
+  const isAuthenticated = auth.isAuthenticated;
+  const requireRole = auth.requireRole;
+  const logAuditEvent = auditLogger;
+
   // Setup authentication
-  await setupAuth(app);
+  await auth.setupAuth(app);
 
   // Auth routes
   app.get("/api/auth/user", async (req, res) => {
@@ -271,7 +294,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       
       const payments = await storage.getShipmentPayments(shipmentId);
-      const shippingDetails = await storage.getShippingDetails(shipmentId);
+      const paymentAllowance = await storage.getPaymentAllowance(shipmentId, { shipment });
       
       // Calculate paid amounts by currency
       const paidRmb = payments
@@ -282,23 +305,60 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .filter(p => p.paymentCurrency === "EGP")
         .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
       
+      const paymentSnapshot = await calculatePaymentSnapshot({
+        shipment,
+        payments,
+        loadRecoveryData: async () => {
+          const items = await storage.getShipmentItems(shipmentId);
+          const rate = await storage.getLatestRate("RMB", "EGP");
+
+          return {
+            items,
+            rmbToEgpRate: rate ? parseAmountOrZero(rate.rateValue) : undefined,
+          };
+        },
+      });
+
+      const paidRmb = paymentSnapshot.paidByCurrency.RMB?.original ?? 0;
+      const paidEgp = paymentSnapshot.paidByCurrency.EGP?.original ?? 0;
+
       // RMB costs breakdown
-      const goodsTotalRmb = parseFloat(shipment.purchaseCostRmb || "0");
-      const shippingTotalRmb = parseFloat(shipment.shippingCostRmb || "0");
-      const commissionTotalRmb = parseFloat(shipment.commissionCostRmb || "0");
+      const goodsTotalRmb = parseAmountOrZero(shipment.purchaseCostRmb || "0");
+      const shippingTotalRmb = parseAmountOrZero(
+        shipment.shippingCostRmb || "0",
+      );
+      const commissionTotalRmb = parseAmountOrZero(
+        shipment.commissionCostRmb || "0",
+      );
       const rmbSubtotal = goodsTotalRmb + shippingTotalRmb + commissionTotalRmb;
       const rmbRemaining = Math.max(0, rmbSubtotal - paidRmb);
       
       // EGP costs breakdown
-      const customsTotalEgp = parseFloat(shipment.customsCostEgp || "0");
-      const takhreegTotalEgp = parseFloat(shipment.takhreegCostEgp || "0");
+      const customsTotalEgp = parseAmountOrZero(shipment.customsCostEgp || "0");
+      const takhreegTotalEgp = parseAmountOrZero(
+        shipment.takhreegCostEgp || "0",
+      );
       const egpSubtotal = customsTotalEgp + takhreegTotalEgp;
       const egpRemaining = Math.max(0, egpSubtotal - paidEgp);
-      
+
+      const paidByCurrency = Object.fromEntries(
+        Object.entries(paymentSnapshot.paidByCurrency).map(([currency, values]) => [
+          currency,
+          {
+            original: values.original.toFixed(2),
+            convertedToEgp: values.convertedToEgp.toFixed(2),
+          },
+        ]),
+      );
+
       res.json({
         shipmentId,
         shipmentCode: shipment.shipmentCode,
         shipmentName: shipment.shipmentName,
+        knownTotalCost: paymentSnapshot.knownTotalCost.toFixed(2),
+        totalPaidEgp: paymentSnapshot.totalPaidEgp.toFixed(2),
+        remainingAllowed: paymentSnapshot.remainingAllowed.toFixed(2),
+        paidByCurrency,
         rmb: {
           goodsTotal: goodsTotalRmb.toFixed(2),
           shippingTotal: shippingTotalRmb.toFixed(2),
@@ -313,6 +373,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           subtotal: egpSubtotal.toFixed(2),
           paid: paidEgp.toFixed(2),
           remaining: egpRemaining.toFixed(2),
+        },
+        paymentAllowance: {
+          knownTotalEgp: paymentAllowance.knownTotal.toFixed(2),
+          alreadyPaidEgp: paymentAllowance.alreadyPaid.toFixed(2),
+          remainingAllowedEgp: paymentAllowance.remainingAllowed.toFixed(2),
+          source: paymentAllowance.recoveredFromItems ? "recovered" : "declared",
         },
         computedAt: new Date().toISOString(),
       });
@@ -426,88 +492,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/payments", requireRole(["مدير", "محاسب"]), async (req, res) => {
-    try {
-      const body = req.body;
-      const userId = (req.user as any)?.id;
-
-      if (!userId) {
-        throw new ApiError("AUTH_REQUIRED", undefined, 401);
-      }
-      
-      // Pre-process paymentDate: convert string/Date to proper Date object
-      let paymentDate: Date;
-      if (body.paymentDate) {
-        paymentDate = new Date(body.paymentDate);
-        if (Number.isNaN(paymentDate.getTime())) {
-          throw new ApiError("PAYMENT_DATE_INVALID");
-        }
-      } else {
-        throw new ApiError("PAYMENT_DATE_INVALID");
-      }
-      
-      // Prepare data with proper type coercion for schema validation
-      const preparedBody = {
-        ...body,
-        paymentDate,
-        shipmentId: body.shipmentId ? Number(body.shipmentId) : undefined,
-        amountOriginal: body.amountOriginal ? String(body.amountOriginal) : undefined,
-        amountEgp: body.amountEgp ? String(body.amountEgp) : undefined,
-        exchangeRateToEgp: body.exchangeRateToEgp ? String(body.exchangeRateToEgp) : null,
-      };
-      
-      // Validate with schema
-      const parseResult = insertShipmentPaymentSchema.safeParse(preparedBody);
-      
-      if (!parseResult.success) {
-        // Map Zod errors to Arabic messages
-        const firstError = parseResult.error.errors[0];
-        const fieldMessages: Record<string, string> = {
-          shipmentId: "يجب اختيار الشحنة",
-          paymentDate: "تاريخ الدفع مطلوب",
-          paymentCurrency: "عملة الدفع مطلوبة",
-          amountOriginal: "المبلغ مطلوب",
-          amountEgp: "المبلغ بالجنيه المصري مطلوب",
-          costComponent: "يجب اختيار بند التكلفة",
-          paymentMethod: "يجب اختيار طريقة الدفع",
-        };
-        const fieldName = firstError?.path?.[0]?.toString() || "";
-        const message = fieldMessages[fieldName] || firstError?.message || "بيانات غير صالحة";
-        throw new ApiError("PAYMENT_PAYLOAD_INVALID", message, 400, {
-          field: fieldName || undefined,
-        });
-      }
-      
-      const data = parseResult.data;
-      
-      const payment = await storage.createPayment({
-        ...data,
-        createdByUserId: userId,
-      });
-
-      logAuditEvent({
-        userId,
-        entityType: "PAYMENT",
-        entityId: payment.id,
-        actionType: "CREATE",
-        details: { 
-          shipmentId: payment.shipmentId,
-          amount: payment.amountEgp,
-          currency: payment.paymentCurrency,
-          method: payment.paymentMethod,
-        },
-      });
-      
-      res.json(success(payment));
-    } catch (error) {
-      console.error("Error creating payment:", error);
-      const { status, body } = formatError(error, {
-        code: "UNKNOWN_ERROR",
-        status: (error as any)?.status || 500,
-      });
-      res.status(status).json(body);
-    }
-  });
+  app.post(
+    "/api/payments",
+    requireRole(["مدير", "محاسب"]),
+    createPaymentHandler({ storage, logAuditEvent }),
+  );
 
   // Inventory
   app.get("/api/inventory", isAuthenticated, async (req, res) => {
