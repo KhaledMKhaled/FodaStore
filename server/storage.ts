@@ -42,12 +42,84 @@ import {
 } from "./services/paymentCalculations";
 import { ApiError } from "./errors";
 
+const RMB_TO_EGP_FALLBACK_RATE = 7.15;
+
 const parseAmount = (value: unknown): number => {
   if (value === null || value === undefined) return 0;
   const parsed = typeof value === "number" ? value : parseFloat(value as any);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const computeKnownTotal = (shipment: Shipment): number => {
+  const purchase = parseAmount(shipment.purchaseCostEgp);
+  const commission = parseAmount(shipment.commissionCostEgp);
+  const shipping = parseAmount(shipment.shippingCostEgp);
+  const customs = parseAmount(shipment.customsCostEgp);
+  const takhreeg = parseAmount(shipment.takhreegCostEgp);
+
+  return purchase + commission + shipping + customs + takhreeg;
+};
+
+async function recoverKnownTotalFromItems(
+  shipmentId: number,
+  executor: typeof db | any,
+): Promise<{
+  recoveredTotal: number;
+  purchaseCostRmb: number;
+  purchaseCostEgp: number;
+  customsCostEgp: number;
+  takhreegCostEgp: number;
+}> {
+  const itemsList = await executor
+    .select()
+    .from(shipmentItems)
+    .where(eq(shipmentItems.shipmentId, shipmentId));
+
+  if (itemsList.length === 0) {
+    return {
+      recoveredTotal: 0,
+      purchaseCostRmb: 0,
+      purchaseCostEgp: 0,
+      customsCostEgp: 0,
+      takhreegCostEgp: 0,
+    };
+  }
+
+  const totalPurchaseCostRmb = itemsList.reduce(
+    (sum: number, item: any) => sum + parseAmount(item.totalPurchaseCostRmb),
+    0,
+  );
+
+  const totalCustomsCostEgp = itemsList.reduce((sum: number, item: any) => {
+    return sum + (item.cartonsCtn || 0) * parseAmount(item.customsCostPerCartonEgp);
+  }, 0);
+
+  const totalTakhreegCostEgp = itemsList.reduce((sum: number, item: any) => {
+    return sum + (item.cartonsCtn || 0) * parseAmount(item.takhreegCostPerCartonEgp);
+  }, 0);
+
+  const rateResult = await executor
+    .select()
+    .from(exchangeRates)
+    .where(
+      and(eq(exchangeRates.fromCurrency, "RMB"), eq(exchangeRates.toCurrency, "EGP")),
+    )
+    .orderBy(desc(exchangeRates.rateDate))
+    .limit(1);
+
+  const rmbToEgpRate =
+    rateResult.length > 0 ? parseAmount(rateResult[0].rateValue) : RMB_TO_EGP_FALLBACK_RATE;
+  const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgpRate;
+  const recoveredTotal = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
+
+  return {
+    recoveredTotal,
+    purchaseCostRmb: totalPurchaseCostRmb,
+    purchaseCostEgp,
+    customsCostEgp: totalCustomsCostEgp,
+    takhreegCostEgp: totalTakhreegCostEgp,
+  };
+}
 export class MissingRmbRateError extends Error {
   constructor() {
     super("RMB_RATE_MISSING");
@@ -210,6 +282,15 @@ export interface IStorage {
   getAllPayments(): Promise<ShipmentPayment[]>;
   getShipmentPayments(shipmentId: number): Promise<ShipmentPayment[]>;
   createPayment(data: InsertShipmentPayment): Promise<ShipmentPayment>;
+  getPaymentAllowance(
+    shipmentId: number,
+    options?: { shipment?: Shipment },
+  ): Promise<{
+    knownTotal: number;
+    alreadyPaid: number;
+    remainingAllowed: number;
+    recoveredFromItems: boolean;
+  }>;
 
   // Inventory
   getAllInventoryMovements(): Promise<InventoryMovement[]>;
@@ -666,6 +747,27 @@ codex/refactor-invoice-summary-calculations
         .from(shipmentPayments)
         .where(eq(shipmentPayments.shipmentId, data.shipmentId));
 
+      // EMERGENCY FIX: If knownTotal = 0 but shipment has items, recalculate costs from items
+      if (knownTotal === 0) {
+        try {
+          const recovery = await recoverKnownTotalFromItems(data.shipmentId, tx);
+
+          // Update shipment with recovered costs ONLY if we calculated something positive
+          if (recovery.recoveredTotal > 0) {
+            knownTotal = recovery.recoveredTotal;
+            
+            await tx
+              .update(shipments)
+              .set({
+                purchaseCostRmb: recovery.purchaseCostRmb.toFixed(2),
+                purchaseCostEgp: recovery.purchaseCostEgp.toFixed(2),
+                customsCostEgp: recovery.customsCostEgp.toFixed(2),
+                takhreegCostEgp: recovery.takhreegCostEgp.toFixed(2),
+                finalTotalCostEgp: recovery.recoveredTotal.toFixed(2),
+                balanceEgp: Math.max(0, recovery.recoveredTotal - currentPaid).toFixed(2),
+              })
+              .where(eq(shipments.id, data.shipmentId));
+          }
       const paymentSnapshot = await calculatePaymentSnapshot({
         shipment,
         payments: existingPayments,
@@ -834,6 +936,42 @@ main
 
       return payment;
     });
+  }
+
+  async getPaymentAllowance(
+    shipmentId: number,
+    options?: { shipment?: Shipment },
+  ): Promise<{
+    knownTotal: number;
+    alreadyPaid: number;
+    remainingAllowed: number;
+    recoveredFromItems: boolean;
+  }> {
+    const shipment = options?.shipment ?? (await this.getShipment(shipmentId));
+
+    if (!shipment) {
+      throw new ApiError("SHIPMENT_NOT_FOUND", undefined, 404, { shipmentId });
+    }
+
+    const alreadyPaid = parseAmount(shipment.totalPaidEgp);
+    let knownTotal = computeKnownTotal(shipment);
+    let recoveredFromItems = false;
+
+    if (knownTotal === 0) {
+      try {
+        const recovery = await recoverKnownTotalFromItems(shipmentId, db);
+        if (recovery.recoveredTotal > 0) {
+          knownTotal = recovery.recoveredTotal;
+          recoveredFromItems = true;
+        }
+      } catch (error) {
+        console.error(`[PAYMENT ALLOWANCE] Failed to recover costs for shipment ${shipmentId}:`, error);
+      }
+    }
+
+    const remainingAllowed = Math.max(0, knownTotal - alreadyPaid);
+
+    return { knownTotal, alreadyPaid, remainingAllowed, recoveredFromItems };
   }
 
   // Inventory

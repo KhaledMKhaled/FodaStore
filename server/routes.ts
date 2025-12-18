@@ -294,6 +294,17 @@ export async function registerRoutes(
       }
       
       const payments = await storage.getShipmentPayments(shipmentId);
+      const paymentAllowance = await storage.getPaymentAllowance(shipmentId, { shipment });
+      
+      // Calculate paid amounts by currency
+      const paidRmb = payments
+        .filter(p => p.paymentCurrency === "RMB")
+        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
+      
+      const paidEgp = payments
+        .filter(p => p.paymentCurrency === "EGP")
+        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
+      
       const paymentSnapshot = await calculatePaymentSnapshot({
         shipment,
         payments,
@@ -362,6 +373,12 @@ export async function registerRoutes(
           subtotal: egpSubtotal.toFixed(2),
           paid: paidEgp.toFixed(2),
           remaining: egpRemaining.toFixed(2),
+        },
+        paymentAllowance: {
+          knownTotalEgp: paymentAllowance.knownTotal.toFixed(2),
+          alreadyPaidEgp: paymentAllowance.alreadyPaid.toFixed(2),
+          remainingAllowedEgp: paymentAllowance.remainingAllowed.toFixed(2),
+          source: paymentAllowance.recoveredFromItems ? "recovered" : "declared",
         },
         computedAt: new Date().toISOString(),
       });
