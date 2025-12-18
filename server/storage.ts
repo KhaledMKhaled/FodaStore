@@ -281,6 +281,10 @@ export interface IStorage {
   // Payments
   getAllPayments(): Promise<ShipmentPayment[]>;
   getShipmentPayments(shipmentId: number): Promise<ShipmentPayment[]>;
+  createPayment(
+    data: InsertShipmentPayment,
+    options?: { simulatePostInsertError?: boolean }
+  ): Promise<ShipmentPayment>;
   createPayment(data: InsertShipmentPayment): Promise<ShipmentPayment>;
   getPaymentAllowance(
     shipmentId: number,
@@ -667,7 +671,10 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(shipmentPayments.paymentDate));
   }
 
-  async createPayment(data: InsertShipmentPayment): Promise<ShipmentPayment> {
+  async createPayment(
+    data: InsertShipmentPayment,
+    options?: { simulatePostInsertError?: boolean }
+  ): Promise<ShipmentPayment> {
     return db.transaction(async (tx) => {
       const lockedShipment = await tx.execute(sql<Shipment>`SELECT * FROM shipments WHERE id = ${data.shipmentId} FOR UPDATE`);
       const shipment = (lockedShipment.rows?.[0] as Shipment | undefined) || undefined;
@@ -679,6 +686,46 @@ export class DatabaseStorage implements IStorage {
       if (shipment.status === "مؤرشفة") {
         throw new ApiError("SHIPMENT_LOCKED", undefined, 409, { shipmentId: data.shipmentId, status: shipment.status });
       }
+
+      const parseAmount = (value: unknown): number => {
+        if (value === null || value === undefined) return 0;
+        const parsed = typeof value === "number" ? value : parseFloat(value as any);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+
+      // Compute the "known total" - sum of cost components that are available/entered
+      // Uses RMB values (with stored rate) when EGP amounts are missing to avoid losing information
+      const computeKnownTotals = (s: Shipment) => {
+        const purchaseRate = parseAmount(s.purchaseRmbToEgpRate);
+
+        const purchaseFromRmb = purchaseRate > 0 ? parseAmount(s.purchaseCostRmb) * purchaseRate : 0;
+        const purchase = parseAmount(s.purchaseCostEgp) || purchaseFromRmb;
+
+        const commissionFromRmb = purchaseRate > 0 ? parseAmount(s.commissionCostRmb) * purchaseRate : 0;
+        const commission = parseAmount(s.commissionCostEgp) || commissionFromRmb;
+
+        const shippingFromRmb = purchaseRate > 0 ? parseAmount(s.shippingCostRmb) * purchaseRate : 0;
+        const shipping = parseAmount(s.shippingCostEgp) || shippingFromRmb;
+
+        const customs = parseAmount(s.customsCostEgp);
+        const takhreeg = parseAmount(s.takhreegCostEgp);
+
+        const componentTotal = purchase + commission + shipping + customs + takhreeg;
+        const existingFinal = parseAmount(s.finalTotalCostEgp);
+        const bestKnownTotal = Math.max(componentTotal, existingFinal);
+
+        return {
+          bestKnownTotal,
+          componentTotal,
+          normalizedComponents: {
+            purchaseCostEgp: purchase,
+            commissionCostEgp: commission,
+            shippingCostEgp: shipping,
+            customsCostEgp: customs,
+            takhreegCostEgp: takhreeg,
+          },
+        };
+      };
 
 codex/refactor-invoice-summary-calculations
       const amountOriginal = parseAmountOrZero(data.amountOriginal as any);
@@ -741,6 +788,25 @@ main
 
       const { amountEgp, exchangeRateToEgp } = normalizedAmounts;
 
+      const currentPaid = parseAmount(shipment.totalPaidEgp);
+      const { bestKnownTotal, normalizedComponents: computedComponents } = computeKnownTotals(shipment);
+      let normalizedComponents = { ...computedComponents };
+      let knownTotal = bestKnownTotal;
+
+      const canonicalUpdates: Partial<typeof shipments.$inferInsert> = {};
+
+      // Backfill EGP fields when only RMB values are present so future totals stay consistent
+      if (normalizedComponents.purchaseCostEgp > 0 && parseAmount(shipment.purchaseCostEgp) === 0) {
+        canonicalUpdates.purchaseCostEgp = roundAmount(normalizedComponents.purchaseCostEgp, 2).toFixed(2);
+      }
+
+      if (normalizedComponents.commissionCostEgp > 0 && parseAmount(shipment.commissionCostEgp) === 0) {
+        canonicalUpdates.commissionCostEgp = roundAmount(normalizedComponents.commissionCostEgp, 2).toFixed(2);
+      }
+
+      if (normalizedComponents.shippingCostEgp > 0 && parseAmount(shipment.shippingCostEgp) === 0) {
+        canonicalUpdates.shippingCostEgp = roundAmount(normalizedComponents.shippingCostEgp, 2).toFixed(2);
+      }
 codex/refactor-invoice-summary-calculations
       const existingPayments = await tx
         .select()
@@ -783,6 +849,32 @@ codex/refactor-invoice-summary-calculations
             .where(
               and(
                 eq(exchangeRates.fromCurrency, "RMB"),
+                eq(exchangeRates.toCurrency, "EGP")
+              ))
+              .orderBy(desc(exchangeRates.rateDate))
+              .limit(1);
+            
+            const rmbToEgpRate = rateResult.length > 0 ? parseAmount(rateResult[0].rateValue) : 7.15;
+            const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgpRate;
+            const recoveredTotal = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
+            
+            // Update shipment with recovered costs ONLY if we calculated something positive
+            if (recoveredTotal > 0) {
+              knownTotal = recoveredTotal;
+              normalizedComponents = {
+                ...normalizedComponents,
+                purchaseCostEgp,
+                customsCostEgp: totalCustomsCostEgp,
+                takhreegCostEgp: totalTakhreegCostEgp,
+              };
+
+              canonicalUpdates.purchaseCostRmb = totalPurchaseCostRmb.toFixed(2);
+              canonicalUpdates.purchaseCostEgp = purchaseCostEgp.toFixed(2);
+              canonicalUpdates.customsCostEgp = totalCustomsCostEgp.toFixed(2);
+              canonicalUpdates.takhreegCostEgp = totalTakhreegCostEgp.toFixed(2);
+              canonicalUpdates.finalTotalCostEgp = recoveredTotal.toFixed(2);
+            }
+          }
                 eq(exchangeRates.toCurrency, "EGP"),
               ),
             )
@@ -885,6 +977,17 @@ main
         throw error;
       }
 
+      // Align final total with the best-known calculated total without overwriting higher-confidence values
+      if (knownTotal > 0 && (parseAmount(shipment.finalTotalCostEgp) === 0 || knownTotal > parseAmount(shipment.finalTotalCostEgp))) {
+        canonicalUpdates.finalTotalCostEgp = roundAmount(knownTotal, 2).toFixed(2);
+      }
+
+      // RADICAL FIX: Allow payments based on KNOWN total costs at any time
+      // Known total = sum of currently available cost components
+      // Payments allowed as long as they don't exceed (knownTotal - alreadyPaid)
+      
+      const remainingAllowed = Math.max(0, knownTotal - currentPaid);
+
       // ONLY block if payment exceeds what's currently known/allowed
       if (amountEgp > paymentSnapshot.remainingAllowed + 0.0001) {
         throw new ApiError("PAYMENT_OVERPAY", 
@@ -907,6 +1010,10 @@ main
         })
         .returning();
 
+      if (options?.simulatePostInsertError) {
+        throw new Error("Simulated failure after inserting payment");
+      }
+
       const [paymentTotals] = await tx
         .select({
           totalPaid: sql<string>`COALESCE(SUM(${shipmentPayments.amountEgp}), 0)`,
@@ -923,15 +1030,25 @@ main
       const latestPaymentDate =
         paymentTotals?.lastPaymentDate || data.paymentDate || new Date();
 
+      const finalTotalForShipment = knownTotal > 0 ? roundAmount(knownTotal, 2).toFixed(2) : undefined;
+      const computedBalance = balance.toFixed(2);
+
+      const shipmentUpdatePayload: Partial<typeof shipments.$inferInsert> = {
+        ...canonicalUpdates,
+        totalPaidEgp: totalPaidNumber.toFixed(2),
+        balanceEgp: computedBalance,
+        lastPaymentDate: latestPaymentDate,
+        updatedAt: new Date(),
+      };
+
+      if (finalTotalForShipment) {
+        shipmentUpdatePayload.finalTotalCostEgp = finalTotalForShipment;
+      }
+
       // Update shipment with new totals atomically
       await tx
         .update(shipments)
-        .set({
-          totalPaidEgp: totalPaidNumber.toFixed(2),
-          balanceEgp: balance.toFixed(2),
-          lastPaymentDate: latestPaymentDate,
-          updatedAt: new Date(),
-        })
+        .set(shipmentUpdatePayload)
         .where(eq(shipments.id, data.shipmentId));
 
       return payment;
