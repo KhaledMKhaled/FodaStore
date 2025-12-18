@@ -38,6 +38,119 @@ import {
 import { normalizePaymentAmounts, roundAmount } from "./services/currency";
 import { ApiError } from "./errors";
 
+const parseAmount = (value: unknown): number => {
+  if (value === null || value === undefined) return 0;
+  const parsed = typeof value === "number" ? value : parseFloat(value as any);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+export class MissingRmbRateError extends Error {
+  constructor() {
+    super("RMB_RATE_MISSING");
+  }
+}
+
+type KnownTotalContext = {
+  shipment: Shipment;
+  shippingDetails?: ShipmentShippingDetails | null;
+  customsDetails?: ShipmentCustomsDetails | null;
+  items?: ShipmentItem[];
+  latestRmbToEgpRate?: number | null;
+  paymentRmbToEgpRate?: number | null;
+  defaultRmbToEgpRate?: number | null;
+};
+
+export const computeShipmentKnownTotal = (context: KnownTotalContext): number => {
+  const {
+    shipment,
+    shippingDetails,
+    customsDetails,
+    items = [],
+    latestRmbToEgpRate,
+    paymentRmbToEgpRate,
+    defaultRmbToEgpRate,
+  } = context;
+
+  const rateCandidates = [
+    parseAmount(shipment.purchaseRmbToEgpRate),
+    parseAmount(latestRmbToEgpRate),
+    parseAmount(paymentRmbToEgpRate),
+    parseAmount(defaultRmbToEgpRate),
+  ];
+
+  let resolvedRate = rateCandidates.find((rate) => rate > 0) ?? null;
+
+  const requireRate = () => {
+    if (resolvedRate && resolvedRate > 0) return resolvedRate;
+    throw new MissingRmbRateError();
+  };
+
+  const pickComponent = (egpCandidates: number[], rmbCandidates: number[]) => {
+    const egpValue = egpCandidates.find((value) => value > 0) ?? 0;
+    if (egpValue > 0) return egpValue;
+
+    const rmbValue = rmbCandidates.find((value) => value > 0) ?? 0;
+    if (rmbValue > 0) {
+      return rmbValue * requireRate();
+    }
+
+    return 0;
+  };
+
+  const itemPurchaseRmb = items.reduce(
+    (sum, item) => sum + parseAmount(item.totalPurchaseCostRmb),
+    0
+  );
+
+  const itemCustomsEgp = items.reduce((sum, item) => {
+    const totalCustoms = parseAmount(item.totalCustomsCostEgp);
+    if (totalCustoms > 0) return sum + totalCustoms;
+    const cartons = parseAmount(item.cartonsCtn);
+    const perCarton = parseAmount(item.customsCostPerCartonEgp);
+    return sum + cartons * perCarton;
+  }, 0);
+
+  const itemTakhreegEgp = items.reduce((sum, item) => {
+    const totalTakhreeg = parseAmount(item.totalTakhreegCostEgp);
+    if (totalTakhreeg > 0) return sum + totalTakhreeg;
+    const cartons = parseAmount(item.cartonsCtn);
+    const perCarton = parseAmount(item.takhreegCostPerCartonEgp);
+    return sum + cartons * perCarton;
+  }, 0);
+
+  const purchaseTotal = pickComponent(
+    [parseAmount(shipment.purchaseCostEgp)],
+    [
+      parseAmount(shipment.purchaseCostRmb),
+      parseAmount(shippingDetails?.totalPurchaseCostRmb),
+      itemPurchaseRmb,
+    ]
+  );
+
+  const commissionTotal = pickComponent(
+    [parseAmount(shipment.commissionCostEgp), parseAmount(shippingDetails?.commissionValueEgp)],
+    [parseAmount(shipment.commissionCostRmb), parseAmount(shippingDetails?.commissionValueRmb)]
+  );
+
+  const shippingTotal = pickComponent(
+    [parseAmount(shipment.shippingCostEgp), parseAmount(shippingDetails?.totalShippingCostEgp)],
+    [parseAmount(shipment.shippingCostRmb), parseAmount(shippingDetails?.totalShippingCostRmb)]
+  );
+
+  const customsTotal = pickComponent(
+    [parseAmount(shipment.customsCostEgp), parseAmount(customsDetails?.totalCustomsCostEgp), itemCustomsEgp],
+    []
+  );
+
+  const takhreegTotal = pickComponent(
+    [parseAmount(shipment.takhreegCostEgp), parseAmount(customsDetails?.totalTakhreegCostEgp), itemTakhreegEgp],
+    []
+  );
+
+  const total = purchaseTotal + commissionTotal + shippingTotal + customsTotal + takhreegTotal;
+  return roundAmount(total);
+};
+
 export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
@@ -482,25 +595,6 @@ export class DatabaseStorage implements IStorage {
         throw new ApiError("SHIPMENT_LOCKED", undefined, 409, { shipmentId: data.shipmentId, status: shipment.status });
       }
 
-      const parseAmount = (value: unknown): number => {
-        if (value === null || value === undefined) return 0;
-        const parsed = typeof value === "number" ? value : parseFloat(value as any);
-        return Number.isFinite(parsed) ? parsed : 0;
-      };
-
-      // Compute the "known total" - sum of cost components that are available/entered
-      // This allows partial payments at any stage of the shipment lifecycle
-      const computeKnownTotal = (s: Shipment): number => {
-        const purchase = parseAmount(s.purchaseCostEgp);
-        const commission = parseAmount(s.commissionCostEgp);
-        const shipping = parseAmount(s.shippingCostEgp);
-        const customs = parseAmount(s.customsCostEgp);
-        const takhreeg = parseAmount(s.takhreegCostEgp);
-
-        // Sum all available components - allows payment even if some components are 0 or not yet entered
-        return purchase + commission + shipping + customs + takhreeg;
-      };
-
       const amountOriginal = parseAmount(data.amountOriginal as any);
       const exchangeRate = data.exchangeRateToEgp
         ? parseAmount(data.exchangeRateToEgp as any)
@@ -536,69 +630,57 @@ export class DatabaseStorage implements IStorage {
       const { amountEgp, exchangeRateToEgp } = normalizedAmounts;
 
       const currentPaid = parseAmount(shipment.totalPaidEgp);
-      let knownTotal = computeKnownTotal(shipment);
+      const defaultRmbRate = parseAmount(process.env.DEFAULT_RMB_TO_EGP_RATE);
 
-      // EMERGENCY FIX: If knownTotal = 0 but shipment has items, recalculate costs from items
-      if (knownTotal === 0) {
-        try {
-          // Fetch all items for this shipment
-          const itemsList = await tx
-            .select()
-            .from(shipmentItems)
-            .where(eq(shipmentItems.shipmentId, data.shipmentId));
-          
-          if (itemsList.length > 0) {
-            // Recalculate costs from items
-            const totalPurchaseCostRmb = itemsList.reduce(
-              (sum: number, item: any) => sum + parseAmount(item.totalPurchaseCostRmb),
-              0
-            );
-            
-            const totalCustomsCostEgp = itemsList.reduce((sum: number, item: any) => {
-              return sum + (item.cartonsCtn || 0) * parseAmount(item.customsCostPerCartonEgp);
-            }, 0);
-            
-            const totalTakhreegCostEgp = itemsList.reduce((sum: number, item: any) => {
-              return sum + (item.cartonsCtn || 0) * parseAmount(item.takhreegCostPerCartonEgp);
-            }, 0);
-            
-            // Get current exchange rate
-            const rateResult = await tx
-              .select()
-              .from(exchangeRates)
-              .where(and(
-                eq(exchangeRates.fromCurrency, "RMB"),
-                eq(exchangeRates.toCurrency, "EGP")
-              ))
-              .orderBy(desc(exchangeRates.rateDate))
-              .limit(1);
-            
-            const rmbToEgpRate = rateResult.length > 0 ? parseAmount(rateResult[0].rateValue) : 7.15;
-            const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgpRate;
-            const recoveredTotal = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
-            
-            // Update shipment with recovered costs ONLY if we calculated something positive
-            if (recoveredTotal > 0) {
-              knownTotal = recoveredTotal;
-              const updateTime = new Date().toISOString();
-              
-              await tx
-                .update(shipments)
-                .set({
-                  purchaseCostRmb: totalPurchaseCostRmb.toFixed(2),
-                  purchaseCostEgp: purchaseCostEgp.toFixed(2),
-                  customsCostEgp: totalCustomsCostEgp.toFixed(2),
-                  takhreegCostEgp: totalTakhreegCostEgp.toFixed(2),
-                  finalTotalCostEgp: recoveredTotal.toFixed(2),
-                  balanceEgp: Math.max(0, recoveredTotal - currentPaid).toFixed(2),
-                })
-                .where(eq(shipments.id, data.shipmentId));
-            }
-          }
-        } catch (error) {
-          console.error(`[PAYMENT RECOVERY ERROR] Failed to recover costs for shipment ${data.shipmentId}:`, error);
-          // Continue anyway - don't block payment if recovery fails
+      const [shippingDetails, customsDetails, itemsList, latestRateResult] = await Promise.all([
+        tx
+          .select()
+          .from(shipmentShippingDetails)
+          .where(eq(shipmentShippingDetails.shipmentId, data.shipmentId))
+          .limit(1),
+        tx
+          .select()
+          .from(shipmentCustomsDetails)
+          .where(eq(shipmentCustomsDetails.shipmentId, data.shipmentId))
+          .limit(1),
+        tx
+          .select()
+          .from(shipmentItems)
+          .where(eq(shipmentItems.shipmentId, data.shipmentId)),
+        tx
+          .select()
+          .from(exchangeRates)
+          .where(
+            and(eq(exchangeRates.fromCurrency, "RMB"), eq(exchangeRates.toCurrency, "EGP"))
+          )
+          .orderBy(desc(exchangeRates.rateDate))
+          .limit(1),
+      ]);
+
+      const latestRmbRate = latestRateResult?.[0]?.rateValue
+        ? parseAmount(latestRateResult[0].rateValue)
+        : null;
+
+      let knownTotal: number;
+
+      try {
+        knownTotal = computeShipmentKnownTotal({
+          shipment,
+          shippingDetails: shippingDetails?.[0],
+          customsDetails: customsDetails?.[0],
+          items: itemsList,
+          latestRmbToEgpRate: latestRmbRate,
+          paymentRmbToEgpRate: data.paymentCurrency === "RMB" ? exchangeRateToEgp : null,
+          defaultRmbToEgpRate: defaultRmbRate,
+        });
+      } catch (error) {
+        if (error instanceof MissingRmbRateError) {
+          throw new ApiError("PAYMENT_RATE_MISSING", undefined, 400, {
+            shipmentId: data.shipmentId,
+            currency: "RMB",
+          });
         }
+        throw error;
       }
 
       // RADICAL FIX: Allow payments based on KNOWN total costs at any time
