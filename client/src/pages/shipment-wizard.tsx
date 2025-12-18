@@ -562,6 +562,14 @@ export default function ShipmentWizard() {
                 value={`¥ ${formatCurrency(totalPurchaseCostRmb)}`}
               />
             )}
+            <SummaryRow
+              label="صافي التكلفة (RMB)"
+              value={`¥ ${formatCurrency((totalPurchaseCostRmb - partialDiscountRmb) + commissionRmb + shippingCostRmb)}`}
+            />
+            <SummaryRow
+              label="صافي التكلفة (ج.م)"
+              value={`${formatCurrency(discountedPurchaseCostEgp + commissionEgp + shippingCostEgp)} ج.م`}
+            />
             <hr className="border-border" />
             <SummaryRow
               label="العمولة (RMB)"
