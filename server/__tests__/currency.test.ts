@@ -26,6 +26,17 @@ test("normalizePaymentAmounts converts RMB payments using provided rate", () => 
   assert.equal(exchangeRateToEgp, 7.25);
 });
 
+test("normalizePaymentAmounts converts RMB payments using DB rate when payload is missing", () => {
+  const latestDbRate = 7.4;
+  const { amountEgp, exchangeRateToEgp } = normalizePaymentAmounts({
+    paymentCurrency: "RMB",
+    amountOriginal: 50,
+    exchangeRateToEgp: latestDbRate,
+  });
+  assert.equal(amountEgp, 370);
+  assert.equal(exchangeRateToEgp, latestDbRate);
+});
+
 test("normalizePaymentAmounts keeps EGP payments untouched", () => {
   const { amountEgp, exchangeRateToEgp } = normalizePaymentAmounts({
     paymentCurrency: "EGP",
@@ -35,13 +46,12 @@ test("normalizePaymentAmounts keeps EGP payments untouched", () => {
   assert.equal(exchangeRateToEgp, null);
 });
 
-test("normalizePaymentAmounts rejects invalid rates", () => {
+test("normalizePaymentAmounts rejects missing RMB rates", () => {
   assert.throws(
     () =>
       normalizePaymentAmounts({
         paymentCurrency: "RMB",
         amountOriginal: 10,
-        exchangeRateToEgp: 0,
       }),
     /سعر الصرف غير صالح|يجب توفير سعر صرف صحيح لليوان/,
   );
