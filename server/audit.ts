@@ -1,4 +1,4 @@
-import { storage } from "./storage";
+import { storage, type IStorage } from "./storage";
 import type { InsertAuditLog } from "@shared/schema";
 
 export type AuditActionType = "CREATE" | "UPDATE" | "DELETE" | "STATUS_CHANGE";
@@ -22,7 +22,10 @@ function serializeDetails(details: unknown) {
   }
 }
 
-export function logAuditEvent(event: AuditEvent): void {
+export function logAuditEvent(
+  event: AuditEvent,
+  auditStorage: Pick<IStorage, "createAuditLog"> = storage,
+): void {
   const payload: InsertAuditLog = {
     userId: event.userId || null,
     entityType: event.entityType,
@@ -31,7 +34,7 @@ export function logAuditEvent(event: AuditEvent): void {
     details: serializeDetails(event.details),
   };
 
-  void storage.createAuditLog(payload).catch((error) => {
+  void auditStorage.createAuditLog(payload).catch((error) => {
     console.error("Failed to write audit log", { error, payload });
   });
 }

@@ -5,6 +5,7 @@ import { setupAuth, isAuthenticated, requireRole } from "./auth";
 import { logAuditEvent } from "./audit";
 import { getPaymentsWithShipments } from "./payments";
 import { createShipmentWithItems, updateShipmentWithItems } from "./shipmentService";
+import { ApiError, formatError, success } from "./errors";
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
@@ -404,7 +405,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const paymentsWithShipments = await getPaymentsWithShipments(storage);
       res.json(paymentsWithShipments);
     } catch (error) {
-      res.status(500).json({ message: "Error fetching payments" });
+      const { status, body } = formatError(error, {
+        code: "PAYMENT_FETCH_FAILED",
+        status: 500,
+      });
+      res.status(status).json(body);
     }
   });
 
@@ -413,23 +418,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const stats = await storage.getPaymentStats();
       res.json(stats);
     } catch (error) {
-      res.status(500).json({ message: "Error fetching payment stats" });
+      const { status, body } = formatError(error, {
+        code: "PAYMENT_FETCH_FAILED",
+        status: 500,
+      });
+      res.status(status).json(body);
     }
   });
 
   app.post("/api/payments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const body = req.body;
+      const userId = (req.user as any)?.id;
+
+      if (!userId) {
+        throw new ApiError("AUTH_REQUIRED", undefined, 401);
+      }
       
       // Pre-process paymentDate: convert string/Date to proper Date object
       let paymentDate: Date;
       if (body.paymentDate) {
         paymentDate = new Date(body.paymentDate);
         if (Number.isNaN(paymentDate.getTime())) {
-          return res.status(400).json({ message: "تاريخ الدفع غير صالح" });
+          throw new ApiError("PAYMENT_DATE_INVALID");
         }
       } else {
-        return res.status(400).json({ message: "تاريخ الدفع مطلوب" });
+        throw new ApiError("PAYMENT_DATE_INVALID");
       }
       
       // Prepare data with proper type coercion for schema validation
@@ -459,11 +473,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         };
         const fieldName = firstError?.path?.[0]?.toString() || "";
         const message = fieldMessages[fieldName] || firstError?.message || "بيانات غير صالحة";
-        return res.status(400).json({ message });
+        throw new ApiError("PAYMENT_PAYLOAD_INVALID", message, 400, {
+          field: fieldName || undefined,
+        });
       }
       
       const data = parseResult.data;
-      const userId = (req.user as any)?.id;
       
       const payment = await storage.createPayment({
         ...data,
@@ -483,11 +498,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         },
       });
       
-      res.json(payment);
+      res.json(success(payment));
     } catch (error) {
       console.error("Error creating payment:", error);
-      const message = (error as Error)?.message || "حدث خطأ أثناء حفظ الدفعة";
-      res.status(400).json({ message });
+      const { status, body } = formatError(error, {
+        code: "UNKNOWN_ERROR",
+        status: (error as any)?.status || 500,
+      });
+      res.status(status).json(body);
     }
   });
 
