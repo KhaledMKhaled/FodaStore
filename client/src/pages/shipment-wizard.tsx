@@ -560,12 +560,8 @@ export default function ShipmentWizard() {
                   value={`- ¥ ${formatCurrency(partialDiscountRmb)}`}
                 />
                 <SummaryRow
-                  label="الخصم (ج.م)"
-                  value={`- ${formatCurrency(partialDiscountEgp)} ج.م`}
-                />
-                <SummaryRow
-                  label="بعد الخصم (ج.م)"
-                  value={`${formatCurrency(discountedPurchaseCostEgp)} ج.م`}
+                  label="بعد الخصم (RMB)"
+                  value={`¥ ${formatCurrency(totalPurchaseCostRmb - partialDiscountRmb)}`}
                 />
               </>
             )}
