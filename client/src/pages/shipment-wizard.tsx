@@ -564,11 +564,11 @@ export default function ShipmentWizard() {
             )}
             <SummaryRow
               label="صافي التكلفة (RMB)"
-              value={`¥ ${formatCurrency((totalPurchaseCostRmb - partialDiscountRmb) + commissionRmb + shippingCostRmb)}`}
+              value={`¥ ${formatCurrency(totalPurchaseCostRmb - partialDiscountRmb)}`}
             />
             <SummaryRow
               label="صافي التكلفة (ج.م)"
-              value={`${formatCurrency(discountedPurchaseCostEgp + commissionEgp + shippingCostEgp)} ج.م`}
+              value={`${formatCurrency(discountedPurchaseCostEgp)} ج.م`}
             />
             <hr className="border-border" />
             <SummaryRow
