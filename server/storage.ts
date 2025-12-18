@@ -488,18 +488,27 @@ export class DatabaseStorage implements IStorage {
         return Number.isFinite(parsed) ? parsed : 0;
       };
 
-      const computeFinalCost = (s: Shipment): number => {
+      const computeFinalCost = (s: Shipment): { total: number; breakdown: Record<string, number> } => {
+        const purchase = parseAmount(s.purchaseCostEgp);
+        const commission = parseAmount(s.commissionCostEgp);
+        const shipping = parseAmount(s.shippingCostEgp);
+        const customs = parseAmount(s.customsCostEgp);
+        const takhreeg = parseAmount(s.takhreegCostEgp);
+
         const existingTotal = parseAmount(s.finalTotalCostEgp);
-        if (existingTotal > 0) return existingTotal;
+        if (existingTotal > 0) {
+          return { 
+            total: existingTotal,
+            breakdown: { purchase, commission, shipping, customs, takhreeg }
+          };
+        }
 
-        const derivedTotal =
-          parseAmount(s.purchaseCostEgp) +
-          parseAmount(s.commissionCostEgp) +
-          parseAmount(s.shippingCostEgp) +
-          parseAmount(s.customsCostEgp) +
-          parseAmount(s.takhreegCostEgp);
+        const derivedTotal = purchase + commission + shipping + customs + takhreeg;
 
-        return derivedTotal;
+        return {
+          total: derivedTotal,
+          breakdown: { purchase, commission, shipping, customs, takhreeg }
+        };
       };
 
       const amountOriginal = parseAmount(data.amountOriginal as any);
@@ -536,10 +545,26 @@ export class DatabaseStorage implements IStorage {
       const { amountEgp, exchangeRateToEgp } = normalizedAmounts;
 
       const currentPaid = parseAmount(shipment.totalPaidEgp);
-      const effectiveFinalCost = computeFinalCost(shipment);
+      const { total: effectiveFinalCost, breakdown } = computeFinalCost(shipment);
 
       if (effectiveFinalCost <= 0) {
-        throw new ApiError("PAYMENT_TOTAL_MISSING", undefined, 400, { shipmentId: data.shipmentId });
+        // Provide specific error about missing components
+        const missing = [];
+        if (breakdown.purchase <= 0) missing.push("تكلفة البضائع");
+        if (breakdown.customs <= 0) missing.push("الجمارك");
+        if (breakdown.takhreeg <= 0) missing.push("التخريج");
+        if (breakdown.shipping <= 0) missing.push("الشحن");
+        if (breakdown.commission <= 0) missing.push("العمولة");
+
+        const detailMsg = missing.length > 0 
+          ? `البيانات المفقودة: ${missing.join(', ')}`
+          : "لم يتم حساب إجمالي التكلفة";
+
+        throw new ApiError("PAYMENT_TOTAL_MISSING", detailMsg, 400, { 
+          shipmentId: data.shipmentId,
+          missing,
+          total: effectiveFinalCost
+        });
       }
 
       const remainingBefore = Math.max(0, effectiveFinalCost - currentPaid);
