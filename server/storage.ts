@@ -677,11 +677,39 @@ export class DatabaseStorage implements IStorage {
   ): Promise<ShipmentPayment> {
     return db.transaction(async (tx) => {
       const lockedShipment = await tx.execute(sql<Shipment>`SELECT * FROM shipments WHERE id = ${data.shipmentId} FOR UPDATE`);
-      const shipment = (lockedShipment.rows?.[0] as Shipment | undefined) || undefined;
+      const rawRow = lockedShipment.rows?.[0] as Record<string, unknown> | undefined;
 
-      if (!shipment) {
+      if (!rawRow) {
         throw new ApiError("SHIPMENT_NOT_FOUND", undefined, 404, { shipmentId: data.shipmentId });
       }
+
+      // Convert snake_case raw SQL result to camelCase Shipment type
+      const shipment: Shipment = {
+        id: rawRow.id as number,
+        shipmentCode: rawRow.shipment_code as string,
+        shipmentName: rawRow.shipment_name as string,
+        purchaseDate: rawRow.purchase_date as string,
+        status: rawRow.status as string,
+        invoiceCustomsDate: rawRow.invoice_customs_date as string | null,
+        createdByUserId: rawRow.created_by_user_id as string | null,
+        purchaseCostRmb: rawRow.purchase_cost_rmb as string | null,
+        purchaseCostEgp: rawRow.purchase_cost_egp as string | null,
+        purchaseRmbToEgpRate: rawRow.purchase_rmb_to_egp_rate as string | null,
+        commissionCostRmb: rawRow.commission_cost_rmb as string | null,
+        commissionCostEgp: rawRow.commission_cost_egp as string | null,
+        shippingCostRmb: rawRow.shipping_cost_rmb as string | null,
+        shippingCostEgp: rawRow.shipping_cost_egp as string | null,
+        customsCostEgp: rawRow.customs_cost_egp as string | null,
+        takhreegCostEgp: rawRow.takhreeg_cost_egp as string | null,
+        finalTotalCostEgp: rawRow.final_total_cost_egp as string | null,
+        totalPaidEgp: rawRow.total_paid_egp as string | null,
+        balanceEgp: rawRow.balance_egp as string | null,
+        partialDiscountRmb: rawRow.partial_discount_rmb as string | null,
+        discountNotes: rawRow.discount_notes as string | null,
+        lastPaymentDate: rawRow.last_payment_date as Date | null,
+        createdAt: rawRow.created_at as Date | null,
+        updatedAt: rawRow.updated_at as Date | null,
+      };
 
       if (shipment.status === "مؤرشفة") {
         throw new ApiError("SHIPMENT_LOCKED", undefined, 409, { shipmentId: data.shipmentId, status: shipment.status });
@@ -881,10 +909,16 @@ export class DatabaseStorage implements IStorage {
         });
       }
 
+      // Ensure paymentDate is a proper Date object
+      const paymentDate = data.paymentDate instanceof Date 
+        ? data.paymentDate 
+        : new Date(data.paymentDate as unknown as string);
+
       const [payment] = await tx
         .insert(shipmentPayments)
         .values({
           ...data,
+          paymentDate,
           amountOriginal: roundAmount(amountOriginal, 2).toFixed(2),
           exchangeRateToEgp: exchangeRateToEgp ? roundAmount(exchangeRateToEgp, 4).toFixed(4) : null,
           amountEgp: roundAmount(amountEgp, 2).toFixed(2),
@@ -908,8 +942,11 @@ export class DatabaseStorage implements IStorage {
       const balance = roundAmount(
         Math.max(0, paymentSnapshot.knownTotalCost - totalPaidNumber),
       );
-      const latestPaymentDate =
-        paymentTotals?.lastPaymentDate || data.paymentDate || new Date();
+      // Ensure date is a proper Date object (raw SQL may return string)
+      const rawLatestDate = paymentTotals?.lastPaymentDate || data.paymentDate || new Date();
+      const latestPaymentDate = rawLatestDate instanceof Date 
+        ? rawLatestDate 
+        : new Date(rawLatestDate as string);
 
       const finalTotalForShipment = knownTotal > 0 ? roundAmount(knownTotal, 2).toFixed(2) : undefined;
       const computedBalance = balance.toFixed(2);
