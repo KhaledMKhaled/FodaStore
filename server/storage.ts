@@ -1306,6 +1306,24 @@ export class DatabaseStorage implements IStorage {
     const totalBalanceCommissionRmb = Math.max(0, totalCommissionRmb - totalPaidCommissionRmb);
     const totalBalanceCommissionEgp = Math.max(0, totalCommissionEgp - totalPaidCommissionEgp);
 
+    // Calculate paid and remaining for customs
+    const totalPaidCustomsEgp = filteredPayments
+      .filter(p => p.costComponent === "الجمرك")
+      .reduce((sum, p) => sum + parseFloat(p.amountEgp || "0"), 0);
+    const totalBalanceCustomsEgp = Math.max(0, totalCustomsEgp - totalPaidCustomsEgp);
+
+    // Calculate paid and remaining for takhreeg
+    const totalPaidTakhreegEgp = filteredPayments
+      .filter(p => p.costComponent === "التخريج")
+      .reduce((sum, p) => sum + parseFloat(p.amountEgp || "0"), 0);
+    const totalBalanceTakhreegEgp = Math.max(0, totalTakhreegEgp - totalPaidTakhreegEgp);
+
+    // Calculate paid and remaining for other payments
+    const totalPaidOtherEgp = filteredPayments
+      .filter(p => p.costComponent === "دفعات اخري")
+      .reduce((sum, p) => sum + parseFloat(p.amountEgp || "0"), 0);
+    const totalBalanceOtherEgp = 0; // Other payments don't have a predefined cost
+
     const filteredItems = allItems.flat().filter(item => filteredShipmentIds.has(item.shipmentId));
     const totalCartons = filteredItems.reduce((sum, item) => sum + (item.cartonsCtn || 0), 0);
     const totalPieces = filteredItems.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
@@ -1347,6 +1365,12 @@ export class DatabaseStorage implements IStorage {
       totalBalanceCommissionRmb: totalBalanceCommissionRmb.toFixed(2),
       totalPaidCommissionEgp: totalPaidCommissionEgp.toFixed(2),
       totalBalanceCommissionEgp: totalBalanceCommissionEgp.toFixed(2),
+      totalPaidCustomsEgp: totalPaidCustomsEgp.toFixed(2),
+      totalBalanceCustomsEgp: totalBalanceCustomsEgp.toFixed(2),
+      totalPaidTakhreegEgp: totalPaidTakhreegEgp.toFixed(2),
+      totalBalanceTakhreegEgp: totalBalanceTakhreegEgp.toFixed(2),
+      totalPaidOtherEgp: totalPaidOtherEgp.toFixed(2),
+      totalBalanceOtherEgp: totalBalanceOtherEgp.toFixed(2),
     };
   }
 

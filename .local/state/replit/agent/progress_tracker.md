@@ -19,19 +19,38 @@
 [x] 19. Display exchange rate under RMB purchase price
 [x] 20. Add pagination to payments page shipments table (max 25 per page)
 [x] 21. Add pagination to payments page ledger table (max 25 per page)
+[x] 22. Add paid/remaining breakdown for shipping and commission costs
+[x] 23. Implement 6 cost component options in payment system:
+     - تكلفة البضاعة (Purchase Cost)
+     - الشحن (Shipping)
+     - العمولة (Commission)
+     - الجمرك (Customs)
+     - التخريج (Takhreeg/Clearance)
+     - دفعات اخري (Other Payments)
 
 ════════════════════════════════════════════════════════════════════
-IMPORT COMPLETED SUCCESSFULLY ✓
+IMPLEMENTATION COMPLETED SUCCESSFULLY ✓
 ════════════════════════════════════════════════════════════════════
 
-Application Status: RUNNING on port 5000 ✓
+✅ 6 Cost Components System - FULLY OPERATIONAL
 
-Features Implemented:
-✓ Commission Column (العمولة RMB) - Commission divided by pieces, included in final cost
-✓ Exchange Rate Display - RMB/EGP exchange rate shown under purchase price  
-✓ Complete Pagination System:
-  - Inventory Page: 25 movements max per page with pagination controls
-  - Payments Shipments: 25 shipments max per page with pagination controls
-  - Payments Ledger: 25 payments max per page with pagination controls
+Frontend Updates:
+✓ Payment form now offers 6 cost component options
+✓ Users can select which cost component their payment covers
+✓ All options properly labeled in Arabic with RTL support
 
-All tables automatically paginate when exceeding 25 items for optimal loading performance.
+Backend Updates:
+✓ Accounting dashboard calculates paid/remaining for each component:
+  - تكلفة البضاعة - shows paid & remaining (RMB + EGP)
+  - الشحن - shows paid & remaining (RMB + EGP)
+  - العمولة - shows paid & remaining (RMB + EGP)
+  - الجمرك - shows paid & remaining (EGP)
+  - التخريج - shows paid & remaining (EGP)
+  - دفعات اخري - tracks other payment amounts (EGP)
+
+✓ Payment tracking filters by costComponent field
+✓ All calculations correctly aggregated per component
+✓ No TypeScript/LSP errors in changes
+
+Status: Application running on port 5000 ✓
+All 6 cost components fully integrated and operational.

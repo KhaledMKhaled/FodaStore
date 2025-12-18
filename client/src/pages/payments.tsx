@@ -64,7 +64,10 @@ const PAYMENT_METHODS = [
 const COST_COMPONENTS = [
   { value: "تكلفة البضاعة", label: "تكلفة البضاعة" },
   { value: "الشحن", label: "الشحن" },
-  { value: "الجمرك والتخريج", label: "الجمرك والتخريج" },
+  { value: "العمولة", label: "العمولة" },
+  { value: "الجمرك", label: "الجمرك" },
+  { value: "التخريج", label: "التخريج" },
+  { value: "دفعات اخري", label: "دفعات اخري" },
 ];
 
 const ITEMS_PER_PAGE = 25;
