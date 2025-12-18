@@ -727,13 +727,8 @@ export class DatabaseStorage implements IStorage {
         };
       };
 
-codex/refactor-invoice-summary-calculations
       const amountOriginal = parseAmountOrZero(data.amountOriginal as any);
-      const amountOriginal = parseAmount(data.amountOriginal as any);
       let exchangeRate = data.exchangeRateToEgp
-        ? parseAmount(data.exchangeRateToEgp as any)
-main
-      const exchangeRate = data.exchangeRateToEgp
         ? parseAmountOrZero(data.exchangeRateToEgp as any)
         : null;
 
@@ -807,33 +802,12 @@ main
       if (normalizedComponents.shippingCostEgp > 0 && parseAmount(shipment.shippingCostEgp) === 0) {
         canonicalUpdates.shippingCostEgp = roundAmount(normalizedComponents.shippingCostEgp, 2).toFixed(2);
       }
-codex/refactor-invoice-summary-calculations
+
       const existingPayments = await tx
         .select()
         .from(shipmentPayments)
         .where(eq(shipmentPayments.shipmentId, data.shipmentId));
 
-      // EMERGENCY FIX: If knownTotal = 0 but shipment has items, recalculate costs from items
-      if (knownTotal === 0) {
-        try {
-          const recovery = await recoverKnownTotalFromItems(data.shipmentId, tx);
-
-          // Update shipment with recovered costs ONLY if we calculated something positive
-          if (recovery.recoveredTotal > 0) {
-            knownTotal = recovery.recoveredTotal;
-            
-            await tx
-              .update(shipments)
-              .set({
-                purchaseCostRmb: recovery.purchaseCostRmb.toFixed(2),
-                purchaseCostEgp: recovery.purchaseCostEgp.toFixed(2),
-                customsCostEgp: recovery.customsCostEgp.toFixed(2),
-                takhreegCostEgp: recovery.takhreegCostEgp.toFixed(2),
-                finalTotalCostEgp: recovery.recoveredTotal.toFixed(2),
-                balanceEgp: Math.max(0, recovery.recoveredTotal - currentPaid).toFixed(2),
-              })
-              .where(eq(shipments.id, data.shipmentId));
-          }
       const paymentSnapshot = await calculatePaymentSnapshot({
         shipment,
         payments: existingPayments,
@@ -849,32 +823,6 @@ codex/refactor-invoice-summary-calculations
             .where(
               and(
                 eq(exchangeRates.fromCurrency, "RMB"),
-                eq(exchangeRates.toCurrency, "EGP")
-              ))
-              .orderBy(desc(exchangeRates.rateDate))
-              .limit(1);
-            
-            const rmbToEgpRate = rateResult.length > 0 ? parseAmount(rateResult[0].rateValue) : 7.15;
-            const purchaseCostEgp = totalPurchaseCostRmb * rmbToEgpRate;
-            const recoveredTotal = purchaseCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
-            
-            // Update shipment with recovered costs ONLY if we calculated something positive
-            if (recoveredTotal > 0) {
-              knownTotal = recoveredTotal;
-              normalizedComponents = {
-                ...normalizedComponents,
-                purchaseCostEgp,
-                customsCostEgp: totalCustomsCostEgp,
-                takhreegCostEgp: totalTakhreegCostEgp,
-              };
-
-              canonicalUpdates.purchaseCostRmb = totalPurchaseCostRmb.toFixed(2);
-              canonicalUpdates.purchaseCostEgp = purchaseCostEgp.toFixed(2);
-              canonicalUpdates.customsCostEgp = totalCustomsCostEgp.toFixed(2);
-              canonicalUpdates.takhreegCostEgp = totalTakhreegCostEgp.toFixed(2);
-              canonicalUpdates.finalTotalCostEgp = recoveredTotal.toFixed(2);
-            }
-          }
                 eq(exchangeRates.toCurrency, "EGP"),
               ),
             )
@@ -896,20 +844,11 @@ codex/refactor-invoice-summary-calculations
           await tx
             .update(shipments)
             .set({
-              purchaseCostRmb: paymentSnapshot.recoveredTotals.purchaseCostRmb.toFixed(
-                2,
-              ),
-              purchaseCostEgp: paymentSnapshot.recoveredTotals.purchaseCostEgp.toFixed(
-                2,
-              ),
-              customsCostEgp: paymentSnapshot.recoveredTotals.customsCostEgp.toFixed(
-                2,
-              ),
-              takhreegCostEgp: paymentSnapshot.recoveredTotals.takhreegCostEgp.toFixed(
-                2,
-              ),
-              finalTotalCostEgp:
-                paymentSnapshot.recoveredTotals.finalTotalCostEgp.toFixed(2),
+              purchaseCostRmb: paymentSnapshot.recoveredTotals.purchaseCostRmb.toFixed(2),
+              purchaseCostEgp: paymentSnapshot.recoveredTotals.purchaseCostEgp.toFixed(2),
+              customsCostEgp: paymentSnapshot.recoveredTotals.customsCostEgp.toFixed(2),
+              takhreegCostEgp: paymentSnapshot.recoveredTotals.takhreegCostEgp.toFixed(2),
+              finalTotalCostEgp: paymentSnapshot.recoveredTotals.finalTotalCostEgp.toFixed(2),
               balanceEgp: Math.max(
                 0,
                 paymentSnapshot.recoveredTotals.finalTotalCostEgp -
@@ -922,71 +861,13 @@ codex/refactor-invoice-summary-calculations
             `[PAYMENT RECOVERY ERROR] Failed to recover costs for shipment ${data.shipmentId}:`,
             error,
           );
-      const currentPaid = parseAmount(shipment.totalPaidEgp);
-      const defaultRmbRate = parseAmount(process.env.DEFAULT_RMB_TO_EGP_RATE);
-
-      const [shippingDetails, customsDetails, itemsList, latestRateResult] = await Promise.all([
-        tx
-          .select()
-          .from(shipmentShippingDetails)
-          .where(eq(shipmentShippingDetails.shipmentId, data.shipmentId))
-          .limit(1),
-        tx
-          .select()
-          .from(shipmentCustomsDetails)
-          .where(eq(shipmentCustomsDetails.shipmentId, data.shipmentId))
-          .limit(1),
-        tx
-          .select()
-          .from(shipmentItems)
-          .where(eq(shipmentItems.shipmentId, data.shipmentId)),
-        tx
-          .select()
-          .from(exchangeRates)
-          .where(
-            and(eq(exchangeRates.fromCurrency, "RMB"), eq(exchangeRates.toCurrency, "EGP"))
-          )
-          .orderBy(desc(exchangeRates.rateDate))
-          .limit(1),
-      ]);
-
-      const latestRmbRate = latestRateResult?.[0]?.rateValue
-        ? parseAmount(latestRateResult[0].rateValue)
-        : null;
-
-      let knownTotal: number;
-
-      try {
-        knownTotal = computeShipmentKnownTotal({
-          shipment,
-          shippingDetails: shippingDetails?.[0],
-          customsDetails: customsDetails?.[0],
-          items: itemsList,
-          latestRmbToEgpRate: latestRmbRate,
-          paymentRmbToEgpRate: data.paymentCurrency === "RMB" ? exchangeRateToEgp : null,
-          defaultRmbToEgpRate: defaultRmbRate,
-        });
-      } catch (error) {
-        if (error instanceof MissingRmbRateError) {
-          throw new ApiError("PAYMENT_RATE_MISSING", undefined, 400, {
-            shipmentId: data.shipmentId,
-            currency: "RMB",
-          });
-main
         }
-        throw error;
       }
 
       // Align final total with the best-known calculated total without overwriting higher-confidence values
-      if (knownTotal > 0 && (parseAmount(shipment.finalTotalCostEgp) === 0 || knownTotal > parseAmount(shipment.finalTotalCostEgp))) {
-        canonicalUpdates.finalTotalCostEgp = roundAmount(knownTotal, 2).toFixed(2);
+      if (paymentSnapshot.knownTotalCost > 0 && (parseAmount(shipment.finalTotalCostEgp) === 0 || paymentSnapshot.knownTotalCost > parseAmount(shipment.finalTotalCostEgp))) {
+        canonicalUpdates.finalTotalCostEgp = roundAmount(paymentSnapshot.knownTotalCost, 2).toFixed(2);
       }
-
-      // RADICAL FIX: Allow payments based on KNOWN total costs at any time
-      // Known total = sum of currently available cost components
-      // Payments allowed as long as they don't exceed (knownTotal - alreadyPaid)
-      
-      const remainingAllowed = Math.max(0, knownTotal - currentPaid);
 
       // ONLY block if payment exceeds what's currently known/allowed
       if (amountEgp > paymentSnapshot.remainingAllowed + 0.0001) {

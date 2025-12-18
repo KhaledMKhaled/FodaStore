@@ -2,6 +2,7 @@ import type { Express, RequestHandler } from "express";
 import type { Server } from "http";
 import { storage, type IStorage } from "./storage";
 import { setupAuth, isAuthenticated, requireRole } from "./auth";
+import { normalizePaymentAmounts } from "./services/currency";
 import { logAuditEvent } from "./audit";
 import { getPaymentsWithShipments } from "./payments";
 import { createShipmentWithItems, updateShipmentWithItems } from "./shipmentService";
@@ -59,28 +60,127 @@ type RouteDependencies = {
   };
 };
 
+type CreatePaymentHandlerDeps = {
+  storage: Pick<IStorage, "createPayment">;
+  logAuditEvent: (event: Parameters<typeof logAuditEvent>[0]) => void;
+};
+
+export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHandler {
+  return async (req, res) => {
+    try {
+      const { shipmentId, paymentDate, paymentCurrency, amountOriginal, exchangeRateToEgp, costComponent, paymentMethod, cashReceiverName, referenceNumber, notes } = req.body;
+      const actorId = (req.user as any)?.id;
+
+      // Validate payment date
+      const parsedDate = new Date(paymentDate);
+      if (isNaN(parsedDate.getTime())) {
+        return res.status(400).json({
+          error: {
+            code: "PAYMENT_DATE_INVALID",
+            message: "تاريخ الدفع غير صالح. الرجاء اختيار تاريخ بصيغة YYYY-MM-DD.",
+            details: { field: "paymentDate" },
+          },
+        });
+      }
+
+      // Validate amount is numeric
+      const originalAmount = parseFloat(amountOriginal);
+      if (isNaN(originalAmount)) {
+        return res.status(400).json({
+          error: {
+            code: "PAYMENT_PAYLOAD_INVALID",
+            message: "المبلغ الأصلي يجب أن يكون رقمًا صحيحًا",
+            details: { field: "amountOriginal" },
+          },
+        });
+      }
+
+      // Validate exchange rate for RMB payments
+      if (paymentCurrency === "RMB") {
+        const rate = parseFloat(exchangeRateToEgp);
+        if (isNaN(rate)) {
+          return res.status(400).json({
+            error: {
+              code: "PAYMENT_RATE_MISSING",
+              message: "سعر الصرف لليوان يجب أن يكون رقمًا صحيحًا",
+              details: { field: "exchangeRateToEgp" },
+            },
+          });
+        }
+        if (rate <= 0) {
+          return res.status(400).json({
+            error: {
+              code: "PAYMENT_RATE_MISSING",
+              message: "سعر الصرف لليوان يجب أن يكون أكبر من صفر",
+              details: { field: "exchangeRateToEgp" },
+            },
+          });
+        }
+      }
+
+      // Normalize payment amounts
+      const normalizedAmounts = normalizePaymentAmounts({
+        paymentCurrency,
+        amountOriginal: originalAmount,
+        exchangeRateToEgp: paymentCurrency === "RMB" ? parseFloat(exchangeRateToEgp) : null,
+      });
+
+      const payment = await deps.storage.createPayment({
+        shipmentId,
+        paymentDate: parsedDate,
+        paymentCurrency,
+        amountOriginal: amountOriginal.toString(),
+        exchangeRateToEgp: normalizedAmounts.exchangeRateToEgp?.toString() || null,
+        amountEgp: normalizedAmounts.amountEgp.toString(),
+        costComponent,
+        paymentMethod,
+        cashReceiverName: cashReceiverName || null,
+        referenceNumber: referenceNumber || null,
+        note: notes || null,
+        createdByUserId: actorId,
+      });
+
+      deps.logAuditEvent({
+        userId: actorId,
+        entityType: "PAYMENT",
+        entityId: payment.id,
+        actionType: "CREATE",
+        details: {
+          shipmentId,
+          amount: normalizedAmounts.amountEgp.toString(),
+          currency: paymentCurrency,
+          method: paymentMethod,
+        },
+      });
+
+      res.json({ ok: true, payment });
+    } catch (error) {
+      const { status, body } = formatError(error, {
+        code: "PAYMENT_FETCH_FAILED",
+        status: 500,
+      });
+      res.status(status).json(body);
+    }
+  };
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express,
   deps: RouteDependencies = {},
 ): Promise<void> {
-  const routeStorage = deps.storage ?? storage;
+  const routeStorage: IStorage = deps.storage ?? storage;
   const auth = deps.auth ?? { setupAuth, isAuthenticated, requireRole };
-  const auditLogger = deps.auditLogger ?? ((event) => logAuditEvent(event, routeStorage));
-  const storage = routeStorage;
-  const isAuthenticated = auth.isAuthenticated;
-  const requireRole = auth.requireRole;
-  const logAuditEvent = auditLogger;
-
+  const auditLogger = deps.auditLogger ?? ((event: Parameters<typeof logAuditEvent>[0]) => logAuditEvent(event, routeStorage));
   // Setup authentication
   await auth.setupAuth(app);
 
   // Auth routes
   app.get("/api/auth/user", async (req, res) => {
     if (req.isAuthenticated() && req.user) {
-      const user = await storage.getUser(req.user.id);
+      const user = await routeStorage.getUser(req.user.id);
       if (user) {
-        const { password, ...userWithoutPassword } = user;
+        const { password: _, ...userWithoutPassword } = user;
         return res.json(userWithoutPassword);
       }
     }
@@ -104,7 +204,7 @@ export async function registerRoutes(
   // Dashboard
   app.get("/api/dashboard/stats", isAuthenticated, async (req, res) => {
     try {
-      const stats = await storage.getDashboardStats();
+      const stats = await routeStorage.getDashboardStats();
       res.json(stats);
     } catch (error) {
       res.status(500).json({ message: "Error fetching dashboard stats" });
@@ -114,7 +214,7 @@ export async function registerRoutes(
   // Suppliers
   app.get("/api/suppliers", isAuthenticated, async (req, res) => {
     try {
-      const suppliers = await storage.getAllSuppliers();
+      const suppliers = await routeStorage.getAllSuppliers();
       res.json(suppliers);
     } catch (error) {
       res.status(500).json({ message: "Error fetching suppliers" });
@@ -123,7 +223,7 @@ export async function registerRoutes(
 
   app.get("/api/suppliers/:id", isAuthenticated, async (req, res) => {
     try {
-      const supplier = await storage.getSupplier(parseInt(req.params.id));
+      const supplier = await routeStorage.getSupplier(parseInt(req.params.id));
       if (!supplier) {
         return res.status(404).json({ message: "Supplier not found" });
       }
@@ -136,7 +236,7 @@ export async function registerRoutes(
   app.post("/api/suppliers", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const data = insertSupplierSchema.parse(req.body);
-      const supplier = await storage.createSupplier(data);
+      const supplier = await routeStorage.createSupplier(data);
       res.json(supplier);
     } catch (error) {
       res.status(400).json({ message: "Invalid data" });
@@ -145,7 +245,7 @@ export async function registerRoutes(
 
   app.patch("/api/suppliers/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
-      const supplier = await storage.updateSupplier(parseInt(req.params.id), req.body);
+      const supplier = await routeStorage.updateSupplier(parseInt(req.params.id), req.body);
       if (!supplier) {
         return res.status(404).json({ message: "Supplier not found" });
       }
@@ -157,7 +257,7 @@ export async function registerRoutes(
 
   app.delete("/api/suppliers/:id", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
-      await storage.deleteSupplier(parseInt(req.params.id));
+      await routeStorage.deleteSupplier(parseInt(req.params.id));
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ message: "Error deleting supplier" });
@@ -167,7 +267,7 @@ export async function registerRoutes(
   // Shipments
   app.get("/api/shipments", isAuthenticated, async (req, res) => {
     try {
-      const shipments = await storage.getAllShipments();
+      const shipments = await routeStorage.getAllShipments();
       res.json(shipments);
     } catch (error) {
       res.status(500).json({ message: "Error fetching shipments" });
@@ -176,7 +276,7 @@ export async function registerRoutes(
 
   app.get("/api/shipments/:id", isAuthenticated, async (req, res) => {
     try {
-      const shipment = await storage.getShipment(parseInt(req.params.id));
+      const shipment = await routeStorage.getShipment(parseInt(req.params.id));
       if (!shipment) {
         return res.status(404).json({ message: "Shipment not found" });
       }
@@ -211,7 +311,7 @@ export async function registerRoutes(
       const shipmentId = parseInt(req.params.id);
       const userId = (req.user as any)?.id;
       
-      const existingShipment = await storage.getShipment(shipmentId);
+      const existingShipment = await routeStorage.getShipment(shipmentId);
       const previousStatus = existingShipment?.status;
       
       const updatedShipment = await updateShipmentWithItems(shipmentId, req.body);
@@ -248,7 +348,7 @@ export async function registerRoutes(
       const shipmentId = parseInt(req.params.id);
       const userId = (req.user as any)?.id;
       
-      await storage.deleteShipment(shipmentId);
+      await routeStorage.deleteShipment(shipmentId);
       
       logAuditEvent({
         userId,
@@ -266,7 +366,7 @@ export async function registerRoutes(
   // Shipment Items
   app.get("/api/shipments/:id/items", isAuthenticated, async (req, res) => {
     try {
-      const items = await storage.getShipmentItems(parseInt(req.params.id));
+      const items = await routeStorage.getShipmentItems(parseInt(req.params.id));
       res.json(items);
     } catch (error) {
       res.status(500).json({ message: "Error fetching items" });
@@ -276,7 +376,7 @@ export async function registerRoutes(
   // Shipment Shipping Details
   app.get("/api/shipments/:id/shipping", isAuthenticated, async (req, res) => {
     try {
-      const details = await storage.getShippingDetails(parseInt(req.params.id));
+      const details = await routeStorage.getShippingDetails(parseInt(req.params.id));
       res.json(details || null);
     } catch (error) {
       res.status(500).json({ message: "Error fetching shipping details" });
@@ -287,30 +387,21 @@ export async function registerRoutes(
   app.get("/api/shipments/:id/invoice-summary", isAuthenticated, async (req, res) => {
     try {
       const shipmentId = parseInt(req.params.id);
-      const shipment = await storage.getShipment(shipmentId);
+      const shipment = await routeStorage.getShipment(shipmentId);
       
       if (!shipment) {
         return res.status(404).json({ message: "الشحنة غير موجودة" });
       }
       
-      const payments = await storage.getShipmentPayments(shipmentId);
-      const paymentAllowance = await storage.getPaymentAllowance(shipmentId, { shipment });
-      
-      // Calculate paid amounts by currency
-      const paidRmb = payments
-        .filter(p => p.paymentCurrency === "RMB")
-        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
-      
-      const paidEgp = payments
-        .filter(p => p.paymentCurrency === "EGP")
-        .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
+      const payments = await routeStorage.getShipmentPayments(shipmentId);
+      const paymentAllowance = await routeStorage.getPaymentAllowance(shipmentId, { shipment });
       
       const paymentSnapshot = await calculatePaymentSnapshot({
         shipment,
         payments,
         loadRecoveryData: async () => {
-          const items = await storage.getShipmentItems(shipmentId);
-          const rate = await storage.getLatestRate("RMB", "EGP");
+          const items = await routeStorage.getShipmentItems(shipmentId);
+          const rate = await routeStorage.getLatestRate("RMB", "EGP");
 
           return {
             items,
@@ -391,7 +482,7 @@ export async function registerRoutes(
   // Exchange Rates
   app.get("/api/exchange-rates", isAuthenticated, async (req, res) => {
     try {
-      const rates = await storage.getAllExchangeRates();
+      const rates = await routeStorage.getAllExchangeRates();
       res.json(rates);
     } catch (error) {
       res.status(500).json({ message: "Error fetching exchange rates" });
@@ -402,7 +493,7 @@ export async function registerRoutes(
     try {
       const data = insertExchangeRateSchema.parse(req.body);
       const userId = (req.user as any)?.id;
-      const rate = await storage.createExchangeRate(data);
+      const rate = await routeStorage.createExchangeRate(data);
       
       logAuditEvent({
         userId,
@@ -423,19 +514,19 @@ export async function registerRoutes(
     try {
       const today = new Date();
       const todayStr = today.toISOString().split("T")[0];
-      const latestRmb = await storage.getLatestRate("RMB", "EGP");
-      const latestUsd = await storage.getLatestRate("USD", "RMB");
+      const latestRmb = await routeStorage.getLatestRate("RMB", "EGP");
+      const latestUsd = await routeStorage.getLatestRate("USD", "RMB");
       const userId = (req.user as any)?.id;
 
       const refreshed = await Promise.all([
-        storage.createExchangeRate({
+        routeStorage.createExchangeRate({
           rateDate: todayStr,
           fromCurrency: "RMB",
           toCurrency: "EGP",
           rateValue: latestRmb?.rateValue || "7.0000",
           source: "تحديث تلقائي",
         }),
-        storage.createExchangeRate({
+        routeStorage.createExchangeRate({
           rateDate: todayStr,
           fromCurrency: "USD",
           toCurrency: "RMB",
@@ -468,7 +559,7 @@ export async function registerRoutes(
   // Payments
   app.get("/api/payments", isAuthenticated, async (req, res) => {
     try {
-      const paymentsWithShipments = await getPaymentsWithShipments(storage);
+      const paymentsWithShipments = await getPaymentsWithShipments(routeStorage);
       res.json(paymentsWithShipments);
     } catch (error) {
       const { status, body } = formatError(error, {
@@ -481,7 +572,7 @@ export async function registerRoutes(
 
   app.get("/api/payments/stats", isAuthenticated, async (req, res) => {
     try {
-      const stats = await storage.getPaymentStats();
+      const stats = await routeStorage.getPaymentStats();
       res.json(stats);
     } catch (error) {
       const { status, body } = formatError(error, {
@@ -495,24 +586,24 @@ export async function registerRoutes(
   app.post(
     "/api/payments",
     requireRole(["مدير", "محاسب"]),
-    createPaymentHandler({ storage, logAuditEvent }),
+    createPaymentHandler({ storage: routeStorage, logAuditEvent: auditLogger }),
   );
 
   // Inventory
   app.get("/api/inventory", isAuthenticated, async (req, res) => {
     try {
-      const movements = await storage.getAllInventoryMovements();
+      const movements = await routeStorage.getAllInventoryMovements();
       // Include shipment, shipping details and item info for cost calculations
       const movementsWithDetails = await Promise.all(
         movements.map(async (movement) => {
           const shipment = movement.shipmentId
-            ? await storage.getShipment(movement.shipmentId)
+            ? await routeStorage.getShipment(movement.shipmentId)
             : null;
           const shippingDetails = movement.shipmentId
-            ? await storage.getShippingDetails(movement.shipmentId)
+            ? await routeStorage.getShippingDetails(movement.shipmentId)
             : null;
           const shipmentItems = movement.shipmentId
-            ? await storage.getShipmentItems(movement.shipmentId)
+            ? await routeStorage.getShipmentItems(movement.shipmentId)
             : [];
           const shipmentItem = shipmentItems.find(
             (item) => item.id === movement.shipmentItemId
@@ -530,7 +621,7 @@ export async function registerRoutes(
 
   app.get("/api/inventory/stats", isAuthenticated, async (req, res) => {
     try {
-      const stats = await storage.getInventoryStats();
+      const stats = await routeStorage.getInventoryStats();
       res.json(stats);
     } catch (error) {
       res.status(500).json({ message: "Error fetching inventory stats" });
@@ -540,7 +631,7 @@ export async function registerRoutes(
   // Users
   app.get("/api/users", isAuthenticated, async (req, res) => {
     try {
-      const allUsers = await storage.getAllUsers();
+      const allUsers = await routeStorage.getAllUsers();
       const usersWithoutPasswords = allUsers.map(({ password, ...user }) => user);
       res.json(usersWithoutPasswords);
     } catch (error) {
@@ -558,13 +649,13 @@ export async function registerRoutes(
         return res.status(400).json({ message: "اسم المستخدم وكلمة المرور مطلوبان" });
       }
 
-      const existingUser = await storage.getUserByUsername(username);
+      const existingUser = await routeStorage.getUserByUsername(username);
       if (existingUser) {
         return res.status(400).json({ message: "اسم المستخدم موجود بالفعل" });
       }
 
       const hashedPassword = await bcrypt.hash(password, 10);
-      const user = await storage.createUser({
+      const user = await routeStorage.createUser({
         username,
         password: hashedPassword,
         firstName: firstName || null,
@@ -615,7 +706,7 @@ export async function registerRoutes(
       if (lastName !== undefined) updateData.lastName = lastName;
       if (role !== undefined && currentUser.role === "مدير") updateData.role = role;
 
-      const user = await storage.updateUser(id, updateData);
+      const user = await routeStorage.updateUser(id, updateData);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
@@ -639,7 +730,7 @@ export async function registerRoutes(
   app.patch("/api/users/:id/role", requireRole(["مدير"]), async (req, res) => {
     try {
       const { role } = req.body;
-      const user = await storage.updateUserRole(req.params.id, role);
+      const user = await routeStorage.updateUserRole(req.params.id, role);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
@@ -672,12 +763,12 @@ export async function registerRoutes(
       }
 
       // Prevent deleting root user
-      const targetUser = await storage.getUser(id);
+      const targetUser = await routeStorage.getUser(id);
       if (targetUser?.username === "root") {
         return res.status(400).json({ message: "لا يمكن حذف حساب الجذر" });
       }
 
-      await storage.deleteUser(id);
+      await routeStorage.deleteUser(id);
       
       logAuditEvent({
         userId: actorId,
@@ -704,7 +795,7 @@ export async function registerRoutes(
         paymentStatus: req.query.paymentStatus as string | undefined,
         includeArchived: req.query.includeArchived === "true",
       };
-      const stats = await storage.getAccountingDashboard(filters);
+      const stats = await routeStorage.getAccountingDashboard(filters);
       res.json(stats);
     } catch (error) {
       console.error("Error fetching accounting dashboard:", error);
@@ -720,7 +811,7 @@ export async function registerRoutes(
         supplierId: req.query.supplierId ? parseInt(req.query.supplierId as string) : undefined,
         balanceType: req.query.balanceType as 'owing' | 'credit' | 'all' | undefined,
       };
-      const balances = await storage.getSupplierBalances(filters);
+      const balances = await routeStorage.getSupplierBalances(filters);
       res.json(balances);
     } catch (error) {
       console.error("Error fetching supplier balances:", error);
@@ -735,7 +826,7 @@ export async function registerRoutes(
         dateFrom: req.query.dateFrom as string | undefined,
         dateTo: req.query.dateTo as string | undefined,
       };
-      const statement = await storage.getSupplierStatement(supplierId, filters);
+      const statement = await routeStorage.getSupplierStatement(supplierId, filters);
       res.json(statement);
     } catch (error) {
       console.error("Error fetching supplier statement:", error);
@@ -757,7 +848,7 @@ export async function registerRoutes(
         paymentStatus: req.query.paymentStatus as string | undefined,
         includeArchived: req.query.includeArchived === "true",
       };
-      const report = await storage.getMovementReport(filters);
+      const report = await routeStorage.getMovementReport(filters);
       res.json(report);
     } catch (error) {
       console.error("Error fetching movement report:", error);
@@ -771,7 +862,7 @@ export async function registerRoutes(
         dateFrom: req.query.dateFrom as string | undefined,
         dateTo: req.query.dateTo as string | undefined,
       };
-      const report = await storage.getPaymentMethodsReport(filters);
+      const report = await routeStorage.getPaymentMethodsReport(filters);
       res.json(report);
     } catch (error) {
       console.error("Error fetching payment methods report:", error);
@@ -789,7 +880,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "كلمة المرور الحالية والجديدة مطلوبتان" });
       }
 
-      const user = await storage.getUser(userId);
+      const user = await routeStorage.getUser(userId);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
@@ -800,7 +891,7 @@ export async function registerRoutes(
       }
 
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      await storage.updateUser(userId, { password: hashedPassword });
+      await routeStorage.updateUser(userId, { password: hashedPassword });
 
       logAuditEvent({
         userId,
