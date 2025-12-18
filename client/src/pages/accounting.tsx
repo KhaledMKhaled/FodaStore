@@ -49,6 +49,14 @@ interface AccountingDashboard {
   totalPieces: number;
   unsettledShipmentsCount: number;
   shipmentsCount: number;
+  totalPaidShippingRmb: string;
+  totalBalanceShippingRmb: string;
+  totalPaidShippingEgp: string;
+  totalBalanceShippingEgp: string;
+  totalPaidCommissionRmb: string;
+  totalBalanceCommissionRmb: string;
+  totalPaidCommissionEgp: string;
+  totalBalanceCommissionEgp: string;
 }
 
 function formatCurrency(value: string | number, currency: string = "EGP") {
@@ -354,12 +362,16 @@ export default function AccountingPage() {
               icon={Truck}
               value={stats?.totalShippingRmb || "0"}
               currency="RMB"
+              paid={stats?.totalPaidShippingRmb || "0"}
+              remaining={stats?.totalBalanceShippingRmb || "0"}
             />
             <CostItemCard
               title="العمولة"
               icon={DollarSign}
               value={stats?.totalCommissionRmb || "0"}
               currency="RMB"
+              paid={stats?.totalPaidCommissionRmb || "0"}
+              remaining={stats?.totalBalanceCommissionRmb || "0"}
             />
             <div className="bg-primary/10 p-4 rounded-md border border-primary/20 mt-4">
               <div className="flex items-center justify-between">
@@ -393,12 +405,16 @@ export default function AccountingPage() {
               icon={Truck}
               value={stats?.totalShippingEgp || "0"}
               currency="EGP"
+              paid={stats?.totalPaidShippingEgp || "0"}
+              remaining={stats?.totalBalanceShippingEgp || "0"}
             />
             <CostItemCard
               title="العمولة"
               icon={DollarSign}
               value={stats?.totalCommissionEgp || "0"}
               currency="EGP"
+              paid={stats?.totalPaidCommissionEgp || "0"}
+              remaining={stats?.totalBalanceCommissionEgp || "0"}
             />
             <CostItemCard
               title="الجمارك"

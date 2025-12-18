@@ -1286,6 +1286,26 @@ export class DatabaseStorage implements IStorage {
       return sum + Math.max(0, cost - paid);
     }, 0);
 
+    // Calculate paid and remaining for shipping
+    const totalPaidShippingRmb = filteredPayments
+      .filter(p => p.costComponent === "الشحن" && p.paymentCurrency === "RMB")
+      .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
+    const totalPaidShippingEgp = filteredPayments
+      .filter(p => p.costComponent === "الشحن")
+      .reduce((sum, p) => sum + parseFloat(p.amountEgp || "0"), 0);
+    const totalBalanceShippingRmb = Math.max(0, totalShippingRmb - totalPaidShippingRmb);
+    const totalBalanceShippingEgp = Math.max(0, totalShippingEgp - totalPaidShippingEgp);
+
+    // Calculate paid and remaining for commission
+    const totalPaidCommissionRmb = filteredPayments
+      .filter(p => p.costComponent === "العمولة" && p.paymentCurrency === "RMB")
+      .reduce((sum, p) => sum + parseFloat(p.amountOriginal || "0"), 0);
+    const totalPaidCommissionEgp = filteredPayments
+      .filter(p => p.costComponent === "العمولة")
+      .reduce((sum, p) => sum + parseFloat(p.amountEgp || "0"), 0);
+    const totalBalanceCommissionRmb = Math.max(0, totalCommissionRmb - totalPaidCommissionRmb);
+    const totalBalanceCommissionEgp = Math.max(0, totalCommissionEgp - totalPaidCommissionEgp);
+
     const filteredItems = allItems.flat().filter(item => filteredShipmentIds.has(item.shipmentId));
     const totalCartons = filteredItems.reduce((sum, item) => sum + (item.cartonsCtn || 0), 0);
     const totalPieces = filteredItems.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
@@ -1319,6 +1339,14 @@ export class DatabaseStorage implements IStorage {
       totalPieces,
       unsettledShipmentsCount,
       shipmentsCount: filteredShipments.length,
+      totalPaidShippingRmb: totalPaidShippingRmb.toFixed(2),
+      totalBalanceShippingRmb: totalBalanceShippingRmb.toFixed(2),
+      totalPaidShippingEgp: totalPaidShippingEgp.toFixed(2),
+      totalBalanceShippingEgp: totalBalanceShippingEgp.toFixed(2),
+      totalPaidCommissionRmb: totalPaidCommissionRmb.toFixed(2),
+      totalBalanceCommissionRmb: totalBalanceCommissionRmb.toFixed(2),
+      totalPaidCommissionEgp: totalPaidCommissionEgp.toFixed(2),
+      totalBalanceCommissionEgp: totalBalanceCommissionEgp.toFixed(2),
     };
   }
 
