@@ -447,7 +447,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       
       // Prepare data with proper type coercion for schema validation
-      const preparedBody = {
+      let preparedBody = {
         ...body,
         paymentDate,
         shipmentId: body.shipmentId ? Number(body.shipmentId) : undefined,
@@ -455,6 +455,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         amountEgp: body.amountEgp ? String(body.amountEgp) : undefined,
         exchangeRateToEgp: body.exchangeRateToEgp ? String(body.exchangeRateToEgp) : null,
       };
+
+      // Auto-fill RMB→EGP rate from DB when missing
+      if (preparedBody.paymentCurrency === "RMB" && !preparedBody.exchangeRateToEgp) {
+        const latestRate = await storage.getLatestRate("RMB", "EGP");
+
+        if (latestRate?.rateValue) {
+          preparedBody = {
+            ...preparedBody,
+            exchangeRateToEgp: String(latestRate.rateValue),
+          };
+        } else {
+          throw new ApiError("PAYMENT_RATE_MISSING", "يجب إضافة سعر صرف RMB→EGP أولاً", 400);
+        }
+      }
       
       // Validate with schema
       const parseResult = insertShipmentPaymentSchema.safeParse(preparedBody);
