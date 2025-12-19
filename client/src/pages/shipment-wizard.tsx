@@ -68,6 +68,7 @@ export default function ShipmentWizard() {
     purchaseRmbToEgpRate: "",
     partialDiscountRmb: "0",
     discountNotes: "",
+    shippingCompanySupplierId: null as number | null,
   });
 
   const [items, setItems] = useState<Partial<ShipmentItem>[]>([
@@ -112,6 +113,10 @@ export default function ShipmentWizard() {
     queryKey: ["/api/suppliers"],
   });
 
+  const { data: shippingSuppliers } = useQuery<Supplier[]>({
+    queryKey: ["/api/suppliers?includeHidden=true"],
+  });
+
   const { data: productTypes } = useQuery<ProductType[]>({
     queryKey: ["/api/product-types"],
   });
@@ -128,6 +133,7 @@ export default function ShipmentWizard() {
           existingShipment.purchaseRmbToEgpRate?.toString() || shipmentData.purchaseRmbToEgpRate,
         partialDiscountRmb: existingShipment.partialDiscountRmb?.toString() || "0",
         discountNotes: existingShipment.discountNotes || "",
+        shippingCompanySupplierId: existingShipment.shippingCompanySupplierId ?? null,
       });
     }
   }, [existingShipment]);
@@ -503,8 +509,11 @@ export default function ShipmentWizard() {
 
           {currentStep === 2 && (
             <Step2Shipping
+              shipmentData={shipmentData}
+              setShipmentData={setShipmentData}
               shippingData={shippingData}
               setShippingData={setShippingData}
+              shippingSuppliers={shippingSuppliers || []}
               totalPurchaseCostRmb={totalPurchaseCostRmb}
               commissionRmb={commissionRmb}
               commissionEgp={commissionEgp}
@@ -528,6 +537,11 @@ export default function ShipmentWizard() {
           {currentStep === 4 && (
             <Step4Summary
               shipmentData={shipmentData}
+              shippingCompanySupplierName={
+                shippingSuppliers?.find(
+                  (supplier) => supplier.id === shipmentData.shippingCompanySupplierId,
+                )?.name || ""
+              }
               items={items}
               totalPurchaseCostRmb={totalPurchaseCostRmb}
               purchaseCostEgp={purchaseCostEgp}
@@ -681,6 +695,7 @@ function Step1Import({
     purchaseRmbToEgpRate: string;
     partialDiscountRmb: string;
     discountNotes: string;
+    shippingCompanySupplierId: number | null;
   };
   setShipmentData: (data: {
     shipmentCode: string;
@@ -690,6 +705,7 @@ function Step1Import({
     purchaseRmbToEgpRate: string;
     partialDiscountRmb: string;
     discountNotes: string;
+    shippingCompanySupplierId: number | null;
   }) => void;
   items: Partial<ShipmentItem>[];
   updateItem: (index: number, field: string, value: string | number) => void;
@@ -1093,8 +1109,11 @@ function Step1Import({
 
 // Step 2: Shipping
 function Step2Shipping({
+  shipmentData,
+  setShipmentData,
   shippingData,
   setShippingData,
+  shippingSuppliers,
   totalPurchaseCostRmb,
   commissionRmb,
   commissionEgp,
@@ -1104,6 +1123,26 @@ function Step2Shipping({
   refreshRates,
   isRefreshing,
 }: {
+  shipmentData: {
+    shipmentCode: string;
+    shipmentName: string;
+    purchaseDate: string;
+    status: string;
+    purchaseRmbToEgpRate: string;
+    partialDiscountRmb: string;
+    discountNotes: string;
+    shippingCompanySupplierId: number | null;
+  };
+  setShipmentData: (data: {
+    shipmentCode: string;
+    shipmentName: string;
+    purchaseDate: string;
+    status: string;
+    purchaseRmbToEgpRate: string;
+    partialDiscountRmb: string;
+    discountNotes: string;
+    shippingCompanySupplierId: number | null;
+  }) => void;
   shippingData: {
     commissionRatePercent: string;
     shippingAreaSqm: string;
@@ -1122,6 +1161,7 @@ function Step2Shipping({
     usdToRmbRate: string;
     ratesUpdatedAt: string;
   }) => void;
+  shippingSuppliers: Supplier[];
   totalPurchaseCostRmb: number;
   commissionRmb: number;
   commissionEgp: number;
@@ -1170,7 +1210,7 @@ function Step2Shipping({
           <CardTitle className="text-lg">العمولة</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-2">
               <Label>نسبة العمولة %</Label>
               <Input
@@ -1214,6 +1254,29 @@ function Step2Shipping({
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label>اسم شركة الشحن</Label>
+              <Select
+                value={shipmentData.shippingCompanySupplierId?.toString() || ""}
+                onValueChange={(value) =>
+                  setShipmentData({
+                    ...shipmentData,
+                    shippingCompanySupplierId: value ? parseInt(value, 10) : null,
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="اختر شركة الشحن" />
+                </SelectTrigger>
+                <SelectContent>
+                  {shippingSuppliers.map((supplier) => (
+                    <SelectItem key={supplier.id} value={supplier.id.toString()}>
+                      {supplier.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-2">
               <Label>مساحة الشحن (م²)</Label>
               <Input
@@ -1437,6 +1500,7 @@ function Step3Customs({
 // Step 4: Summary
 function Step4Summary({
   shipmentData,
+  shippingCompanySupplierName,
   items,
   totalPurchaseCostRmb,
   purchaseCostEgp,
@@ -1453,6 +1517,7 @@ function Step4Summary({
   purchaseRate,
 }: {
   shipmentData: { shipmentCode: string; shipmentName: string; purchaseDate: string; status: string };
+  shippingCompanySupplierName?: string;
   items: Partial<ShipmentItem>[];
   totalPurchaseCostRmb: number;
   purchaseCostEgp: number;
@@ -1488,7 +1553,7 @@ function Step4Summary({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div>
               <p className="text-sm text-muted-foreground">رقم الشحنة</p>
               <p className="font-medium">{shipmentData.shipmentCode}</p>
@@ -1506,6 +1571,10 @@ function Step4Summary({
             <div>
               <p className="text-sm text-muted-foreground">الحالة</p>
               <p className="font-medium">{shipmentData.status}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">شركة الشحن</p>
+              <p className="font-medium">{shippingCompanySupplierName || "غير محدد"}</p>
             </div>
           </div>
         </CardContent>
