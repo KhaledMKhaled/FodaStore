@@ -269,8 +269,12 @@ export async function registerRoutes(
   // Suppliers
   app.get("/api/suppliers", isAuthenticated, async (req, res) => {
     try {
+      const includeHidden = req.query.includeHidden === "true";
       const suppliers = await routeStorage.getAllSuppliers();
-      res.json(suppliers);
+      const filteredSuppliers = includeHidden
+        ? suppliers
+        : suppliers.filter((supplier) => !supplier.isHidden);
+      res.json(filteredSuppliers);
     } catch (error) {
       res.status(500).json({ message: "Error fetching suppliers" });
     }

@@ -170,7 +170,7 @@ export default function Payments() {
   });
 
   const { data: suppliers, isLoading: loadingSuppliers } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers"],
+    queryKey: ["/api/suppliers?includeHidden=true"],
   });
 
   const { data: shipments, isLoading: loadingShipments } = useQuery<Shipment[]>({
@@ -578,7 +578,7 @@ export default function Payments() {
                           {loadingSuppliers ? "جاري التحميل..." : "لا يوجد مورد مطابق"}
                         </CommandEmpty>
                         <CommandGroup>
-                          {suppliers?.filter((s) => !s.isHidden).map((supplier) => (
+                          {suppliers?.map((supplier) => (
                             <CommandItem
                               key={supplier.id}
                               value={supplier.name}
@@ -606,6 +606,9 @@ export default function Payments() {
                     اختيار المورد مطلوب لهذه الشحنة.
                   </p>
                 )}
+                <p className="text-xs text-muted-foreground">
+                  يشمل الموردين المخفيين لأغراض المحاسبة.
+                </p>
               </div>
 
               <div className="space-y-2">
