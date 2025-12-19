@@ -137,6 +137,7 @@ export default function Payments() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
+  const [supplierId, setSupplierId] = useState<number | null>(null);
   const [paymentCurrency, setPaymentCurrency] = useState("EGP");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [costComponent, setCostComponent] = useState("");
@@ -149,6 +150,10 @@ export default function Payments() {
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
     queryKey: ["/api/payments/stats"],
+  });
+
+  const { data: suppliers, isLoading: loadingSuppliers } = useQuery({
+    queryKey: ["/api/suppliers"],
   });
 
   const { data: shipments, isLoading: loadingShipments } = useQuery<Shipment[]>({
@@ -196,6 +201,7 @@ export default function Payments() {
 
   const resetForm = () => {
     setSelectedShipmentId(null);
+    setSupplierId(null);
     setPaymentCurrency("EGP");
     setPaymentMethod("");
     setCostComponent("");
@@ -268,8 +274,9 @@ export default function Payments() {
 
     const safeAmountEgp = Number.isFinite(amountEgpNumber) ? amountEgpNumber : 0;
 
-    const data: InsertShipmentPayment = {
+    const data: InsertShipmentPayment & { supplierId?: number | null } = {
       shipmentId: selectedShipmentId,
+      supplierId: supplierId || null,
       paymentDate: new Date(formData.get("paymentDate") as string),
       paymentCurrency,
       amountOriginal,
@@ -468,6 +475,28 @@ export default function Payments() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>المورد</Label>
+                <Select 
+                  value={supplierId?.toString() || ""} 
+                  onValueChange={(v) => setSupplierId(v ? parseInt(v) : null)}
+                >
+                  <SelectTrigger data-testid="select-supplier">
+                    <SelectValue placeholder="اختر المورد…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {suppliers?.map((supplier: any) => (
+                      <SelectItem key={supplier.id} value={supplier.id.toString()}>
+                        {supplier.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
                 {costComponent && stats && (
                   <div className="mt-2 p-3 bg-muted/50 rounded text-sm space-y-2">
                     {costComponent === "تكلفة البضاعة" && (

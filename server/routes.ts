@@ -69,7 +69,7 @@ type CreatePaymentHandlerDeps = {
 export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHandler {
   return async (req, res) => {
     try {
-      const { shipmentId, paymentDate, paymentCurrency, amountOriginal, exchangeRateToEgp, costComponent, paymentMethod, cashReceiverName, referenceNumber, notes } = req.body;
+      const { shipmentId, supplierId, paymentDate, paymentCurrency, amountOriginal, exchangeRateToEgp, costComponent, paymentMethod, cashReceiverName, referenceNumber, notes } = req.body;
       const actorId = (req.user as any)?.id;
 
       // Validate payment date
@@ -119,6 +119,20 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         }
       }
 
+      // Validate supplierId if provided
+      if (supplierId) {
+        const supplier = await (deps.storage as any).getSupplier?.(supplierId);
+        if (!supplier) {
+          return res.status(400).json({
+            error: {
+              code: "SUPPLIER_NOT_FOUND",
+              message: "المورد المحدد غير موجود",
+              details: { field: "supplierId", supplierId },
+            },
+          });
+        }
+      }
+
       // Normalize payment amounts
       const normalizedAmounts = normalizePaymentAmounts({
         paymentCurrency,
@@ -128,6 +142,7 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
 
       const payment = await deps.storage.createPayment({
         shipmentId,
+        supplierId: supplierId || null,
         paymentDate: parsedDate,
         paymentCurrency,
         amountOriginal: amountOriginal.toString(),
@@ -148,6 +163,7 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         actionType: "CREATE",
         details: {
           shipmentId,
+          supplierId: supplierId || null,
           amount: normalizedAmounts.amountEgp.toString(),
           currency: paymentCurrency,
           method: paymentMethod,

@@ -1,0 +1,107 @@
+Context:
+In the “Add New Payment” screen, there is a section titled:
+“حساب أي جزء؟” (Which part are you paying for?)
+
+I want a new UI control directly under this section:
+✅ A dropdown/list of **Supplier Names** so I can link the payment to a supplier.
+This linkage is required so the payment appears correctly inside **Accounting & Reports** (supplier balances, supplier statements, movement report, dashboards, etc.).
+
+============================================================
+GOALS
+============================================================
+
+1) UI change:
+- Under “حساب أي جزء؟”, add a searchable dropdown/select field:
+  - Label (Arabic): “المورد”
+  - Placeholder: “اختر المورد…”
+  - Values loaded from Suppliers (supplier list endpoint)
+  - Must be required if the shipment has a supplier OR if accounting reports depend on supplier attribution
+
+2) Data model change (if needed):
+- Ensure a payment can be linked to a supplier in a traceable way.
+- Prefer linking by `supplierId` (not free text).
+- If payments are already implicitly linked via shipment → supplier:
+  - Still store supplierId on the payment for reporting accuracy and historical traceability (recommended), OR
+  - Clearly document why it is not necessary and ensure reporting can attribute correctly in all cases.
+
+3) Reporting correctness:
+After linking a payment to a supplier:
+- Supplier balances and statements must include the payment correctly
+- Accounting dashboard rollups must reflect it correctly
+- Movement report must show it correctly (with user attribution)
+- Payment method analytics must remain correct
+- Shipment totals (totalPaid/balance/lastPaymentDate) must still update atomically and correctly
+
+============================================================
+NON-NEGOTIABLE RULES (MUST PRESERVE)
+============================================================
+
+- Auth: Passport sessions via Postgres store; secure cookies in production.
+- RBAC: isAuthenticated protects routes; requireRole enforces roles; isAdmin for Manager-only.
+- Payments:
+  - Validate payload including paymentDate parsing
+  - Prevent overpayment
+  - Update shipment totals atomically (totalPaid/balance/lastPaymentDate)
+  - Currency normalization must remain correct (EGP/RMB with exchange rates where required)
+  - Record creator and audit-log key mutations
+- Suppliers:
+  - Supplier CRUD must remain intact and secure
+- Audit logging:
+  - Log payment creation including supplierId linkage and key computed totals
+
+============================================================
+IMPLEMENTATION REQUIREMENTS
+============================================================
+
+A) Backend
+1) Add/extend the payment creation API to accept `supplierId`:
+- Validate supplierId exists
+- Enforce RBAC
+- Store supplierId in payments table (migration if needed)
+- Audit log includes supplierId, shipmentId, amount, currency, date
+
+2) If supplier is already on shipment:
+- Decide rule:
+  - Default supplierId = shipment.supplierId (auto-fill), but allow override only for Manager if business allows
+  - OR require matching (supplierId must equal shipment supplierId) to prevent accounting inconsistencies
+Implement the safest, most consistent rule and document it.
+
+B) Frontend
+1) In “Add New Payment” form:
+- Add Supplier dropdown under “حساب أي جزء؟”
+- Load suppliers list from backend and show names
+- On submit, include supplierId in payload
+- Show clear validation message if supplier is required and not selected
+- After success, refresh:
+  - Payment history list
+  - Shipment totals
+  - Any supplier/accounting views affected
+
+C) Accounting/Reports Updates
+- Ensure supplier-linked payments appear everywhere needed:
+  - Supplier balances
+  - Supplier statements (chronological with running balance)
+  - Accounting dashboards and filters (date/supplier/status/method/component)
+  - Movement report (with user attribution)
+- If any report currently derives supplier only from shipment, update it to use payment.supplierId when present for accurate attribution.
+
+D) Tests (Required)
+Add/extend tests to cover:
+- Creating a payment with supplierId succeeds
+- Invalid supplierId fails with clear 400 error
+- Supplier-linked payment appears in supplier statement/balance calculations
+- Overpayment still blocked
+- Atomic shipment totals update still correct
+- RBAC: only allowed roles can create payments and link supplier
+
+============================================================
+DELIVERABLES
+============================================================
+
+1) UI: Supplier dropdown under “حساب أي جزء؟”
+2) Backend: supplierId supported and stored for payments (with migration if needed)
+3) Reports: supplier accounting and reporting updated to include supplier-linked payments correctly
+4) Tests: verifying supplier linkage and accounting correctness
+5) Short note explaining the supplier-linking rule (shipment supplier vs overridden supplier)
+
+BEGIN by writing an “Understanding Summary” confirming what will be changed and the safest supplier-linking rule, then implement.

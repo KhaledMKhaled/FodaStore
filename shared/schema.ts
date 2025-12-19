@@ -175,6 +175,7 @@ export const exchangeRates = pgTable("exchange_rates", {
 export const shipmentPayments = pgTable("shipment_payments", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   shipmentId: integer("shipment_id").references(() => shipments.id).notNull(),
+  supplierId: integer("supplier_id").references(() => suppliers.id),
   paymentDate: timestamp("payment_date").notNull(),
   paymentCurrency: varchar("payment_currency", { length: 10 }).notNull(), // RMB or EGP
   amountOriginal: decimal("amount_original", { precision: 15, scale: 2 }).notNull(),
