@@ -111,7 +111,7 @@ export default function AccountingPage() {
   });
 
   const { data: suppliers } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers"],
+    queryKey: ["/api/suppliers?includeHidden=true"],
   });
 
   const { data: exchangeRates } = useQuery<ExchangeRate[]>({

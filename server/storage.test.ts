@@ -251,7 +251,7 @@ describe("computeShipmentKnownTotal", () => {
 describe("supplier reporting with payment supplier overrides", () => {
   it("prefers payment supplierId for supplier balances", async () => {
     const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
-    const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
+    const supplierB = buildSupplier({ id: 2, name: "Supplier B", isHidden: true });
     const shipment = buildShipment({
       id: 10,
       shipmentCode: "S-10",
@@ -363,6 +363,7 @@ describe("supplier reporting with payment supplier overrides", () => {
     );
 
     assert.equal(paymentMovement?.supplierId, supplierB.id);
+    assert.equal(paymentMovement?.supplierName, "Supplier B");
     assert.equal(costMovement?.supplierId, supplierA.id);
   });
 });

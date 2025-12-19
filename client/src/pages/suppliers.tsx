@@ -39,7 +39,7 @@ export default function Suppliers() {
   const { toast } = useToast();
 
   const { data: suppliers, isLoading } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers"],
+    queryKey: ["/api/suppliers?includeHidden=true"],
   });
 
   const createMutation = useMutation({
@@ -48,7 +48,7 @@ export default function Suppliers() {
     },
     onSuccess: () => {
       toast({ title: "تم إضافة المورد بنجاح" });
-      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers?includeHidden=true"] });
       setIsDialogOpen(false);
       setEditingSupplier(null);
     },
@@ -63,7 +63,7 @@ export default function Suppliers() {
     },
     onSuccess: () => {
       toast({ title: "تم تحديث المورد بنجاح" });
-      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers?includeHidden=true"] });
       setIsDialogOpen(false);
       setEditingSupplier(null);
     },
@@ -78,7 +78,7 @@ export default function Suppliers() {
     },
     onSuccess: () => {
       toast({ title: "تم حذف المورد بنجاح" });
-      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers?includeHidden=true"] });
     },
     onError: () => {
       toast({ title: "حدث خطأ", variant: "destructive" });
@@ -91,7 +91,7 @@ export default function Suppliers() {
     },
     onSuccess: (_, { isHidden }) => {
       toast({ title: isHidden ? "تم إخفاء المورد" : "تم إظهار المورد" });
-      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers?includeHidden=true"] });
     },
     onError: () => {
       toast({ title: "حدث خطأ", variant: "destructive" });

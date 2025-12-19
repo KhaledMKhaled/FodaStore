@@ -98,6 +98,11 @@ npm run db:push    # Push database schema changes
 - **Matching rules vs shipment suppliers**: the resolved `supplierId` must be one of the shipment’s suppliers. If it is not, `/api/payments` returns a supplier mismatch error.
 - **Reporting preference**: reporting and statement views prefer `payment.supplierId` when present, and only fall back to shipment-item suppliers when it is missing. See storage methods like `getAccountingDashboard`, `getSupplierBalances`, `getSupplierStatement`, and `getMovementReport`.
 
+### Suppliers: hidden flag usage
+- **Field name**: `suppliers.is_hidden` (`isHidden` in the API payloads).
+- **Default supplier list**: `GET /api/suppliers` excludes hidden suppliers by default for shipment creation.
+- **Payments and reporting**: use `GET /api/suppliers?includeHidden=true` to include hidden suppliers so accounting, reports, and payment attribution remain complete.
+
 ### Key Design Decisions
 - All UI is in Arabic with RTL layout
 - Cairo and Tajawal fonts for Arabic text

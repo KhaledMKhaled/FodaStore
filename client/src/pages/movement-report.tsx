@@ -127,7 +127,7 @@ export default function MovementReportPage() {
   });
 
   const { data: suppliers } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers"],
+    queryKey: ["/api/suppliers?includeHidden=true"],
   });
 
   const { data: shipments } = useQuery<Shipment[]>({

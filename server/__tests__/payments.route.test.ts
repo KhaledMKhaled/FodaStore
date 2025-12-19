@@ -31,7 +31,7 @@ const storageState: {
 };
 
 let shipmentSuppliers: number[] = [];
-const suppliersById = new Map<number, { id: number; name?: string }>();
+const suppliersById = new Map<number, { id: number; name?: string; isHidden?: boolean }>();
 
 const createAuditLogMock = mock.fn(async () => ({}));
 
@@ -223,6 +223,25 @@ test("creates payment with valid supplierId", async () => {
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
   assert.equal(createPaymentMock.mock.calls[0].arguments[0].supplierId, 88);
+});
+
+test("creates payment with hidden supplierId", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+  shipmentSuppliers = [42];
+  suppliersById.set(42, { id: 42, name: "Hidden Supplier", isHidden: true });
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...createPaymentPayload(101), supplierId: 42 }),
+  });
+
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(createPaymentMock.mock.calls[0].arguments[0].supplierId, 42);
 });
 
 test("rejects invalid supplierId", async () => {
