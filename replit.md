@@ -93,6 +93,11 @@ npm run dev        # Start development server
 npm run db:push    # Push database schema changes
 ```
 
+### Payments: supplier attribution rules
+- **When `supplierId` is required**: `POST /api/payments` requires a supplier when the shipment has supplier attribution (i.e., `getShipmentSuppliers` finds supplier IDs on shipment items). If exactly one supplier is present, the handler defaults to it; otherwise the request must provide `supplierId`.
+- **Matching rules vs shipment suppliers**: the resolved `supplierId` must be one of the shipment’s suppliers. If it is not, `/api/payments` returns a supplier mismatch error.
+- **Reporting preference**: reporting and statement views prefer `payment.supplierId` when present, and only fall back to shipment-item suppliers when it is missing. See storage methods like `getAccountingDashboard`, `getSupplierBalances`, `getSupplierStatement`, and `getMovementReport`.
+
 ### Key Design Decisions
 - All UI is in Arabic with RTL layout
 - Cairo and Tajawal fonts for Arabic text
