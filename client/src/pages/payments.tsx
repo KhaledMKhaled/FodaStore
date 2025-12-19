@@ -609,21 +609,21 @@ export default function Payments() {
               </div>
 
               <div className="space-y-2">
-                {costComponent && stats && (
+                {costComponent && invoiceSummary && (
                   <div className="mt-2 p-3 bg-muted/50 rounded text-sm space-y-2">
                     {costComponent === "تكلفة البضاعة" && (
                       <>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(stats.purchaseCostRmb)} ¥</span>
+                          <span className="font-semibold">{formatCurrency(invoiceSummary.rmb.goodsTotal)} ¥</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(stats.purchasePaidRmb)} ¥</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.rmb.paid)} ¥</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(stats.purchaseBalanceRmb)} ¥</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.rmb.remaining)} ¥</span>
                         </div>
                       </>
                     )}
@@ -631,15 +631,15 @@ export default function Payments() {
                       <>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(stats.shippingCostRmb)} ¥</span>
+                          <span className="font-semibold">{formatCurrency(invoiceSummary.rmb.shippingTotal)} ¥</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(stats.shippingPaidRmb)} ¥</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.rmb.paid)} ¥</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(stats.shippingBalanceRmb)} ¥</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.rmb.remaining)} ¥</span>
                         </div>
                       </>
                     )}
@@ -647,15 +647,15 @@ export default function Payments() {
                       <>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(stats.commissionCostRmb)} ¥</span>
+                          <span className="font-semibold">{formatCurrency(invoiceSummary.rmb.commissionTotal)} ¥</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(stats.commissionPaidRmb)} ¥</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.rmb.paid)} ¥</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(stats.commissionBalanceRmb)} ¥</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.rmb.remaining)} ¥</span>
                         </div>
                       </>
                     )}
@@ -663,15 +663,15 @@ export default function Payments() {
                       <>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(stats.customsCostEgp)} ج.م</span>
+                          <span className="font-semibold">{formatCurrency(invoiceSummary.egp.customsTotal)} ج.م</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(stats.customsPaidEgp)} ج.م</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.egp.paid)} ج.م</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(stats.customsBalanceEgp)} ج.م</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.egp.remaining)} ج.م</span>
                         </div>
                       </>
                     )}
@@ -679,15 +679,15 @@ export default function Payments() {
                       <>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(stats.takhreegCostEgp)} ج.م</span>
+                          <span className="font-semibold">{formatCurrency(invoiceSummary.egp.takhreegTotal)} ج.م</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(stats.takhreegPaidEgp)} ج.م</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.egp.paid)} ج.م</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(stats.takhreegBalanceEgp)} ج.م</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.egp.remaining)} ج.م</span>
                         </div>
                       </>
                     )}

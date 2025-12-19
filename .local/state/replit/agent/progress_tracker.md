@@ -93,3 +93,12 @@ Status: Feature complete and tested
     - All dependencies installed successfully
     - Application running on port 5000
     - Import completed successfully
+
+[x] 28. Fix payment form cost component data display accuracy:
+    - Issue: Data shown in cost component summary was using global stats instead of shipment-specific data
+    - Solution: Changed data source from global `stats` to `invoiceSummary` which contains accurate per-shipment breakdown
+    - Changes made to client/src/pages/payments.tsx lines 614-699
+    - Now displays accurate costs, paid amounts, and remaining balances specific to the selected shipment
+    - Data properly updates when payments are added to the shipment
+    - Workflow restarted and verified running on port 5000
+    - Application working correctly with accurate data display
