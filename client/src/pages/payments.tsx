@@ -65,7 +65,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
 import { shipmentStatusColors } from "@/lib/colorMaps";
-import type { Shipment, ShipmentItem, ShipmentPayment, InsertShipmentPayment } from "@shared/schema";
+import type { Shipment, ShipmentItem, ShipmentPayment, InsertShipmentPayment, Supplier } from "@shared/schema";
 import { deriveAmountEgp, validateRemainingAllowance } from "./paymentValidation";
 import { cn } from "@/lib/utils";
 
@@ -169,7 +169,7 @@ export default function Payments() {
     queryKey: ["/api/payments/stats"],
   });
 
-  const { data: suppliers, isLoading: loadingSuppliers } = useQuery({
+  const { data: suppliers, isLoading: loadingSuppliers } = useQuery<Supplier[]>({
     queryKey: ["/api/suppliers"],
   });
 
@@ -565,7 +565,7 @@ export default function Payments() {
                       data-testid="select-supplier"
                     >
                       {supplierId
-                        ? suppliers?.find((supplier: any) => supplier.id === supplierId)?.name
+                        ? suppliers?.find((supplier) => supplier.id === supplierId)?.name
                         : "اختر المورد…"}
                       <ChevronsUpDown className="h-4 w-4 opacity-50" />
                     </Button>
@@ -578,7 +578,7 @@ export default function Payments() {
                           {loadingSuppliers ? "جاري التحميل..." : "لا يوجد مورد مطابق"}
                         </CommandEmpty>
                         <CommandGroup>
-                          {suppliers?.map((supplier: any) => (
+                          {suppliers?.filter((s) => !s.isHidden).map((supplier) => (
                             <CommandItem
                               key={supplier.id}
                               value={supplier.name}
