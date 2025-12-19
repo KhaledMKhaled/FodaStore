@@ -82,6 +82,7 @@ export const shipments = pgTable("shipments", {
   purchaseDate: date("purchase_date").notNull(),
   status: varchar("status", { length: 50 }).default("جديدة").notNull(), // جديدة, في انتظار الشحن, جاهزة للاستلام, مستلمة بنجاح, مؤرشفة
   invoiceCustomsDate: date("invoice_customs_date"),
+  shippingCompanySupplierId: integer("shipping_company_supplier_id").references(() => suppliers.id),
   createdByUserId: varchar("created_by_user_id").references(() => users.id),
   // Cost breakdown fields
   purchaseCostRmb: decimal("purchase_cost_rmb", { precision: 15, scale: 2 }).default("0"),
@@ -227,6 +228,7 @@ export const usersRelations = relations(users, ({ many }) => ({
 export const suppliersRelations = relations(suppliers, ({ many }) => ({
   products: many(products),
   shipmentItems: many(shipmentItems),
+  shippingCompanyShipments: many(shipments),
 }));
 
 export const productTypesRelations = relations(productTypes, ({ many }) => ({
@@ -246,6 +248,10 @@ export const shipmentsRelations = relations(shipments, ({ one, many }) => ({
   createdBy: one(users, {
     fields: [shipments.createdByUserId],
     references: [users.id],
+  }),
+  shippingCompanySupplier: one(suppliers, {
+    fields: [shipments.shippingCompanySupplierId],
+    references: [suppliers.id],
   }),
   items: many(shipmentItems),
   shippingDetails: one(shipmentShippingDetails),
