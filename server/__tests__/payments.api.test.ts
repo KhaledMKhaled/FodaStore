@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-codex/verify-payment-api-audit-log-entry
 import test, { mock } from "node:test";
 
+import { ApiError } from "../errors";
 import { createPaymentHandler } from "../routes";
 
 const actor = {
@@ -11,6 +11,48 @@ const actor = {
   lastName: "User",
   role: "مدير",
 };
+
+function createResponse() {
+  return {
+    statusCode: 200,
+    body: undefined as unknown,
+    status(code: number) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload: unknown) {
+      this.body = payload;
+      return this;
+    },
+  } as any;
+}
+
+const baseBody = {
+  paymentDate: "2024-01-02",
+  shipmentId: 1,
+  paymentCurrency: "EGP",
+  amountOriginal: "100",
+  amountEgp: "100",
+  costComponent: "شراء",
+  paymentMethod: "نقدي",
+};
+
+function createHandler(
+  overrides: {
+    createPayment?: (...args: any[]) => any;
+    getShipmentSuppliers?: (...args: any[]) => any;
+    getSupplier?: (...args: any[]) => any;
+  } = {},
+) {
+  const storage = {
+    createPayment: overrides.createPayment || (async () => ({ id: 99 })),
+    getShipmentSuppliers: overrides.getShipmentSuppliers || (async () => []),
+    getSupplier: overrides.getSupplier || (async (id: number) => ({ id })),
+  } as any;
+
+  const handler = createPaymentHandler({ storage, logAuditEvent: () => {} });
+  return { handler, storage };
+}
 
 test("POST /api/payments writes an audit log entry", async () => {
   process.env.DATABASE_URL ||= "postgres://example.com:5432/test";
@@ -98,52 +140,75 @@ test("POST /api/payments writes an audit log entry", async () => {
   });
 
   mock.restoreAll();
-import test from "node:test";
+});
 
-import { ApiError } from "../errors";
-import { createPaymentHandler } from "../routes";
+test("accepts payment creation with a valid supplierId", async () => {
+  const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
+  const getShipmentSuppliers = mock.fn(async () => [55]);
+  const getSupplier = mock.fn(async (id: number) => (id === 55 ? { id } : undefined));
 
-function createResponse() {
-  return {
-    statusCode: 200,
-    body: undefined as unknown,
-    status(code: number) {
-      this.statusCode = code;
-      return this;
-    },
-    json(payload: unknown) {
-      this.body = payload;
-      return this;
-    },
+  const { handler } = createHandler({
+    createPayment,
+    getShipmentSuppliers,
+    getSupplier,
+  });
+
+  const req = {
+    body: { ...baseBody, supplierId: 55 },
+    user: { id: "user-1" },
   } as any;
-}
+  const res = createResponse();
 
-const baseBody = {
-  paymentDate: "2024-01-02",
-  shipmentId: 1,
-  paymentCurrency: "EGP",
-  amountOriginal: "100",
-  amountEgp: "100",
-  costComponent: "شراء",
-  paymentMethod: "نقدي",
-};
+  await handler(req, res);
 
-function createHandler(
-  overrides: {
-    createPayment?: (...args: any[]) => any;
-    getShipmentSuppliers?: (...args: any[]) => any;
-    getSupplier?: (...args: any[]) => any;
-  } = {},
-) {
-  const storage = {
-    createPayment: overrides.createPayment || (async () => ({ id: 99 })),
-    getShipmentSuppliers: overrides.getShipmentSuppliers || (async () => []),
-    getSupplier: overrides.getSupplier || (async (id: number) => ({ id })),
+  assert.equal(res.statusCode, 200);
+  assert.equal(createPayment.mock.calls.length, 1);
+  assert.equal(createPayment.mock.calls[0].arguments[0].supplierId, 55);
+});
+
+test("returns 400 for invalid supplierId", async () => {
+  const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
+  const getSupplier = mock.fn(async () => undefined);
+
+  const { handler } = createHandler({
+    createPayment,
+    getSupplier,
+  });
+
+  const req = {
+    body: { ...baseBody, supplierId: 999 },
+    user: { id: "user-1" },
   } as any;
+  const res = createResponse();
 
-  const handler = createPaymentHandler({ storage, logAuditEvent: () => {} });
-  return { handler, storage };
-}
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body?.error?.code, "SUPPLIER_NOT_FOUND");
+  assert.equal(createPayment.mock.calls.length, 0);
+});
+
+test("requires supplierId when shipment has supplier attribution", async () => {
+  const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
+  const getShipmentSuppliers = mock.fn(async () => [5]);
+
+  const { handler } = createHandler({
+    createPayment,
+    getShipmentSuppliers,
+  });
+
+  const req = {
+    body: { ...baseBody, supplierId: null },
+    user: { id: "user-1" },
+  } as any;
+  const res = createResponse();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body?.error?.code, "SUPPLIER_REQUIRED");
+  assert.equal(createPayment.mock.calls.length, 0);
+});
 
 test("returns PAYMENT_DATE_INVALID for malformed paymentDate", async () => {
   const { handler } = createHandler();
@@ -240,5 +305,4 @@ test("returns 404 when shipment is missing", async () => {
   assert.equal(res.body?.error?.code, "SHIPMENT_NOT_FOUND");
   assert.equal(res.body?.error?.message, "الشحنة غير موجودة. تأكد من اختيار شحنة صحيحة.");
   assert.equal(createPaymentCalled, 1);
-main
 });

@@ -6,8 +6,10 @@ import type {
   ShipmentCustomsDetails,
   ShipmentItem,
   ShipmentShippingDetails,
+  ShipmentPayment,
+  Supplier,
 } from "@shared/schema";
-import { computeShipmentKnownTotal, MissingRmbRateError } from "./storage";
+import { computeShipmentKnownTotal, DatabaseStorage, MissingRmbRateError } from "./storage";
 
 const baseShipment: Shipment = {
   id: 1,
@@ -64,6 +66,61 @@ const buildItem = (overrides: Partial<ShipmentItem>): ShipmentItem => ({
   updatedAt: new Date("2024-01-02"),
   ...overrides,
 });
+
+const buildSupplier = (overrides: Partial<Supplier>): Supplier => ({
+  id: 1,
+  name: "Supplier",
+  description: null,
+  country: "الصين",
+  phone: null,
+  email: null,
+  address: null,
+  isActive: true,
+  isHidden: false,
+  createdAt: new Date("2024-01-02"),
+  updatedAt: new Date("2024-01-02"),
+  ...overrides,
+});
+
+const buildPayment = (overrides: Partial<ShipmentPayment>): ShipmentPayment => ({
+  id: 1,
+  shipmentId: baseShipment.id,
+  supplierId: null,
+  paymentDate: new Date("2024-01-05"),
+  paymentCurrency: "EGP",
+  amountOriginal: "40",
+  exchangeRateToEgp: null,
+  amountEgp: "40",
+  costComponent: "شراء",
+  paymentMethod: "نقدي",
+  cashReceiverName: null,
+  referenceNumber: null,
+  note: null,
+  attachmentUrl: null,
+  createdByUserId: "user-1",
+  createdAt: new Date("2024-01-05"),
+  updatedAt: new Date("2024-01-05"),
+  ...overrides,
+});
+
+const buildReportingStorage = (data: {
+  suppliers: Supplier[];
+  shipments: Shipment[];
+  payments: ShipmentPayment[];
+  itemsByShipment: Map<number, ShipmentItem[]>;
+  users?: Array<{ id: string; firstName?: string; username?: string }>;
+}) => {
+  const storage = new DatabaseStorage();
+  storage.getAllSuppliers = async () => data.suppliers;
+  storage.getSupplier = async (id: number) =>
+    data.suppliers.find((supplier) => supplier.id === id);
+  storage.getAllShipments = async () => data.shipments;
+  storage.getAllPayments = async () => data.payments;
+  storage.getShipmentItems = async (shipmentId: number) =>
+    data.itemsByShipment.get(shipmentId) ?? [];
+  storage.getAllUsers = async () => data.users ?? [];
+  return storage;
+};
 
 describe("computeShipmentKnownTotal", () => {
   it("sums available EGP components for جديدة without NaN", () => {
@@ -188,5 +245,124 @@ describe("computeShipmentKnownTotal", () => {
     assert.throws(() => {
       computeShipmentKnownTotal({ shipment });
     }, MissingRmbRateError);
+  });
+});
+
+describe("supplier reporting with payment supplier overrides", () => {
+  it("prefers payment supplierId for supplier balances", async () => {
+    const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
+    const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
+    const shipment = buildShipment({
+      id: 10,
+      shipmentCode: "S-10",
+      shipmentName: "Shipment 10",
+      finalTotalCostEgp: "100.00",
+      purchaseDate: new Date("2024-01-03"),
+    });
+    const itemsByShipment = new Map<number, ShipmentItem[]>([
+      [shipment.id, [buildItem({ shipmentId: shipment.id, supplierId: 1 })]],
+    ]);
+    const payment = buildPayment({
+      shipmentId: shipment.id,
+      supplierId: 2,
+      amountEgp: "40.00",
+    });
+
+    const storage = buildReportingStorage({
+      suppliers: [supplierA, supplierB],
+      shipments: [shipment],
+      payments: [payment],
+      itemsByShipment,
+    });
+
+    const balances = await storage.getSupplierBalances();
+
+    const balanceA = balances.find((row) => row.supplierId === supplierA.id);
+    const balanceB = balances.find((row) => row.supplierId === supplierB.id);
+
+    assert.equal(balanceA?.totalCostEgp, "100.00");
+    assert.equal(balanceA?.totalPaidEgp, "0.00");
+    assert.equal(balanceA?.balanceStatus, "owing");
+
+    assert.equal(balanceB?.totalCostEgp, "0.00");
+    assert.equal(balanceB?.totalPaidEgp, "40.00");
+    assert.equal(balanceB?.balanceStatus, "credit");
+  });
+
+  it("uses payment supplierId in supplier statements", async () => {
+    const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
+    const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
+    const shipment = buildShipment({
+      id: 11,
+      shipmentCode: "S-11",
+      shipmentName: "Shipment 11",
+      finalTotalCostEgp: "75.00",
+      purchaseDate: new Date("2024-01-04"),
+    });
+    const itemsByShipment = new Map<number, ShipmentItem[]>([
+      [shipment.id, [buildItem({ shipmentId: shipment.id, supplierId: 1 })]],
+    ]);
+    const payment = buildPayment({
+      shipmentId: shipment.id,
+      supplierId: 2,
+      amountEgp: "20.00",
+      paymentDate: new Date("2024-01-06"),
+    });
+
+    const storage = buildReportingStorage({
+      suppliers: [supplierA, supplierB],
+      shipments: [shipment],
+      payments: [payment],
+      itemsByShipment,
+    });
+
+    const statementA = await storage.getSupplierStatement(1);
+    assert.equal(statementA.movements.some((move) => move.type === "payment"), false);
+
+    const statementB = await storage.getSupplierStatement(2);
+    const paymentMovement = statementB.movements.find((move) => move.type === "payment");
+    assert.equal(paymentMovement?.paidEgp, "20.00");
+    assert.equal(paymentMovement?.runningBalance, "-20.00");
+  });
+
+  it("attributes movement report payments to payment supplierId", async () => {
+    const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
+    const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
+    const shipment = buildShipment({
+      id: 12,
+      shipmentCode: "S-12",
+      shipmentName: "Shipment 12",
+      finalTotalCostEgp: "100.00",
+      purchaseCostEgp: "100.00",
+      purchaseDate: new Date("2024-01-04"),
+    });
+    const itemsByShipment = new Map<number, ShipmentItem[]>([
+      [shipment.id, [buildItem({ shipmentId: shipment.id, supplierId: 1 })]],
+    ]);
+    const payment = buildPayment({
+      shipmentId: shipment.id,
+      supplierId: 2,
+      amountEgp: "30.00",
+      paymentDate: new Date("2024-01-07"),
+    });
+
+    const storage = buildReportingStorage({
+      suppliers: [supplierA, supplierB],
+      shipments: [shipment],
+      payments: [payment],
+      itemsByShipment,
+      users: [{ id: "user-1", firstName: "User" }],
+    });
+
+    const report = await storage.getMovementReport();
+    const paymentMovement = report.movements.find(
+      (movement) => movement.movementType === "دفعة",
+    );
+    const costMovement = report.movements.find(
+      (movement) => movement.movementType === "تكلفة بضاعة",
+    );
+
+    assert.equal(paymentMovement?.supplierId, supplierB.id);
+    assert.equal(costMovement?.supplierId, supplierA.id);
   });
 });

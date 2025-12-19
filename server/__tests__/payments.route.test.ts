@@ -30,6 +30,9 @@ const storageState: {
   payments: [],
 };
 
+let shipmentSuppliers: number[] = [];
+const suppliersById = new Map<number, { id: number; name?: string }>();
+
 const createAuditLogMock = mock.fn(async () => ({}));
 
 const createPaymentMock = mock.fn(async (data: InsertShipmentPayment) => {
@@ -90,6 +93,16 @@ const mockedGetShipmentsByIds = mock.method(
       status: storageState.shipments.get(id)?.status,
     })),
 );
+const mockedGetShipmentSuppliers = mock.method(
+  storage,
+  "getShipmentSuppliers",
+  async () => shipmentSuppliers,
+);
+const mockedGetSupplier = mock.method(
+  storage,
+  "getSupplier",
+  async (id: number) => suppliersById.get(id),
+);
 
 const { registerRoutes } = await import("../routes");
 
@@ -98,12 +111,16 @@ function resetStorageState() {
     shipmentSeeds.map(({ id, status }) => [id, { status, total: 1_000, paid: 0 }])
   );
   storageState.payments = [];
+  shipmentSuppliers = [];
+  suppliersById.clear();
   createPaymentMock.mock.resetCalls();
   createAuditLogMock.mock.resetCalls();
   mockedCreatePayment.mock.resetCalls();
   mockedCreateAuditLog.mock.resetCalls();
   mockedGetAllPayments.mock.resetCalls();
   mockedGetShipmentsByIds.mock.resetCalls();
+  mockedGetShipmentSuppliers.mock.resetCalls();
+  mockedGetSupplier.mock.resetCalls();
 }
 
 function createPaymentPayload(shipmentId: number, amount = "150.00") {
@@ -186,6 +203,60 @@ test("viewer and inventory roles are forbidden", async () => {
     assert.deepEqual(body, { message: "لا تملك صلاحية لتنفيذ هذا الإجراء" });
   }
 
+  assert.equal(createPaymentMock.mock.calls.length, 0);
+});
+
+test("creates payment with valid supplierId", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+  shipmentSuppliers = [88];
+  suppliersById.set(88, { id: 88, name: "Supplier 88" });
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...createPaymentPayload(101), supplierId: 88 }),
+  });
+
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(createPaymentMock.mock.calls[0].arguments[0].supplierId, 88);
+});
+
+test("rejects invalid supplierId", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...createPaymentPayload(101), supplierId: 999 }),
+  });
+
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 400);
+  assert.equal(body?.error?.code, "SUPPLIER_NOT_FOUND");
+  assert.equal(createPaymentMock.mock.calls.length, 0);
+});
+
+test("requires supplierId when shipment has supplier attribution", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+  shipmentSuppliers = [70];
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(createPaymentPayload(101)),
+  });
+
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 400);
+  assert.equal(body?.error?.code, "SUPPLIER_REQUIRED");
   assert.equal(createPaymentMock.mock.calls.length, 0);
 });
 
