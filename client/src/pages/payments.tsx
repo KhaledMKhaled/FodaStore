@@ -75,25 +75,26 @@ interface PaymentsStats {
   totalCostEgp: string;
   totalPaidEgp: string;
   totalBalanceEgp: string;
-  totalCostRmb: string;
-  totalPaidRmb: string;
-  totalBalanceRmb: string;
-  totalPaidPurchaseRmb: string;
-  totalBalancePurchaseRmb: string;
-  totalPaidPurchaseEgp: string;
-  totalBalancePurchaseEgp: string;
-  totalPaidShippingRmb: string;
-  totalBalanceShippingRmb: string;
-  totalPaidShippingEgp: string;
-  totalBalanceShippingEgp: string;
-  totalPaidCommissionRmb: string;
-  totalBalanceCommissionRmb: string;
-  totalPaidCommissionEgp: string;
-  totalBalanceCommissionEgp: string;
-  totalPaidCustomsEgp: string;
-  totalBalanceCustomsEgp: string;
-  totalPaidTakhreegEgp: string;
-  totalBalanceTakhreegEgp: string;
+  // Purchase (تكلفة البضاعة) - RMB
+  purchaseCostRmb: string;
+  purchasePaidRmb: string;
+  purchaseBalanceRmb: string;
+  // Shipping (الشحن) - RMB
+  shippingCostRmb: string;
+  shippingPaidRmb: string;
+  shippingBalanceRmb: string;
+  // Commission (العمولة) - RMB
+  commissionCostRmb: string;
+  commissionPaidRmb: string;
+  commissionBalanceRmb: string;
+  // Customs (الجمرك) - EGP
+  customsCostEgp: string;
+  customsPaidEgp: string;
+  customsBalanceEgp: string;
+  // Takhreeg (التخريج) - EGP
+  takhreegCostEgp: string;
+  takhreegPaidEgp: string;
+  takhreegBalanceEgp: string;
   lastPayment: ShipmentPayment | null;
 }
 
@@ -468,66 +469,86 @@ export default function Payments() {
                   </SelectContent>
                 </Select>
                 {costComponent && stats && (
-                  <div className="mt-2 p-2 bg-muted/50 rounded text-sm">
+                  <div className="mt-2 p-3 bg-muted/50 rounded text-sm space-y-2">
                     {costComponent === "تكلفة البضاعة" && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
-                        <span className="font-semibold">{formatCurrency(stats.totalPaidPurchaseRmb)} ¥</span>
-                      </div>
-                    )}
-                    {costComponent === "تكلفة البضاعة" && (
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-muted-foreground">المتبقي</span>
-                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalancePurchaseRmb)} ¥</span>
-                      </div>
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">الإجمالي</span>
+                          <span className="font-semibold">{formatCurrency(stats.purchaseCostRmb)} ¥</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المدفوع</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(stats.purchasePaidRmb)} ¥</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المتبقي</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(stats.purchaseBalanceRmb)} ¥</span>
+                        </div>
+                      </>
                     )}
                     {costComponent === "الشحن" && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
-                        <span className="font-semibold">{formatCurrency(stats.totalPaidShippingRmb)} ¥</span>
-                      </div>
-                    )}
-                    {costComponent === "الشحن" && (
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-muted-foreground">المتبقي</span>
-                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalanceShippingRmb)} ¥</span>
-                      </div>
-                    )}
-                    {costComponent === "العمولة" && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
-                        <span className="font-semibold">{formatCurrency(stats.totalPaidCommissionRmb)} ¥</span>
-                      </div>
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">الإجمالي</span>
+                          <span className="font-semibold">{formatCurrency(stats.shippingCostRmb)} ¥</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المدفوع</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(stats.shippingPaidRmb)} ¥</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المتبقي</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(stats.shippingBalanceRmb)} ¥</span>
+                        </div>
+                      </>
                     )}
                     {costComponent === "العمولة" && (
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-muted-foreground">المتبقي</span>
-                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalanceCommissionRmb)} ¥</span>
-                      </div>
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">الإجمالي</span>
+                          <span className="font-semibold">{formatCurrency(stats.commissionCostRmb)} ¥</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المدفوع</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(stats.commissionPaidRmb)} ¥</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المتبقي</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(stats.commissionBalanceRmb)} ¥</span>
+                        </div>
+                      </>
                     )}
                     {costComponent === "الجمرك" && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
-                        <span className="font-semibold">{formatCurrency(stats.totalPaidCustomsEgp)} ج.م</span>
-                      </div>
-                    )}
-                    {costComponent === "الجمرك" && (
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-muted-foreground">المتبقي</span>
-                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalanceCustomsEgp)} ج.م</span>
-                      </div>
-                    )}
-                    {costComponent === "التخريج" && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">إجمالي المدفوع في هذا البند</span>
-                        <span className="font-semibold">{formatCurrency(stats.totalPaidTakhreegEgp)} ج.م</span>
-                      </div>
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">الإجمالي</span>
+                          <span className="font-semibold">{formatCurrency(stats.customsCostEgp)} ج.م</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المدفوع</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(stats.customsPaidEgp)} ج.م</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المتبقي</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(stats.customsBalanceEgp)} ج.م</span>
+                        </div>
+                      </>
                     )}
                     {costComponent === "التخريج" && (
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-muted-foreground">المتبقي</span>
-                        <span className="font-semibold text-amber-600">{formatCurrency(stats.totalBalanceTakhreegEgp)} ج.م</span>
-                      </div>
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">الإجمالي</span>
+                          <span className="font-semibold">{formatCurrency(stats.takhreegCostEgp)} ج.م</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المدفوع</span>
+                          <span className="font-semibold text-green-600">{formatCurrency(stats.takhreegPaidEgp)} ج.م</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">المتبقي</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency(stats.takhreegBalanceEgp)} ج.م</span>
+                        </div>
+                      </>
                     )}
                   </div>
                 )}

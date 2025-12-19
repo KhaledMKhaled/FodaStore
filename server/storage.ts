@@ -1115,27 +1115,63 @@ export class DatabaseStorage implements IStorage {
     const allShipments = await this.getAllShipments();
     const allPayments = await this.getAllPayments();
 
-    const unsettledShipments = allShipments.filter((s) => {
-      const cost = parseFloat(s.finalTotalCostEgp || "0");
-      const paid = parseFloat(s.totalPaidEgp || "0");
-      return Math.max(0, cost - paid) > 0.0001;
-    });
+    // Initialize accumulators for each component
+    let purchaseCostRmb = 0, purchasePaidRmb = 0;
+    let shippingCostRmb = 0, shippingPaidRmb = 0;
+    let commissionCostRmb = 0, commissionPaidRmb = 0;
+    let customsCostEgp = 0, customsPaidEgp = 0;
+    let takhreegCostEgp = 0, takhreegPaidEgp = 0;
+    let totalPaidEgp = 0;
 
-    const totalCostEgp = unsettledShipments.reduce(
-      (sum, s) => sum + parseFloat(s.finalTotalCostEgp || "0"),
-      0
-    );
+    // Sum costs from shipments
+    for (const s of allShipments) {
+      purchaseCostRmb += parseFloat(s.purchaseCostRmb || "0");
+      shippingCostRmb += parseFloat(s.shippingCostRmb || "0");
+      commissionCostRmb += parseFloat(s.commissionCostRmb || "0");
+      customsCostEgp += parseFloat(s.customsCostEgp || "0");
+      takhreegCostEgp += parseFloat(s.takhreegCostEgp || "0");
+    }
 
-    const totalPaidEgp = unsettledShipments.reduce(
-      (sum, s) => sum + parseFloat(s.totalPaidEgp || "0"),
-      0
-    );
+    // Sum payments by component
+    for (const p of allPayments) {
+      const amountEgp = parseFloat(p.amountEgp || "0");
+      const amountOriginal = parseFloat(p.amountOriginal || "0");
+      
+      totalPaidEgp += amountEgp;
 
-    const totalBalanceEgp = unsettledShipments.reduce((sum, s) => {
-      const cost = parseFloat(s.finalTotalCostEgp || "0");
-      const paid = parseFloat(s.totalPaidEgp || "0");
-      return sum + Math.max(0, cost - paid);
-    }, 0);
+      if (p.costComponent === "تكلفة البضاعة") {
+        if (p.paymentCurrency === "RMB") {
+          purchasePaidRmb += amountOriginal;
+        }
+      } else if (p.costComponent === "الشحن") {
+        if (p.paymentCurrency === "RMB") {
+          shippingPaidRmb += amountOriginal;
+        }
+      } else if (p.costComponent === "العمولة") {
+        if (p.paymentCurrency === "RMB") {
+          commissionPaidRmb += amountOriginal;
+        }
+      } else if (p.costComponent === "الجمرك") {
+        if (p.paymentCurrency === "EGP") {
+          customsPaidEgp += amountOriginal;
+        }
+      } else if (p.costComponent === "التخريج") {
+        if (p.paymentCurrency === "EGP") {
+          takhreegPaidEgp += amountOriginal;
+        }
+      }
+    }
+
+    // Calculate balances
+    const purchaseBalanceRmb = Math.max(0, purchaseCostRmb - purchasePaidRmb);
+    const shippingBalanceRmb = Math.max(0, shippingCostRmb - shippingPaidRmb);
+    const commissionBalanceRmb = Math.max(0, commissionCostRmb - commissionPaidRmb);
+    const customsBalanceEgp = Math.max(0, customsCostEgp - customsPaidEgp);
+    const takhreegBalanceEgp = Math.max(0, takhreegCostEgp - takhreegPaidEgp);
+
+    // Calculate overall totals
+    const totalCostEgp = customsCostEgp + takhreegCostEgp;
+    const totalBalanceEgp = customsBalanceEgp + takhreegBalanceEgp;
 
     const lastPayment = allPayments.length > 0 ? allPayments[0] : null;
 
@@ -1143,6 +1179,21 @@ export class DatabaseStorage implements IStorage {
       totalCostEgp: totalCostEgp.toFixed(2),
       totalPaidEgp: totalPaidEgp.toFixed(2),
       totalBalanceEgp: totalBalanceEgp.toFixed(2),
+      purchaseCostRmb: purchaseCostRmb.toFixed(2),
+      purchasePaidRmb: purchasePaidRmb.toFixed(2),
+      purchaseBalanceRmb: purchaseBalanceRmb.toFixed(2),
+      shippingCostRmb: shippingCostRmb.toFixed(2),
+      shippingPaidRmb: shippingPaidRmb.toFixed(2),
+      shippingBalanceRmb: shippingBalanceRmb.toFixed(2),
+      commissionCostRmb: commissionCostRmb.toFixed(2),
+      commissionPaidRmb: commissionPaidRmb.toFixed(2),
+      commissionBalanceRmb: commissionBalanceRmb.toFixed(2),
+      customsCostEgp: customsCostEgp.toFixed(2),
+      customsPaidEgp: customsPaidEgp.toFixed(2),
+      customsBalanceEgp: customsBalanceEgp.toFixed(2),
+      takhreegCostEgp: takhreegCostEgp.toFixed(2),
+      takhreegPaidEgp: takhreegPaidEgp.toFixed(2),
+      takhreegBalanceEgp: takhreegBalanceEgp.toFixed(2),
       lastPayment,
     };
   }
