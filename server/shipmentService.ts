@@ -8,6 +8,7 @@ import {
   shipmentItems,
   shipments,
   shipmentShippingDetails,
+  suppliers,
   type InsertShipmentItem,
   type Shipment,
   type ShipmentItem,
@@ -58,6 +59,23 @@ function calculateItemTotals(items: ShipmentItem[]) {
   };
 }
 
+async function ensureShippingCompanySupplierExists(
+  shippingCompanySupplierId?: number | null
+) {
+  if (shippingCompanySupplierId === undefined || shippingCompanySupplierId === null) {
+    return;
+  }
+
+  const [supplier] = await db
+    .select()
+    .from(suppliers)
+    .where(eq(suppliers.id, shippingCompanySupplierId));
+
+  if (!supplier) {
+    throw new Error("شركة الشحن غير موجودة");
+  }
+}
+
 export async function createShipmentWithItems(
   payload: CreateShipmentPayload,
   userId?: string
@@ -69,6 +87,8 @@ export async function createShipmentWithItems(
       ...shipmentData,
       createdByUserId: userId,
     });
+
+    await ensureShippingCompanySupplierExists(validatedShipment.shippingCompanySupplierId ?? null);
 
     const purchaseRateFromPayload = validatedShipment.purchaseRmbToEgpRate
       ? parseFloat(validatedShipment.purchaseRmbToEgpRate)
@@ -165,6 +185,12 @@ export async function updateShipmentWithItems(
     const validatedShipmentData = shipmentData
       ? insertShipmentSchema.partial().parse(shipmentData)
       : undefined;
+
+    if (validatedShipmentData?.shippingCompanySupplierId !== undefined) {
+      await ensureShippingCompanySupplierExists(
+        validatedShipmentData.shippingCompanySupplierId ?? null
+      );
+    }
 
     const parsedItems = items && Array.isArray(items)
       ? (items as unknown[]).map((item) =>

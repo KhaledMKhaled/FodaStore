@@ -396,7 +396,10 @@ export async function registerRoutes(
         entityType: "SHIPMENT",
         entityId: shipment.id,
         actionType: "CREATE",
-        details: { status: shipment.status },
+        details: {
+          status: shipment.status,
+          shippingCompanySupplierId: shipment.shippingCompanySupplierId ?? null,
+        },
       });
       
       res.json(shipment);
@@ -413,15 +416,30 @@ export async function registerRoutes(
       
       const existingShipment = await routeStorage.getShipment(shipmentId);
       const previousStatus = existingShipment?.status;
+      const previousShippingCompanySupplierId =
+        existingShipment?.shippingCompanySupplierId ?? null;
       
       const updatedShipment = await updateShipmentWithItems(shipmentId, req.body);
+      const nextShippingCompanySupplierId =
+        updatedShipment?.shippingCompanySupplierId ?? null;
       
       logAuditEvent({
         userId,
         entityType: "SHIPMENT",
         entityId: shipmentId,
         actionType: "UPDATE",
-        details: { step: req.body.step, status: updatedShipment?.status },
+        details: {
+          step: req.body.step,
+          status: updatedShipment?.status,
+          shippingCompanySupplierId: nextShippingCompanySupplierId,
+          shippingCompanySupplierChange:
+            previousShippingCompanySupplierId !== nextShippingCompanySupplierId
+              ? {
+                  from: previousShippingCompanySupplierId,
+                  to: nextShippingCompanySupplierId,
+                }
+              : undefined,
+        },
       });
       
       if (updatedShipment && updatedShipment.status !== previousStatus) {
