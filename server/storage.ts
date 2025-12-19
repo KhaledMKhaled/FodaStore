@@ -1254,6 +1254,14 @@ export class DatabaseStorage implements IStorage {
       allShipments.map(s => this.getShipmentItems(s.id))
     );
 
+    const shipmentSuppliersMap = new Map<number, Set<number>>();
+    allItems.flat().forEach(item => {
+      if (!item.supplierId) return;
+      const existing = shipmentSuppliersMap.get(item.shipmentId) ?? new Set<number>();
+      existing.add(item.supplierId);
+      shipmentSuppliersMap.set(item.shipmentId, existing);
+    });
+
     let filteredShipments = allShipments;
     
     if (!filters?.includeArchived) {
@@ -1286,13 +1294,15 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
+    const baseFilteredShipmentIds = new Set(filteredShipments.map(s => s.id));
+
     if (filters?.supplierId) {
-      const shipmentItemsForFilter = allItems.flat();
-      const shipmentIdsWithSupplier = new Set(
-        shipmentItemsForFilter
-          .filter(item => item.supplierId === filters.supplierId)
-          .map(item => item.shipmentId)
-      );
+      const shipmentIdsWithSupplier = new Set<number>();
+      shipmentSuppliersMap.forEach((suppliers, shipmentId) => {
+        if (suppliers.has(filters.supplierId!)) {
+          shipmentIdsWithSupplier.add(shipmentId);
+        }
+      });
       filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
     }
 
@@ -1309,7 +1319,16 @@ export class DatabaseStorage implements IStorage {
     }
 
     const filteredShipmentIds = new Set(filteredShipments.map(s => s.id));
-    const filteredPayments = allPayments.filter(p => filteredShipmentIds.has(p.shipmentId));
+    const filteredPayments = allPayments.filter(p => {
+      if (!baseFilteredShipmentIds.has(p.shipmentId)) return false;
+      if (filters?.supplierId) {
+        if (p.supplierId !== null && p.supplierId !== undefined) {
+          return p.supplierId === filters.supplierId;
+        }
+        return shipmentSuppliersMap.get(p.shipmentId)?.has(filters.supplierId) ?? false;
+      }
+      return filteredShipmentIds.has(p.shipmentId);
+    });
 
     const totalPurchaseRmb = filteredShipments.reduce(
       (sum, s) => sum + parseFloat(s.purchaseCostRmb || "0"), 0
@@ -1461,6 +1480,14 @@ export class DatabaseStorage implements IStorage {
       allShipments.map(s => this.getShipmentItems(s.id))
     );
 
+    const shipmentSuppliersMap = new Map<number, Set<number>>();
+    allItems.flat().forEach(item => {
+      if (!item.supplierId) return;
+      const existing = shipmentSuppliersMap.get(item.shipmentId) ?? new Set<number>();
+      existing.add(item.supplierId);
+      shipmentSuppliersMap.set(item.shipmentId, existing);
+    });
+
     const result: Array<{
       supplierId: number;
       supplierName: string;
@@ -1474,9 +1501,9 @@ export class DatabaseStorage implements IStorage {
       if (filters?.supplierId && supplier.id !== filters.supplierId) continue;
 
       const supplierShipmentIds = new Set<number>();
-      allItems.forEach((items, idx) => {
-        if (items.some(item => item.supplierId === supplier.id)) {
-          supplierShipmentIds.add(allShipments[idx].id);
+      shipmentSuppliersMap.forEach((suppliers, shipmentId) => {
+        if (suppliers.has(supplier.id)) {
+          supplierShipmentIds.add(shipmentId);
         }
       });
 
@@ -1499,7 +1526,12 @@ export class DatabaseStorage implements IStorage {
       }
 
       const supplierShipmentIdsFiltered = new Set(supplierShipments.map(s => s.id));
-      const supplierPayments = allPayments.filter(p => supplierShipmentIdsFiltered.has(p.shipmentId));
+      const supplierPayments = allPayments.filter(p => {
+        if (p.supplierId !== null && p.supplierId !== undefined) {
+          return p.supplierId === supplier.id;
+        }
+        return supplierShipmentIdsFiltered.has(p.shipmentId);
+      });
 
       const totalCost = supplierShipments.reduce(
         (sum, s) => sum + parseFloat(s.finalTotalCostEgp || "0"), 0
@@ -1548,14 +1580,19 @@ export class DatabaseStorage implements IStorage {
     );
 
     const supplierShipmentIds = new Set<number>();
-    allItems.forEach((items, idx) => {
-      if (items.some(item => item.supplierId === supplierId)) {
-        supplierShipmentIds.add(allShipments[idx].id);
+    allItems.flat().forEach(item => {
+      if (item.supplierId === supplierId) {
+        supplierShipmentIds.add(item.shipmentId);
       }
     });
 
     let supplierShipments = allShipments.filter(s => supplierShipmentIds.has(s.id));
-    let supplierPayments = allPayments.filter(p => supplierShipmentIds.has(p.shipmentId));
+    let supplierPayments = allPayments.filter(p => {
+      if (p.supplierId !== null && p.supplierId !== undefined) {
+        return p.supplierId === supplierId;
+      }
+      return supplierShipmentIds.has(p.shipmentId);
+    });
 
     if (filters?.dateFrom) {
       const fromDate = new Date(filters.dateFrom);
@@ -1646,6 +1683,13 @@ export class DatabaseStorage implements IStorage {
 
     const supplierMap = new Map(allSuppliers.map(s => [s.id, s.name]));
     const userMap = new Map(allUsers.map(u => [u.id, u.firstName || u.username]));
+    const shipmentSuppliersMap = new Map<number, Set<number>>();
+    allItems.flat().forEach(item => {
+      if (!item.supplierId) return;
+      const existing = shipmentSuppliersMap.get(item.shipmentId) ?? new Set<number>();
+      existing.add(item.supplierId);
+      shipmentSuppliersMap.set(item.shipmentId, existing);
+    });
 
     let filteredShipments = allShipments;
     
@@ -1677,11 +1721,13 @@ export class DatabaseStorage implements IStorage {
       filteredShipments = filteredShipments.filter(s => s.id === filters.shipmentId);
     }
 
+    const baseFilteredShipmentIds = new Set(filteredShipments.map(s => s.id));
+
     if (filters?.supplierId) {
       const shipmentIdsWithSupplier = new Set<number>();
-      allItems.forEach((items, idx) => {
-        if (items.some(item => item.supplierId === filters.supplierId)) {
-          shipmentIdsWithSupplier.add(allShipments[idx].id);
+      shipmentSuppliersMap.forEach((suppliers, shipmentId) => {
+        if (suppliers.has(filters.supplierId!)) {
+          shipmentIdsWithSupplier.add(shipmentId);
         }
       });
       filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
@@ -1758,7 +1804,16 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    let filteredPayments = allPayments.filter(p => filteredShipmentIds.has(p.shipmentId));
+    let filteredPayments = allPayments.filter(p => {
+      if (!baseFilteredShipmentIds.has(p.shipmentId)) return false;
+      if (filters?.supplierId) {
+        if (p.supplierId !== null && p.supplierId !== undefined) {
+          return p.supplierId === filters.supplierId;
+        }
+        return shipmentSuppliersMap.get(p.shipmentId)?.has(filters.supplierId) ?? false;
+      }
+      return filteredShipmentIds.has(p.shipmentId);
+    });
 
     if (filters?.dateFrom) {
       const fromDate = new Date(filters.dateFrom);
@@ -1786,7 +1841,10 @@ export class DatabaseStorage implements IStorage {
         continue;
       }
 
-      const supplierId = shipmentSupplierMap.get(p.shipmentId);
+      const supplierId =
+        p.supplierId !== null && p.supplierId !== undefined
+          ? p.supplierId
+          : shipmentSupplierMap.get(p.shipmentId);
       const supplierName = supplierId ? supplierMap.get(supplierId) : undefined;
       const userName = p.createdByUserId ? userMap.get(p.createdByUserId) : undefined;
 
