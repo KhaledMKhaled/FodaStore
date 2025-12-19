@@ -16,6 +16,8 @@ import {
   ChevronDown,
   ChevronUp,
   Receipt,
+  ChevronsUpDown,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,12 +48,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
 import { shipmentStatusColors } from "@/lib/colorMaps";
-import type { Shipment, ShipmentPayment, InsertShipmentPayment } from "@shared/schema";
+import type { Shipment, ShipmentItem, ShipmentPayment, InsertShipmentPayment } from "@shared/schema";
 import { deriveAmountEgp, validateRemainingAllowance } from "./paymentValidation";
+import { cn } from "@/lib/utils";
 
 const PAYMENT_METHODS = [
   { value: "نقدي", label: "نقدي" },
@@ -138,6 +154,7 @@ export default function Payments() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
   const [supplierId, setSupplierId] = useState<number | null>(null);
+  const [supplierPopoverOpen, setSupplierPopoverOpen] = useState(false);
   const [paymentCurrency, setPaymentCurrency] = useState("EGP");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [costComponent, setCostComponent] = useState("");
@@ -173,9 +190,38 @@ export default function Payments() {
     enabled: !!selectedShipmentId,
   });
 
+  const { data: shipmentItems } = useQuery<ShipmentItem[]>({
+    queryKey: ["/api/shipments", selectedShipmentId, "items"],
+    enabled: !!selectedShipmentId && isDialogOpen,
+  });
+
+  const supplierIds = new Set(
+    shipmentItems?.map((item) => item.supplierId).filter((id): id is number => !!id) ?? [],
+  );
+
+  const hasSupplierAttribution = supplierIds.size > 0;
+  const autoSupplierId = supplierIds.size === 1 ? Array.from(supplierIds)[0] : null;
+
+  useEffect(() => {
+    if (!isDialogOpen) return;
+    if (autoSupplierId) {
+      setSupplierId(autoSupplierId);
+      return;
+    }
+    if (hasSupplierAttribution && supplierId) {
+      return;
+    }
+    setSupplierId(null);
+  }, [autoSupplierId, hasSupplierAttribution, isDialogOpen, selectedShipmentId, supplierId]);
+
   useEffect(() => {
     setClientValidationError(null);
-  }, [selectedShipmentId, paymentCurrency, invoiceSummary?.paymentAllowance?.remainingAllowedEgp]);
+  }, [
+    selectedShipmentId,
+    paymentCurrency,
+    supplierId,
+    invoiceSummary?.paymentAllowance?.remainingAllowedEgp,
+  ]);
 
   const createMutation = useMutation({
     mutationFn: async (data: InsertShipmentPayment) => {
@@ -216,6 +262,36 @@ export default function Payments() {
 
     if (!selectedShipmentId) {
       toast({ title: "يرجى اختيار الشحنة", variant: "destructive" });
+      return;
+    }
+
+    let latestShipmentItems = shipmentItems;
+    if (!latestShipmentItems && selectedShipmentId) {
+      try {
+        latestShipmentItems = await queryClient.ensureQueryData<ShipmentItem[]>([
+          "/api/shipments",
+          selectedShipmentId,
+          "items",
+        ]);
+      } catch (error) {
+        toast({
+          title: "تعذر التحقق من المورد",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    const shipmentSupplierIds = new Set(
+      latestShipmentItems
+        ?.map((item) => item.supplierId)
+        .filter((id): id is number => !!id) ?? [],
+    );
+
+    if (shipmentSupplierIds.size > 0 && !supplierId) {
+      const message = "يرجى اختيار المورد لهذه الشحنة";
+      setClientValidationError(message);
+      toast({ title: message, variant: "destructive" });
       return;
     }
 
@@ -479,21 +555,57 @@ export default function Payments() {
 
               <div className="space-y-2">
                 <Label>المورد</Label>
-                <Select 
-                  value={supplierId?.toString() || ""} 
-                  onValueChange={(v) => setSupplierId(v ? parseInt(v) : null)}
-                >
-                  <SelectTrigger data-testid="select-supplier">
-                    <SelectValue placeholder="اختر المورد…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {suppliers?.map((supplier: any) => (
-                      <SelectItem key={supplier.id} value={supplier.id.toString()}>
-                        {supplier.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover open={supplierPopoverOpen} onOpenChange={setSupplierPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={supplierPopoverOpen}
+                      className="w-full justify-between"
+                      data-testid="select-supplier"
+                    >
+                      {supplierId
+                        ? suppliers?.find((supplier: any) => supplier.id === supplierId)?.name
+                        : "اختر المورد…"}
+                      <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-full p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="ابحث عن المورد..." />
+                      <CommandList>
+                        <CommandEmpty>
+                          {loadingSuppliers ? "جاري التحميل..." : "لا يوجد مورد مطابق"}
+                        </CommandEmpty>
+                        <CommandGroup>
+                          {suppliers?.map((supplier: any) => (
+                            <CommandItem
+                              key={supplier.id}
+                              value={supplier.name}
+                              onSelect={() => {
+                                setSupplierId(supplier.id);
+                                setSupplierPopoverOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "ml-2 h-4 w-4",
+                                  supplierId === supplier.id ? "opacity-100" : "opacity-0",
+                                )}
+                              />
+                              {supplier.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {hasSupplierAttribution && (
+                  <p className="text-xs text-muted-foreground">
+                    اختيار المورد مطلوب لهذه الشحنة.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
