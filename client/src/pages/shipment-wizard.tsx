@@ -541,6 +541,7 @@ export default function ShipmentWizard() {
               totalCustomsCostEgp={totalCustomsCostEgp}
               totalTakhreegCostEgp={totalTakhreegCostEgp}
               finalTotalCostEgp={finalTotalCostEgp}
+              purchaseRate={purchaseRate}
             />
           )}
         </div>
@@ -1449,6 +1450,7 @@ function Step4Summary({
   totalCustomsCostEgp,
   totalTakhreegCostEgp,
   finalTotalCostEgp,
+  purchaseRate,
 }: {
   shipmentData: { shipmentCode: string; shipmentName: string; purchaseDate: string; status: string };
   items: Partial<ShipmentItem>[];
@@ -1464,6 +1466,7 @@ function Step4Summary({
   totalCustomsCostEgp: number;
   totalTakhreegCostEgp: number;
   finalTotalCostEgp: number;
+  purchaseRate: number;
 }) {
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("ar-EG", {
@@ -1577,11 +1580,32 @@ function Step4Summary({
             egpValue={`${formatCurrency(totalTakhreegCostEgp)} ج.م`}
           />
           <hr className="border-border my-4" />
-          <div className="flex items-center justify-between p-4 bg-primary/10 rounded-md">
-            <span className="text-xl font-bold">إجمالي تكلفة الشحنة</span>
-            <span className="text-2xl font-bold text-primary">
-              {formatCurrency(finalTotalCostEgp)} ج.م
-            </span>
+          
+          {/* RMB Total */}
+          <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-md">
+            <div className="flex items-start justify-between">
+              <span className="text-lg font-bold">الإجمالي بالرممبي</span>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                  ¥ {formatCurrency(discountedPurchaseCostEgp / purchaseRate + commissionRmb + shippingCostRmb)}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  ≈ {formatCurrency((discountedPurchaseCostEgp / purchaseRate + commissionRmb + shippingCostRmb) * purchaseRate)} ج.م
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          {/* EGP Total */}
+          <div className="p-4 bg-green-50 dark:bg-green-950/30 rounded-md">
+            <div className="flex items-start justify-between">
+              <span className="text-lg font-bold">الإجمالي بالمصري</span>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                  {formatCurrency(totalCustomsCostEgp + totalTakhreegCostEgp)} ج.م
+                </div>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
