@@ -601,14 +601,6 @@ export default function Payments() {
                     </Command>
                   </PopoverContent>
                 </Popover>
-                {hasSupplierAttribution && (
-                  <p className="text-xs text-muted-foreground">
-                    اختيار المورد مطلوب لهذه الشحنة.
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  يشمل الموردين المخفيين لأغراض المحاسبة.
-                </p>
               </div>
 
               <div className="space-y-2">
