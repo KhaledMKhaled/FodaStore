@@ -352,9 +352,9 @@ export default function Suppliers() {
                     data-testid={`button-toggle-hidden-supplier-${supplier.id}`}
                   >
                     {supplier.isHidden ? (
-                      <Eye className="w-4 h-4" />
+                      <Eye className="w-4 h-4 text-red-600 dark:text-red-400" />
                     ) : (
-                      <EyeOff className="w-4 h-4" />
+                      <EyeOff className="w-4 h-4 text-green-600 dark:text-green-400" />
                     )}
                   </Button>
                   <Button
