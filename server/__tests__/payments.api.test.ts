@@ -25,6 +25,8 @@ test("POST /api/payments writes an audit log entry", async () => {
       createdAt: new Date("2024-02-02"),
       updatedAt: new Date("2024-02-02"),
     })),
+    getShipmentSuppliers: mock.fn(async () => []),
+    getSupplier: mock.fn(async (id) => ({ id })),
   };
 
   const auditLogger = mock.fn();
@@ -84,6 +86,12 @@ test("POST /api/payments writes an audit log entry", async () => {
   assert.equal(auditEvent.userId, actor.id);
   assert.deepEqual(auditEvent.details, {
     shipmentId: payload.shipmentId,
+    supplierId: null,
+    supplierRule: {
+      shipmentSuppliers: [],
+      required: false,
+      defaulted: false,
+    },
     amount: payload.amountEgp,
     currency: payload.paymentCurrency,
     method: payload.paymentMethod,
@@ -120,9 +128,17 @@ const baseBody = {
   paymentMethod: "نقدي",
 };
 
-function createHandler(overrides: { createPayment?: (...args: any[]) => any } = {}) {
+function createHandler(
+  overrides: {
+    createPayment?: (...args: any[]) => any;
+    getShipmentSuppliers?: (...args: any[]) => any;
+    getSupplier?: (...args: any[]) => any;
+  } = {},
+) {
   const storage = {
     createPayment: overrides.createPayment || (async () => ({ id: 99 })),
+    getShipmentSuppliers: overrides.getShipmentSuppliers || (async () => []),
+    getSupplier: overrides.getSupplier || (async (id: number) => ({ id })),
   } as any;
 
   const handler = createPaymentHandler({ storage, logAuditEvent: () => {} });

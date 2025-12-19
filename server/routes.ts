@@ -62,7 +62,7 @@ type RouteDependencies = {
 };
 
 type CreatePaymentHandlerDeps = {
-  storage: Pick<IStorage, "createPayment">;
+  storage: Pick<IStorage, "createPayment" | "getSupplier" | "getShipmentSuppliers">;
   logAuditEvent: (event: Parameters<typeof logAuditEvent>[0]) => void;
 };
 
@@ -71,6 +71,39 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
     try {
       const { shipmentId, supplierId, paymentDate, paymentCurrency, amountOriginal, exchangeRateToEgp, costComponent, paymentMethod, cashReceiverName, referenceNumber, notes } = req.body;
       const actorId = (req.user as any)?.id;
+      const shipmentSuppliers = await deps.storage.getShipmentSuppliers(shipmentId);
+      const shipmentSuppliersCount = shipmentSuppliers.length;
+      const shouldRequireSupplier = shipmentSuppliersCount > 0;
+      const shouldDefaultSupplier = !supplierId && shipmentSuppliersCount === 1;
+      const resolvedSupplierId = shouldDefaultSupplier ? shipmentSuppliers[0] : supplierId;
+
+      if (shouldRequireSupplier && !resolvedSupplierId) {
+        return res.status(400).json({
+          error: {
+            code: "SUPPLIER_REQUIRED",
+            message: "يجب تحديد المورد المرتبط بهذه الشحنة.",
+            details: { field: "supplierId", shipmentSuppliers },
+          },
+        });
+      }
+
+      if (
+        resolvedSupplierId &&
+        shouldRequireSupplier &&
+        !shipmentSuppliers.includes(resolvedSupplierId)
+      ) {
+        return res.status(400).json({
+          error: {
+            code: "SUPPLIER_MISMATCH",
+            message: "المورد المحدد لا يطابق موردي الشحنة.",
+            details: {
+              field: "supplierId",
+              supplierId: resolvedSupplierId,
+              shipmentSuppliers,
+            },
+          },
+        });
+      }
 
       // Validate payment date
       const parsedDate = new Date(paymentDate);
@@ -120,14 +153,14 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
       }
 
       // Validate supplierId if provided
-      if (supplierId) {
-        const supplier = await (deps.storage as any).getSupplier?.(supplierId);
+      if (resolvedSupplierId) {
+        const supplier = await deps.storage.getSupplier(resolvedSupplierId);
         if (!supplier) {
           return res.status(400).json({
             error: {
               code: "SUPPLIER_NOT_FOUND",
               message: "المورد المحدد غير موجود",
-              details: { field: "supplierId", supplierId },
+              details: { field: "supplierId", supplierId: resolvedSupplierId },
             },
           });
         }
@@ -142,7 +175,7 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
 
       const payment = await deps.storage.createPayment({
         shipmentId,
-        supplierId: supplierId || null,
+        supplierId: resolvedSupplierId || null,
         paymentDate: parsedDate,
         paymentCurrency,
         amountOriginal: amountOriginal.toString(),
@@ -163,7 +196,12 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         actionType: "CREATE",
         details: {
           shipmentId,
-          supplierId: supplierId || null,
+          supplierId: resolvedSupplierId || null,
+          supplierRule: {
+            shipmentSuppliers,
+            required: shouldRequireSupplier,
+            defaulted: shouldDefaultSupplier,
+          },
           amount: normalizedAmounts.amountEgp.toString(),
           currency: paymentCurrency,
           method: paymentMethod,

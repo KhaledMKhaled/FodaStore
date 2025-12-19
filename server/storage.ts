@@ -270,6 +270,7 @@ export interface IStorage {
 
   // Shipment Items
   getShipmentItems(shipmentId: number): Promise<ShipmentItem[]>;
+  getShipmentSuppliers(shipmentId: number): Promise<number[]>;
   createShipmentItem(data: InsertShipmentItem): Promise<ShipmentItem>;
   updateShipmentItem(id: number, data: Partial<InsertShipmentItem>): Promise<ShipmentItem | undefined>;
   deleteShipmentItem(id: number): Promise<boolean>;
@@ -597,6 +598,21 @@ export class DatabaseStorage implements IStorage {
   // Shipment Items
   async getShipmentItems(shipmentId: number): Promise<ShipmentItem[]> {
     return db.select().from(shipmentItems).where(eq(shipmentItems.shipmentId, shipmentId));
+  }
+
+  async getShipmentSuppliers(shipmentId: number): Promise<number[]> {
+    const rows = await db
+      .select({ supplierId: shipmentItems.supplierId })
+      .from(shipmentItems)
+      .where(eq(shipmentItems.shipmentId, shipmentId));
+
+    return Array.from(
+      new Set(
+        rows
+          .map((row) => row.supplierId)
+          .filter((supplierId): supplierId is number => typeof supplierId === "number"),
+      ),
+    );
   }
 
   async createShipmentItem(data: InsertShipmentItem): Promise<ShipmentItem> {
