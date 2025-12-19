@@ -48,6 +48,7 @@ export const suppliers = pgTable("suppliers", {
   email: varchar("email", { length: 255 }),
   address: text("address"),
   isActive: boolean("is_active").default(true).notNull(),
+  isHidden: boolean("is_hidden").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

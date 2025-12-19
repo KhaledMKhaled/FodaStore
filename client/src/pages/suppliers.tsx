@@ -10,6 +10,8 @@ import {
   Mail,
   MapPin,
   Building,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +78,19 @@ export default function Suppliers() {
     },
     onSuccess: () => {
       toast({ title: "تم حذف المورد بنجاح" });
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+    },
+    onError: () => {
+      toast({ title: "حدث خطأ", variant: "destructive" });
+    },
+  });
+
+  const toggleHiddenMutation = useMutation({
+    mutationFn: async ({ id, isHidden }: { id: number; isHidden: boolean }) => {
+      return apiRequest("PATCH", `/api/suppliers/${id}`, { isHidden });
+    },
+    onSuccess: (_, { isHidden }) => {
+      toast({ title: isHidden ? "تم إخفاء المورد" : "تم إظهار المورد" });
       queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
     },
     onError: () => {
@@ -323,6 +338,24 @@ export default function Suppliers() {
                   >
                     <Edit className="w-4 h-4 ml-1" />
                     تعديل
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      toggleHiddenMutation.mutate({
+                        id: supplier.id,
+                        isHidden: !supplier.isHidden,
+                      })
+                    }
+                    disabled={toggleHiddenMutation.isPending}
+                    data-testid={`button-toggle-hidden-supplier-${supplier.id}`}
+                  >
+                    {supplier.isHidden ? (
+                      <Eye className="w-4 h-4" />
+                    ) : (
+                      <EyeOff className="w-4 h-4" />
+                    )}
                   </Button>
                   <Button
                     variant="outline"

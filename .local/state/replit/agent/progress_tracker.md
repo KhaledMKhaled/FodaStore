@@ -57,3 +57,35 @@ All 6 cost components fully integrated and operational.
 
 [x] 24. Final migration to Replit environment - npm install completed
 [x] 25. Workflow restarted and verified running on port 5000
+[x] 26. Add supplier hide feature:
+     - Added isHidden boolean field to suppliers table
+     - Implemented toggle mutation for hide/show functionality
+     - Added Eye/EyeOff icons for visibility toggle in supplier cards
+     - Filtered hidden suppliers from shipment wizard dropdown
+     - Database schema pushed successfully
+     - Application running and tested on port 5000
+
+════════════════════════════════════════════════════════════════════
+NEW FEATURE IMPLEMENTED: SUPPLIER HIDE/SHOW
+════════════════════════════════════════════════════════════════════
+
+✅ Supplier Visibility Control - FULLY OPERATIONAL
+
+Changes Made:
+✓ Added isHidden boolean column to suppliers table
+✓ UI: Eye/EyeOff icon button in supplier card for toggle
+✓ Functionality: Click icon to hide/show supplier
+✓ Visibility Filtering:
+  - Hidden suppliers DO NOT appear in shipment wizard dropdown
+  - Hidden suppliers remain FULLY ACTIVE for all operations
+  - Payment processing works normally on hidden suppliers
+  - All CRUD operations continue to work seamlessly
+
+Key Features:
+- Hiding is UI-only: hidden suppliers still appear in all ledgers/accounting
+- Hidden suppliers can still receive payments normally
+- Complete backwards compatibility maintained
+- No data loss or modification to existing suppliers
+
+Status: Feature complete and tested ✓
+All suppliers management features operational.
