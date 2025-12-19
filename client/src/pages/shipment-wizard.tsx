@@ -1551,7 +1551,7 @@ function Step4Summary({
               />
               <CostRow
                 label="بعد الخصم"
-                rmbValue="-"
+                rmbValue={`¥ ${formatCurrency(totalPurchaseCostRmb - partialDiscountRmb)}`}
                 egpValue={`${formatCurrency(discountedPurchaseCostEgp)} ج.م`}
               />
             </>
