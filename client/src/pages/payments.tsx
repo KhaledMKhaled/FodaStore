@@ -1239,15 +1239,22 @@ export default function Payments() {
 
                                               {/* Last payment date column (aligns with آخر سداد) */}
                                               <div className="w-20 px-2 text-center">
-                                                {payment.cashReceiverName && (
+                                                {payment.partyType === "supplier" && payment.partyId ? (
+                                                  <div className="text-xs font-medium truncate">
+                                                    {suppliers?.find(s => s.id === payment.partyId)?.name?.substring(0, 8) || "مورد"}
+                                                  </div>
+                                                ) : payment.partyType === "shipping_company" && payment.partyId ? (
+                                                  <div className="text-xs font-medium truncate">
+                                                    {shippingCompanies?.find(c => c.id === payment.partyId)?.name?.substring(0, 8) || "شحن"}
+                                                  </div>
+                                                ) : payment.cashReceiverName ? (
                                                   <div className="flex items-center justify-center gap-1 text-xs">
                                                     <User className="w-3 h-3" />
                                                     <span>{payment.cashReceiverName.substring(0, 6)}</span>
                                                   </div>
-                                                )}
-                                                {payment.referenceNumber && (
+                                                ) : payment.referenceNumber ? (
                                                   <div className="text-xs text-muted-foreground">{payment.referenceNumber.substring(0, 8)}</div>
-                                                )}
+                                                ) : null}
                                               </div>
 
                                               {/* Actions column (aligns with إجراءات) */}
@@ -1477,7 +1484,17 @@ export default function Payments() {
                             <Badge variant="outline">{payment.paymentMethod}</Badge>
                           </TableCell>
                           <TableCell>
-                            {payment.paymentMethod === "نقدي" ? (
+                            {payment.partyType === "supplier" && payment.partyId ? (
+                              <div className="flex items-center gap-1">
+                                <Building2 className="w-3 h-3" />
+                                {suppliers?.find(s => s.id === payment.partyId)?.name || "مورد"}
+                              </div>
+                            ) : payment.partyType === "shipping_company" && payment.partyId ? (
+                              <div className="flex items-center gap-1">
+                                <Building2 className="w-3 h-3" />
+                                {shippingCompanies?.find(c => c.id === payment.partyId)?.name || "شحن"}
+                              </div>
+                            ) : payment.paymentMethod === "نقدي" ? (
                               <div className="flex items-center gap-1">
                                 <User className="w-3 h-3" />
                                 {payment.cashReceiverName}
