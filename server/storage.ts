@@ -53,6 +53,132 @@ const parseAmount = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const PURCHASE_COST_COMPONENT = "تكلفة البضاعة";
+const SHIPPING_COST_COMPONENTS = new Set(["الشحن", "العمولة", "الجمرك", "التخريج"]);
+
+const getShipmentPurchaseCostEgp = (shipment: Shipment, items: ShipmentItem[]): number => {
+  const purchaseCostEgp = parseAmount(shipment.purchaseCostEgp);
+  if (purchaseCostEgp > 0) return purchaseCostEgp;
+
+  const purchaseCostRmb = parseAmount(shipment.purchaseCostRmb);
+  const rate = parseAmount(shipment.purchaseRmbToEgpRate);
+  if (purchaseCostRmb > 0 && rate > 0) return purchaseCostRmb * rate;
+
+  if (rate > 0) {
+    const itemsRmb = items.reduce(
+      (sum, item) => sum + parseAmount(item.totalPurchaseCostRmb),
+      0
+    );
+    if (itemsRmb > 0) return itemsRmb * rate;
+  }
+
+  return 0;
+};
+
+const getShipmentShippingCompanyCostEgp = (shipment: Shipment): number => {
+  return (
+    parseAmount(shipment.shippingCostEgp) +
+    parseAmount(shipment.commissionCostEgp) +
+    parseAmount(shipment.customsCostEgp) +
+    parseAmount(shipment.takhreegCostEgp)
+  );
+};
+
+const buildShipmentSupplierMaps = (
+  shipments: Shipment[],
+  itemsByShipment: ShipmentItem[][]
+) => {
+  const shipmentItemSuppliersMap = new Map<number, Set<number>>();
+  const shipmentAnySuppliersMap = new Map<number, Set<number>>();
+  const shipmentShippingCompanyMap = new Map<number, number | undefined>();
+  const purchaseCostByShipmentSupplierMap = new Map<number, Map<number, number>>();
+
+  shipments.forEach((shipment, index) => {
+    const items = itemsByShipment[index] ?? [];
+    const supplierTotalsRmb = new Map<number, number>();
+
+    for (const item of items) {
+      if (!item.supplierId) continue;
+      const current = supplierTotalsRmb.get(item.supplierId) ?? 0;
+      supplierTotalsRmb.set(item.supplierId, current + parseAmount(item.totalPurchaseCostRmb));
+    }
+
+    const itemSuppliers = new Set<number>(supplierTotalsRmb.keys());
+    const shippingCompanySupplierId = shipment.shippingCompanySupplierId ?? undefined;
+    const anySuppliers = new Set<number>(itemSuppliers);
+    if (shippingCompanySupplierId) {
+      anySuppliers.add(shippingCompanySupplierId);
+    }
+
+    const purchaseCostEgp = getShipmentPurchaseCostEgp(shipment, items);
+    const totalRmb = Array.from(supplierTotalsRmb.values()).reduce((sum, val) => sum + val, 0);
+    const purchaseCostMap = new Map<number, number>();
+    if (purchaseCostEgp > 0 && itemSuppliers.size > 0) {
+      if (totalRmb > 0) {
+        supplierTotalsRmb.forEach((rmbAmount, supplierId) => {
+          purchaseCostMap.set(supplierId, purchaseCostEgp * (rmbAmount / totalRmb));
+        });
+      } else {
+        const share = purchaseCostEgp / itemSuppliers.size;
+        itemSuppliers.forEach((supplierId) => {
+          purchaseCostMap.set(supplierId, share);
+        });
+      }
+    }
+
+    shipmentItemSuppliersMap.set(shipment.id, itemSuppliers);
+    shipmentAnySuppliersMap.set(shipment.id, anySuppliers);
+    shipmentShippingCompanyMap.set(shipment.id, shippingCompanySupplierId);
+    purchaseCostByShipmentSupplierMap.set(shipment.id, purchaseCostMap);
+  });
+
+  return {
+    shipmentItemSuppliersMap,
+    shipmentAnySuppliersMap,
+    shipmentShippingCompanyMap,
+    purchaseCostByShipmentSupplierMap,
+  };
+};
+
+const paymentMatchesSupplier = (
+  payment: ShipmentPayment,
+  supplierId: number,
+  shipmentItemSuppliersMap: Map<number, Set<number>>,
+  shipmentShippingCompanyMap: Map<number, number | undefined>
+) => {
+  if (payment.supplierId !== null && payment.supplierId !== undefined) {
+    return payment.supplierId === supplierId;
+  }
+
+  const itemSuppliers = shipmentItemSuppliersMap.get(payment.shipmentId) ?? new Set<number>();
+  const shippingCompanySupplierId = shipmentShippingCompanyMap.get(payment.shipmentId);
+
+  if (payment.costComponent && SHIPPING_COST_COMPONENTS.has(payment.costComponent)) {
+    return shippingCompanySupplierId === supplierId;
+  }
+
+  if (payment.costComponent === PURCHASE_COST_COMPONENT) {
+    return itemSuppliers.has(supplierId);
+  }
+
+  return itemSuppliers.has(supplierId) || shippingCompanySupplierId === supplierId;
+};
+
+const getSupplierShipmentCost = (
+  shipment: Shipment,
+  supplierId: number,
+  purchaseCostByShipmentSupplierMap: Map<number, Map<number, number>>,
+  shipmentShippingCompanyMap: Map<number, number | undefined>
+) => {
+  const purchaseCost =
+    purchaseCostByShipmentSupplierMap.get(shipment.id)?.get(supplierId) ?? 0;
+  const shippingCompanySupplierId = shipmentShippingCompanyMap.get(shipment.id);
+  const shippingCost =
+    shippingCompanySupplierId === supplierId ? getShipmentShippingCompanyCostEgp(shipment) : 0;
+
+  return roundAmount(purchaseCost + shippingCost);
+};
+
 const computeKnownTotal = (shipment: Shipment): number => {
   const purchase = parseAmount(shipment.purchaseCostEgp);
   const commission = parseAmount(shipment.commissionCostEgp);
@@ -1254,13 +1380,11 @@ export class DatabaseStorage implements IStorage {
       allShipments.map(s => this.getShipmentItems(s.id))
     );
 
-    const shipmentSuppliersMap = new Map<number, Set<number>>();
-    allItems.flat().forEach(item => {
-      if (!item.supplierId) return;
-      const existing = shipmentSuppliersMap.get(item.shipmentId) ?? new Set<number>();
-      existing.add(item.supplierId);
-      shipmentSuppliersMap.set(item.shipmentId, existing);
-    });
+    const {
+      shipmentItemSuppliersMap,
+      shipmentAnySuppliersMap,
+      shipmentShippingCompanyMap,
+    } = buildShipmentSupplierMaps(allShipments, allItems);
 
     let filteredShipments = allShipments;
     
@@ -1298,7 +1422,7 @@ export class DatabaseStorage implements IStorage {
 
     if (filters?.supplierId) {
       const shipmentIdsWithSupplier = new Set<number>();
-      shipmentSuppliersMap.forEach((suppliers, shipmentId) => {
+      shipmentAnySuppliersMap.forEach((suppliers, shipmentId) => {
         if (suppliers.has(filters.supplierId!)) {
           shipmentIdsWithSupplier.add(shipmentId);
         }
@@ -1322,10 +1446,12 @@ export class DatabaseStorage implements IStorage {
     const filteredPayments = allPayments.filter(p => {
       if (!baseFilteredShipmentIds.has(p.shipmentId)) return false;
       if (filters?.supplierId) {
-        if (p.supplierId !== null && p.supplierId !== undefined) {
-          return p.supplierId === filters.supplierId;
-        }
-        return shipmentSuppliersMap.get(p.shipmentId)?.has(filters.supplierId) ?? false;
+        return paymentMatchesSupplier(
+          p,
+          filters.supplierId,
+          shipmentItemSuppliersMap,
+          shipmentShippingCompanyMap
+        );
       }
       return filteredShipmentIds.has(p.shipmentId);
     });
@@ -1480,13 +1606,12 @@ export class DatabaseStorage implements IStorage {
       allShipments.map(s => this.getShipmentItems(s.id))
     );
 
-    const shipmentSuppliersMap = new Map<number, Set<number>>();
-    allItems.flat().forEach(item => {
-      if (!item.supplierId) return;
-      const existing = shipmentSuppliersMap.get(item.shipmentId) ?? new Set<number>();
-      existing.add(item.supplierId);
-      shipmentSuppliersMap.set(item.shipmentId, existing);
-    });
+    const {
+      shipmentItemSuppliersMap,
+      shipmentAnySuppliersMap,
+      shipmentShippingCompanyMap,
+      purchaseCostByShipmentSupplierMap,
+    } = buildShipmentSupplierMaps(allShipments, allItems);
 
     const result: Array<{
       supplierId: number;
@@ -1500,14 +1625,10 @@ export class DatabaseStorage implements IStorage {
     for (const supplier of allSuppliers) {
       if (filters?.supplierId && supplier.id !== filters.supplierId) continue;
 
-      const supplierShipmentIds = new Set<number>();
-      shipmentSuppliersMap.forEach((suppliers, shipmentId) => {
-        if (suppliers.has(supplier.id)) {
-          supplierShipmentIds.add(shipmentId);
-        }
+      let supplierShipments = allShipments.filter(s => {
+        const anySuppliers = shipmentAnySuppliersMap.get(s.id);
+        return anySuppliers?.has(supplier.id);
       });
-
-      let supplierShipments = allShipments.filter(s => supplierShipmentIds.has(s.id));
 
       if (filters?.dateFrom) {
         const fromDate = new Date(filters.dateFrom);
@@ -1527,15 +1648,23 @@ export class DatabaseStorage implements IStorage {
 
       const supplierShipmentIdsFiltered = new Set(supplierShipments.map(s => s.id));
       const supplierPayments = allPayments.filter(p => {
-        if (p.supplierId !== null && p.supplierId !== undefined) {
-          return p.supplierId === supplier.id;
-        }
-        return supplierShipmentIdsFiltered.has(p.shipmentId);
+        if (!supplierShipmentIdsFiltered.has(p.shipmentId)) return false;
+        return paymentMatchesSupplier(
+          p,
+          supplier.id,
+          shipmentItemSuppliersMap,
+          shipmentShippingCompanyMap
+        );
       });
 
-      const totalCost = supplierShipments.reduce(
-        (sum, s) => sum + parseFloat(s.finalTotalCostEgp || "0"), 0
-      );
+      const totalCost = supplierShipments.reduce((sum, s) => {
+        return sum + getSupplierShipmentCost(
+          s,
+          supplier.id,
+          purchaseCostByShipmentSupplierMap,
+          shipmentShippingCompanyMap
+        );
+      }, 0);
       const totalPaid = supplierPayments.reduce(
         (sum, p) => sum + parseFloat(p.amountEgp || "0"), 0
       );
@@ -1579,19 +1708,24 @@ export class DatabaseStorage implements IStorage {
       allShipments.map(s => this.getShipmentItems(s.id))
     );
 
-    const supplierShipmentIds = new Set<number>();
-    allItems.flat().forEach(item => {
-      if (item.supplierId === supplierId) {
-        supplierShipmentIds.add(item.shipmentId);
-      }
-    });
+    const {
+      shipmentItemSuppliersMap,
+      shipmentAnySuppliersMap,
+      shipmentShippingCompanyMap,
+      purchaseCostByShipmentSupplierMap,
+    } = buildShipmentSupplierMaps(allShipments, allItems);
 
-    let supplierShipments = allShipments.filter(s => supplierShipmentIds.has(s.id));
+    let supplierShipments = allShipments.filter(s => {
+      const suppliers = shipmentAnySuppliersMap.get(s.id);
+      return suppliers?.has(supplierId);
+    });
     let supplierPayments = allPayments.filter(p => {
-      if (p.supplierId !== null && p.supplierId !== undefined) {
-        return p.supplierId === supplierId;
-      }
-      return supplierShipmentIds.has(p.shipmentId);
+      return paymentMatchesSupplier(
+        p,
+        supplierId,
+        shipmentItemSuppliersMap,
+        shipmentShippingCompanyMap
+      );
     });
 
     if (filters?.dateFrom) {
@@ -1623,12 +1757,19 @@ export class DatabaseStorage implements IStorage {
     }> = [];
 
     supplierShipments.forEach(s => {
+      const cost = getSupplierShipmentCost(
+        s,
+        supplierId,
+        purchaseCostByShipmentSupplierMap,
+        shipmentShippingCompanyMap
+      );
+      if (cost <= 0) return;
       movements.push({
         date: s.purchaseDate || s.createdAt || new Date(),
         type: 'shipment',
         description: `شحنة: ${s.shipmentName}`,
         shipmentCode: s.shipmentCode,
-        costEgp: s.finalTotalCostEgp || "0",
+        costEgp: cost.toFixed(2),
         runningBalance: "0",
       });
     });
@@ -1683,13 +1824,11 @@ export class DatabaseStorage implements IStorage {
 
     const supplierMap = new Map(allSuppliers.map(s => [s.id, s.name]));
     const userMap = new Map(allUsers.map(u => [u.id, u.firstName || u.username]));
-    const shipmentSuppliersMap = new Map<number, Set<number>>();
-    allItems.flat().forEach(item => {
-      if (!item.supplierId) return;
-      const existing = shipmentSuppliersMap.get(item.shipmentId) ?? new Set<number>();
-      existing.add(item.supplierId);
-      shipmentSuppliersMap.set(item.shipmentId, existing);
-    });
+    const {
+      shipmentItemSuppliersMap,
+      shipmentAnySuppliersMap,
+      shipmentShippingCompanyMap,
+    } = buildShipmentSupplierMaps(allShipments, allItems);
 
     let filteredShipments = allShipments;
     
@@ -1725,7 +1864,7 @@ export class DatabaseStorage implements IStorage {
 
     if (filters?.supplierId) {
       const shipmentIdsWithSupplier = new Set<number>();
-      shipmentSuppliersMap.forEach((suppliers, shipmentId) => {
+      shipmentAnySuppliersMap.forEach((suppliers, shipmentId) => {
         if (suppliers.has(filters.supplierId!)) {
           shipmentIdsWithSupplier.add(shipmentId);
         }
@@ -1770,15 +1909,19 @@ export class DatabaseStorage implements IStorage {
     });
 
     for (const s of filteredShipments) {
-      const supplierId = shipmentSupplierMap.get(s.id);
-      const supplierName = supplierId ? supplierMap.get(supplierId) : undefined;
+      const purchaseSupplierId = shipmentSupplierMap.get(s.id);
+      const purchaseSupplierName = purchaseSupplierId ? supplierMap.get(purchaseSupplierId) : undefined;
+      const shippingCompanySupplierId = shipmentShippingCompanyMap.get(s.id) ?? purchaseSupplierId;
+      const shippingCompanySupplierName = shippingCompanySupplierId
+        ? supplierMap.get(shippingCompanySupplierId)
+        : undefined;
 
       const costTypes = [
-        { type: "تكلفة بضاعة", rmb: s.purchaseCostRmb, egp: s.purchaseCostEgp },
-        { type: "تكلفة شحن", rmb: s.shippingCostRmb, egp: s.shippingCostEgp },
-        { type: "عمولة", rmb: s.commissionCostRmb, egp: s.commissionCostEgp },
-        { type: "جمرك", rmb: null, egp: s.customsCostEgp },
-        { type: "تخريج", rmb: null, egp: s.takhreegCostEgp },
+        { type: "تكلفة بضاعة", rmb: s.purchaseCostRmb, egp: s.purchaseCostEgp, supplierId: purchaseSupplierId, supplierName: purchaseSupplierName },
+        { type: "تكلفة شحن", rmb: s.shippingCostRmb, egp: s.shippingCostEgp, supplierId: shippingCompanySupplierId, supplierName: shippingCompanySupplierName },
+        { type: "عمولة", rmb: s.commissionCostRmb, egp: s.commissionCostEgp, supplierId: shippingCompanySupplierId, supplierName: shippingCompanySupplierName },
+        { type: "جمرك", rmb: null, egp: s.customsCostEgp, supplierId: shippingCompanySupplierId, supplierName: shippingCompanySupplierName },
+        { type: "تخريج", rmb: null, egp: s.takhreegCostEgp, supplierId: shippingCompanySupplierId, supplierName: shippingCompanySupplierName },
       ];
 
       for (const ct of costTypes) {
@@ -1793,8 +1936,8 @@ export class DatabaseStorage implements IStorage {
           date: s.purchaseDate || s.createdAt || new Date(),
           shipmentCode: s.shipmentCode,
           shipmentName: s.shipmentName,
-          supplierName,
-          supplierId,
+          supplierName: ct.supplierName,
+          supplierId: ct.supplierId,
           movementType: ct.type,
           originalCurrency: ct.rmb ? "RMB" : "EGP",
           amountOriginal: ct.rmb || ct.egp || "0",
@@ -1807,10 +1950,12 @@ export class DatabaseStorage implements IStorage {
     let filteredPayments = allPayments.filter(p => {
       if (!baseFilteredShipmentIds.has(p.shipmentId)) return false;
       if (filters?.supplierId) {
-        if (p.supplierId !== null && p.supplierId !== undefined) {
-          return p.supplierId === filters.supplierId;
-        }
-        return shipmentSuppliersMap.get(p.shipmentId)?.has(filters.supplierId) ?? false;
+        return paymentMatchesSupplier(
+          p,
+          filters.supplierId,
+          shipmentItemSuppliersMap,
+          shipmentShippingCompanyMap
+        );
       }
       return filteredShipmentIds.has(p.shipmentId);
     });
@@ -1844,7 +1989,9 @@ export class DatabaseStorage implements IStorage {
       const supplierId =
         p.supplierId !== null && p.supplierId !== undefined
           ? p.supplierId
-          : shipmentSupplierMap.get(p.shipmentId);
+          : SHIPPING_COST_COMPONENTS.has(p.costComponent ?? "")
+            ? shipmentShippingCompanyMap.get(p.shipmentId)
+            : shipmentSupplierMap.get(p.shipmentId);
       const supplierName = supplierId ? supplierMap.get(supplierId) : undefined;
       const userName = p.createdByUserId ? userMap.get(p.createdByUserId) : undefined;
 
