@@ -1276,30 +1276,29 @@ export class DatabaseStorage implements IStorage {
       },
     );
 
+    const totalOutstanding = roundAmount(
+      supplierRows.reduce((sum, row) => sum + row.outstandingRmb, 0),
+      2,
+    );
+
+    const effectiveAmount = Math.min(Math.max(0, paymentAmountRmb), totalOutstanding);
+
     const allocationInputs: AllocationBasis[] = supplierRows.map((row) => ({
       supplierId: row.supplierId,
       totalAmount: row.goodsTotalRmb,
       remainingAmount: row.outstandingRmb,
     }));
 
-    const allocations = computeProportionalAllocations(
-      Math.max(0, paymentAmountRmb),
-      allocationInputs,
-    );
+    const allocations = computeProportionalAllocations(effectiveAmount, allocationInputs);
 
     const allocationMap = new Map<number, number>();
     allocations.forEach((allocation) => {
       allocationMap.set(allocation.supplierId, allocation.allocatedAmount);
     });
 
-    const totalOutstanding = roundAmount(
-      supplierRows.reduce((sum, row) => sum + row.outstandingRmb, 0),
-      2,
-    );
-
     return {
       shipmentId,
-      amountRmb: roundAmount(Math.max(0, paymentAmountRmb), 2),
+      amountRmb: roundAmount(effectiveAmount, 2),
       totalOutstandingRmb: totalOutstanding,
       suppliers: supplierRows.map((row) => ({
         supplierId: row.supplierId,
