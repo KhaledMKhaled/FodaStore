@@ -12,6 +12,7 @@ import {
   shipmentCustomsDetails,
   exchangeRates,
   shipmentPayments,
+  paymentAllocations,
   inventoryMovements,
   auditLogs,
   type User,
@@ -58,6 +59,148 @@ const parseAmount = (value: unknown): number => {
 
 const PURCHASE_COST_COMPONENT = "تكلفة البضاعة";
 const SHIPPING_COST_COMPONENTS = new Set(["الشحن", "العمولة", "الجمرك", "التخريج"]);
+
+type AllocationBasis = {
+  supplierId: number;
+  totalAmount: number;
+  remainingAmount: number;
+};
+
+type AllocationResult = {
+  supplierId: number;
+  allocatedAmount: number;
+};
+
+const computeProportionalAllocations = (
+  paymentAmount: number,
+  suppliers: AllocationBasis[],
+): AllocationResult[] => {
+  const normalizedSuppliers = suppliers.filter(
+    (supplier) => supplier.totalAmount > 0 && supplier.remainingAmount > 0,
+  );
+  const totalRemaining = normalizedSuppliers.reduce(
+    (sum, supplier) => sum + supplier.remainingAmount,
+    0,
+  );
+  const cappedPayment = Math.min(paymentAmount, totalRemaining);
+
+  if (cappedPayment <= 0 || normalizedSuppliers.length === 0) {
+    return [];
+  }
+
+  const remainingBySupplier = new Map<number, number>();
+  const totalBySupplier = new Map<number, number>();
+  const allocations = new Map<number, number>();
+
+  normalizedSuppliers.forEach((supplier) => {
+    remainingBySupplier.set(supplier.supplierId, supplier.remainingAmount);
+    totalBySupplier.set(supplier.supplierId, supplier.totalAmount);
+    allocations.set(supplier.supplierId, 0);
+  });
+
+  let remainingPayment = cappedPayment;
+  let eligibleSupplierIds = normalizedSuppliers.map((supplier) => supplier.supplierId);
+
+  while (remainingPayment > 0.0001 && eligibleSupplierIds.length > 0) {
+    const basisTotal = eligibleSupplierIds.reduce(
+      (sum, supplierId) => sum + (totalBySupplier.get(supplierId) ?? 0),
+      0,
+    );
+
+    if (basisTotal <= 0) {
+      break;
+    }
+
+    let allocatedThisRound = 0;
+
+    for (const supplierId of eligibleSupplierIds) {
+      const supplierBasis = totalBySupplier.get(supplierId) ?? 0;
+      const remainingSupplier = remainingBySupplier.get(supplierId) ?? 0;
+      if (remainingSupplier <= 0 || supplierBasis <= 0) continue;
+
+      const proportionalShare = (remainingPayment * supplierBasis) / basisTotal;
+      const allocation = Math.min(proportionalShare, remainingSupplier);
+
+      allocations.set(
+        supplierId,
+        (allocations.get(supplierId) ?? 0) + allocation,
+      );
+      remainingBySupplier.set(supplierId, remainingSupplier - allocation);
+      allocatedThisRound += allocation;
+    }
+
+    if (allocatedThisRound <= 0) {
+      break;
+    }
+
+    remainingPayment -= allocatedThisRound;
+    eligibleSupplierIds = eligibleSupplierIds.filter(
+      (supplierId) => (remainingBySupplier.get(supplierId) ?? 0) > 0.0001,
+    );
+  }
+
+  const roundedAllocations = Array.from(allocations.entries())
+    .filter(([, amount]) => amount > 0)
+    .map(([supplierId, amount]) => ({
+      supplierId,
+      allocatedAmount: roundAmount(amount, 2),
+    }));
+
+  const targetTotal = roundAmount(cappedPayment, 2);
+  const roundedTotal = roundAmount(
+    roundedAllocations.reduce((sum, allocation) => sum + allocation.allocatedAmount, 0),
+    2,
+  );
+  let delta = roundAmount(targetTotal - roundedTotal, 2);
+
+  if (Math.abs(delta) >= 0.01) {
+    const capacityMap = new Map<number, number>();
+    normalizedSuppliers.forEach((supplier) => {
+      capacityMap.set(supplier.supplierId, roundAmount(supplier.remainingAmount, 2));
+    });
+
+    while (Math.abs(delta) >= 0.01) {
+      const deltaCents = Math.round(delta * 100);
+      if (deltaCents === 0) break;
+
+      if (deltaCents > 0) {
+        const candidate = roundedAllocations
+          .map((allocation) => {
+            const cap = capacityMap.get(allocation.supplierId) ?? 0;
+            return { allocation, remaining: cap - allocation.allocatedAmount };
+          })
+          .filter((entry) => entry.remaining > 0)
+          .sort((a, b) => b.remaining - a.remaining)[0];
+
+        if (!candidate) break;
+        const adjustment = Math.min(deltaCents, Math.round(candidate.remaining * 100));
+        candidate.allocation.allocatedAmount = roundAmount(
+          candidate.allocation.allocatedAmount + adjustment / 100,
+          2,
+        );
+        delta = roundAmount(delta - adjustment / 100, 2);
+      } else {
+        const candidate = roundedAllocations
+          .filter((allocation) => allocation.allocatedAmount > 0)
+          .sort((a, b) => b.allocatedAmount - a.allocatedAmount)[0];
+
+        if (!candidate) break;
+        const adjustment = Math.min(
+          Math.abs(deltaCents),
+          Math.round(candidate.allocatedAmount * 100),
+        );
+        candidate.allocatedAmount = roundAmount(
+          candidate.allocatedAmount - adjustment / 100,
+          2,
+        );
+        delta = roundAmount(delta + adjustment / 100, 2);
+      }
+    }
+
+  }
+
+  return roundedAllocations.filter((allocation) => allocation.allocatedAmount > 0);
+};
 
 const getShipmentPurchaseCostEgp = (shipment: Shipment, items: ShipmentItem[]): number => {
   const purchaseCostEgp = parseAmount(shipment.purchaseCostEgp);
@@ -439,9 +582,8 @@ export interface IStorage {
   getShipmentPayments(shipmentId: number): Promise<ShipmentPayment[]>;
   createPayment(
     data: InsertShipmentPayment,
-    options?: { simulatePostInsertError?: boolean }
+    options?: { simulatePostInsertError?: boolean; autoAllocate?: boolean }
   ): Promise<ShipmentPayment>;
-  createPayment(data: InsertShipmentPayment): Promise<ShipmentPayment>;
   getPaymentAllowance(
     shipmentId: number,
     options?: { shipment?: Shipment },
@@ -985,7 +1127,7 @@ export class DatabaseStorage implements IStorage {
 
   async createPayment(
     data: InsertShipmentPayment,
-    options?: { simulatePostInsertError?: boolean }
+    options?: { simulatePostInsertError?: boolean; autoAllocate?: boolean }
   ): Promise<ShipmentPayment> {
     return db.transaction(async (tx) => {
       const lockedShipment = await tx.execute(sql<Shipment>`SELECT * FROM shipments WHERE id = ${data.shipmentId} FOR UPDATE`);
@@ -1222,6 +1364,100 @@ export class DatabaseStorage implements IStorage {
         });
       }
 
+      let allocationPlan: AllocationResult[] | null = null;
+
+      if (options?.autoAllocate) {
+        if (data.partyType !== "shipping_company") {
+          throw new ApiError("AUTO_ALLOCATION_NOT_ELIGIBLE", undefined, 400, {
+            reason: "partyType",
+            expected: "shipping_company",
+            received: data.partyType,
+          });
+        }
+
+        if (data.costComponent !== PURCHASE_COST_COMPONENT) {
+          throw new ApiError("AUTO_ALLOCATION_NOT_ELIGIBLE", undefined, 400, {
+            reason: "costComponent",
+            expected: PURCHASE_COST_COMPONENT,
+            received: data.costComponent,
+          });
+        }
+
+        if (data.paymentCurrency !== "RMB") {
+          throw new ApiError("AUTO_ALLOCATION_NOT_ELIGIBLE", undefined, 400, {
+            reason: "paymentCurrency",
+            expected: "RMB",
+            received: data.paymentCurrency,
+          });
+        }
+
+        const items = await tx
+          .select({
+            supplierId: shipmentItems.supplierId,
+            totalPurchaseCostRmb: shipmentItems.totalPurchaseCostRmb,
+          })
+          .from(shipmentItems)
+          .where(eq(shipmentItems.shipmentId, data.shipmentId));
+
+        const supplierTotals = new Map<number, number>();
+        for (const item of items) {
+          if (!item.supplierId) continue;
+          const current = supplierTotals.get(item.supplierId) ?? 0;
+          supplierTotals.set(
+            item.supplierId,
+            current + parseAmountOrZero(item.totalPurchaseCostRmb),
+          );
+        }
+
+        const shipmentGoodsTotal = Array.from(supplierTotals.values()).reduce(
+          (sum, value) => sum + value,
+          0,
+        );
+
+        if (shipmentGoodsTotal <= 0) {
+          throw new ApiError("AUTO_ALLOCATION_NOT_ELIGIBLE", undefined, 400, {
+            reason: "shipmentGoodsTotal",
+            shipmentGoodsTotal,
+          });
+        }
+
+        const existingAllocations = await tx
+          .select({
+            supplierId: paymentAllocations.supplierId,
+            totalAllocated: sql<string>`COALESCE(SUM(${paymentAllocations.allocatedAmount}), 0)`,
+          })
+          .from(paymentAllocations)
+          .where(
+            and(
+              eq(paymentAllocations.shipmentId, data.shipmentId),
+              eq(paymentAllocations.component, PURCHASE_COST_COMPONENT),
+              eq(paymentAllocations.currency, "RMB"),
+            ),
+          )
+          .groupBy(paymentAllocations.supplierId);
+
+        const allocatedMap = new Map<number, number>();
+        existingAllocations.forEach((allocation) => {
+          allocatedMap.set(
+            allocation.supplierId,
+            parseAmountOrZero(allocation.totalAllocated),
+          );
+        });
+
+        const allocationInputs: AllocationBasis[] = Array.from(supplierTotals.entries()).map(
+          ([supplierId, totalAmount]) => ({
+            supplierId,
+            totalAmount,
+            remainingAmount: Math.max(
+              0,
+              totalAmount - (allocatedMap.get(supplierId) ?? 0),
+            ),
+          }),
+        );
+
+        allocationPlan = computeProportionalAllocations(amountOriginal, allocationInputs);
+      }
+
       // Ensure paymentDate is a proper Date object
       const paymentDate = data.paymentDate instanceof Date 
         ? data.paymentDate 
@@ -1237,6 +1473,39 @@ export class DatabaseStorage implements IStorage {
           amountEgp: roundAmount(amountEgp, 2).toFixed(2),
         })
         .returning();
+
+      if (allocationPlan && allocationPlan.length > 0) {
+        const allocationRows = allocationPlan.map((allocation) => ({
+          paymentId: payment.id,
+          shipmentId: data.shipmentId,
+          supplierId: allocation.supplierId,
+          component: PURCHASE_COST_COMPONENT,
+          currency: "RMB",
+          allocatedAmount: roundAmount(allocation.allocatedAmount, 2).toFixed(2),
+          createdByUserId: data.createdByUserId ?? null,
+        }));
+
+        await tx.insert(paymentAllocations).values(allocationRows);
+
+        const totalAllocated = allocationPlan.reduce(
+          (sum, allocation) => sum + allocation.allocatedAmount,
+          0,
+        );
+
+        await tx.insert(auditLogs).values({
+          userId: data.createdByUserId ?? null,
+          entityType: "PAYMENT",
+          entityId: String(payment.id),
+          actionType: "AUTO_ALLOCATION_CREATED",
+          details: {
+            paymentId: payment.id,
+            shipmentId: data.shipmentId,
+            totalAllocated: roundAmount(totalAllocated, 2).toFixed(2),
+            allocationCount: allocationPlan.length,
+            method: "proportional",
+          },
+        });
+      }
 
       if (options?.simulatePostInsertError) {
         throw new Error("Simulated failure after inserting payment");

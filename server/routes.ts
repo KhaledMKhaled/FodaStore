@@ -156,6 +156,7 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         referenceNumber,
         note,
         notes,
+        autoAllocate,
       } = req.body;
       const actorId = (req.user as any)?.id;
       const attachment = req.file;
@@ -320,27 +321,33 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         exchangeRateToEgp: paymentCurrency === "RMB" ? parseFloat(exchangeRateToEgp) : null,
       });
 
-      const payment = await deps.storage.createPayment({
-        shipmentId: parsedShipmentId,
-        partyType: resolvedPartyType,
-        partyId: resolvedPartyId || null,
-        paymentDate: parsedDate,
-        paymentCurrency,
-        amountOriginal: amountOriginal.toString(),
-        exchangeRateToEgp: normalizedAmounts.exchangeRateToEgp?.toString() || null,
-        amountEgp: normalizedAmounts.amountEgp.toFixed(2),
-        costComponent,
-        paymentMethod,
-        cashReceiverName: cashReceiverName || null,
-        referenceNumber: referenceNumber || null,
-        note: note || notes || null,
-        attachmentUrl: attachment ? `/uploads/payments/${attachment.filename}` : null,
-        attachmentMimeType: attachment?.mimetype ?? null,
-        attachmentSize: attachment?.size ?? null,
-        attachmentOriginalName: attachment?.originalname ?? null,
-        attachmentUploadedAt: attachment ? new Date() : null,
-        createdByUserId: actorId,
-      });
+      const shouldAutoAllocate =
+        autoAllocate === true || autoAllocate === "true" || autoAllocate === "1";
+
+      const payment = await deps.storage.createPayment(
+        {
+          shipmentId: parsedShipmentId,
+          partyType: resolvedPartyType,
+          partyId: resolvedPartyId || null,
+          paymentDate: parsedDate,
+          paymentCurrency,
+          amountOriginal: amountOriginal.toString(),
+          exchangeRateToEgp: normalizedAmounts.exchangeRateToEgp?.toString() || null,
+          amountEgp: normalizedAmounts.amountEgp.toFixed(2),
+          costComponent,
+          paymentMethod,
+          cashReceiverName: cashReceiverName || null,
+          referenceNumber: referenceNumber || null,
+          note: note || notes || null,
+          attachmentUrl: attachment ? `/uploads/payments/${attachment.filename}` : null,
+          attachmentMimeType: attachment?.mimetype ?? null,
+          attachmentSize: attachment?.size ?? null,
+          attachmentOriginalName: attachment?.originalname ?? null,
+          attachmentUploadedAt: attachment ? new Date() : null,
+          createdByUserId: actorId,
+        },
+        { autoAllocate: shouldAutoAllocate },
+      );
 
       deps.logAuditEvent({
         userId: actorId,
