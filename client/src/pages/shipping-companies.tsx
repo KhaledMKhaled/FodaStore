@@ -28,7 +28,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
 import type { InsertShippingCompany, ShippingCompany } from "@shared/schema";
 
 export default function ShippingCompanies() {
@@ -51,8 +51,8 @@ export default function ShippingCompanies() {
       setIsDialogOpen(false);
       setEditingCompany(null);
     },
-    onError: () => {
-      toast({ title: "حدث خطأ", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -66,8 +66,8 @@ export default function ShippingCompanies() {
       setIsDialogOpen(false);
       setEditingCompany(null);
     },
-    onError: () => {
-      toast({ title: "حدث خطأ", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -79,8 +79,8 @@ export default function ShippingCompanies() {
       toast({ title: "تم حذف شركة الشحن بنجاح" });
       queryClient.invalidateQueries({ queryKey: ["/api/shipping-companies"] });
     },
-    onError: () => {
-      toast({ title: "حدث خطأ", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
     },
   });
 

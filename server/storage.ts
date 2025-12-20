@@ -378,6 +378,7 @@ export interface IStorage {
   // Shipping Companies
   getAllShippingCompanies(): Promise<ShippingCompany[]>;
   getShippingCompany(id: number): Promise<ShippingCompany | undefined>;
+  getShippingCompanyByName(name: string): Promise<ShippingCompany | undefined>;
   createShippingCompany(data: InsertShippingCompany): Promise<ShippingCompany>;
   updateShippingCompany(
     id: number,
@@ -700,6 +701,14 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(shippingCompanies)
       .where(eq(shippingCompanies.id, id));
+    return company;
+  }
+
+  async getShippingCompanyByName(name: string): Promise<ShippingCompany | undefined> {
+    const [company] = await db
+      .select()
+      .from(shippingCompanies)
+      .where(sql`lower(${shippingCompanies.name}) = lower(${name})`);
     return company;
   }
 
