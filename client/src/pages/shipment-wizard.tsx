@@ -768,8 +768,8 @@ function Step1Import({
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-2">
               <Label htmlFor="shipmentCode">رقم الشحنة *</Label>
               <Input
@@ -823,7 +823,7 @@ function Step1Import({
               />
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
             <div className="space-y-2">
               <Label htmlFor="partialDiscountRmb">خصم جزئي (رممبي)</Label>
               <Input

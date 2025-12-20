@@ -26,33 +26,8 @@
 [x] 26. Add supplier hide feature with visibility control
 [x] 27. Environment migration completed - npm install and workflow restart verified
 [x] 28. Fix payment form cost component data display accuracy
-
-════════════════════════════════════════════════════════════════════
-NEW TASK: FIX SUPPLIER SELECTION FUNCTIONALITY
-════════════════════════════════════════════════════════════════════
-
-[x] 29. Fix supplier selection in payment form:
-    - Issue: Users couldn't change supplier due to TypeScript errors
-    - LSP errors on lines 568 and 581 (find/map operations on wrong type)
-    
-    Root Cause: suppliers query had no type annotation, causing TypeScript to infer {} type
-    
-    Solution Applied:
-    ✓ Added Supplier type to imports from @shared/schema
-    ✓ Updated suppliers query from useQuery({}) to useQuery<Supplier[]>({})
-    ✓ Removed unnecessary 'any' type casts from supplier.find() and suppliers.map()
-    ✓ Added filtering to hide suppliers with isHidden flag from dropdown (line 584)
-    ✓ Ensured only visible suppliers appear in the selection dropdown
-    
-    Features Now Working:
-    ✓ Users can freely select and change suppliers
-    ✓ Supplier selection updates correctly in the form
-    ✓ Hidden suppliers don't appear in dropdown
-    ✓ Payment submission with supplier attribution works properly
-    ✓ TypeScript errors reduced from 6 to 4 (unrelated to supplier fix)
-    ✓ Application running on port 5000
-    
-Status: ✅ COMPLETE - Supplier selection fully functional
+[x] 29. Fix supplier selection in payment form - TypeScript errors resolved
+[x] 30. npm install - installed all dependencies
 
 ════════════════════════════════════════════════════════════════════
 ENVIRONMENT MIGRATION - December 20, 2025
@@ -61,3 +36,7 @@ ENVIRONMENT MIGRATION - December 20, 2025
 [x] 30. npm install - installed all dependencies
 [x] 31. Workflow restart - application running on port 5000
 [x] 32. Import complete
+[x] 33. Improve spacing and layout for shipment commission and shipping fields
+[x] 34. Improve shipment wizard header layout with responsive design
+[x] 35. Format shipment info fields (rقم الشحنة، اسم، تاريخ، سعر صرف) - 4 عمود منتاسق
+[x] 36. Workflow restarted after shipment wizard layout updates
