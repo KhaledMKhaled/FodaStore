@@ -1214,18 +1214,21 @@ export default function Payments() {
                                                 </Badge>
                                               </div>
 
-                                              {/* Amount in original currency (aligns with التكلفة) */}
+                                              {/* Amount (shows payment currency only - no conversion) */}
                                               <div className="w-28 px-2 font-semibold text-right">
                                                 <div className="flex items-center justify-end gap-1">
                                                   {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}
-                                                  <span className="font-mono">{formatCurrency(payment.amountOriginal)}</span>
+                                                  <span className="font-mono">
+                                                    {payment.paymentCurrency === "RMB" 
+                                                      ? formatCurrency(payment.amountOriginal)
+                                                      : formatCurrency(payment.amountEgp)
+                                                    }
+                                                  </span>
                                                 </div>
                                               </div>
 
-                                              {/* Amount in EGP (aligns with المدفوع) */}
-                                              <div className="w-28 px-2 font-bold text-right">
-                                                <div className="font-mono">{formatCurrency(payment.amountEgp)}</div>
-                                              </div>
+                                              {/* Empty column (aligns with المدفوع) */}
+                                              <div className="w-28 px-2 text-right"></div>
 
                                               {/* Payment method (aligns with الرصيد) */}
                                               <div className="w-20 px-2 text-xs text-center">
@@ -1461,11 +1464,14 @@ export default function Payments() {
                           <TableCell>
                             <span className="font-mono">
                               {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}{" "}
-                              {formatCurrency(payment.amountOriginal)}
+                              {payment.paymentCurrency === "RMB" 
+                                ? formatCurrency(payment.amountOriginal)
+                                : formatCurrency(payment.amountEgp)
+                              }
                             </span>
                           </TableCell>
-                          <TableCell className="font-bold">
-                            {formatCurrency(payment.amountEgp)} ج.م
+                          <TableCell className="font-bold text-muted-foreground text-xs">
+                            {payment.paymentCurrency === "EGP" ? "-" : `${formatCurrency(payment.amountEgp)} ج.م`}
                           </TableCell>
                           <TableCell>
                             <Badge variant="outline">{payment.paymentMethod}</Badge>
