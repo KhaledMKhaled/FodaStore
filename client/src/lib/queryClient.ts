@@ -48,6 +48,35 @@ async function throwIfResNotOk(res: Response) {
 
 export function getErrorMessage(error: unknown): string {
   const err = error as any;
+  const status = err?.status;
+
+  if (status === 401) {
+    return "Session expired, please login again";
+  }
+  if (status === 403) {
+    return "You don’t have permission";
+  }
+  if (status === 409) {
+    return err?.message || "Shipping company name already exists";
+  }
+  if (status === 400 && Array.isArray(err?.details?.fields)) {
+    const details = err.details.fields
+      .map((field: { field?: string; message?: string }) => {
+        if (!field?.field && !field?.message) return null;
+        if (!field?.field) return field.message;
+        if (!field?.message) return field.field;
+        return `${field.field}: ${field.message}`;
+      })
+      .filter(Boolean)
+      .join(", ");
+    if (details) {
+      return `Validation error: ${details}`;
+    }
+  }
+  if (status === 500) {
+    return "تعذر إكمال العملية حالياً. حاول مرة أخرى.";
+  }
+
   return err?.message || "حدث خطأ";
 }
 

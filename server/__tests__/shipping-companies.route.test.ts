@@ -5,6 +5,7 @@ import express from "express";
 import test, { beforeEach, mock } from "node:test";
 
 import type { ShippingCompany } from "@shared/schema";
+import { isAuthenticated, requireRole } from "../auth";
 
 process.env.DATABASE_URL ||= "postgres://example.com:5432/test";
 process.env.SESSION_SECRET ||= "test-secret";
@@ -18,6 +19,17 @@ const mockedGetAllShippingCompanies = mock.method(
   storage,
   "getAllShippingCompanies",
   async () => companiesFixture,
+);
+const mockedCreateShippingCompany = mock.method(
+  storage,
+  "createShippingCompany",
+  async (payload: Partial<ShippingCompany>) =>
+    buildCompany({ id: 3, name: payload.name ?? "شركة شحن" }),
+);
+const mockedGetShippingCompanyByName = mock.method(
+  storage,
+  "getShippingCompanyByName",
+  async () => undefined,
 );
 
 const { registerRoutes } = await import("../routes");
@@ -49,7 +61,15 @@ async function createTestServer(user?: { id: string; role: string }) {
   });
 
   const httpServer = createServer(app);
-  await registerRoutes(httpServer, app);
+  await registerRoutes(httpServer, app, {
+    storage,
+    auditLogger: () => {},
+    auth: {
+      setupAuth: async () => {},
+      isAuthenticated,
+      requireRole,
+    },
+  });
 
   await new Promise((resolve) => httpServer.listen(0, resolve));
   const port = (httpServer.address() as AddressInfo).port;
@@ -64,6 +84,8 @@ async function createTestServer(user?: { id: string; role: string }) {
 
 beforeEach(() => {
   mockedGetAllShippingCompanies.mock.resetCalls();
+  mockedCreateShippingCompany.mock.resetCalls();
+  mockedGetShippingCompanyByName.mock.resetCalls();
   companiesFixture = [];
 });
 
@@ -85,4 +107,53 @@ test("GET /api/shipping-companies returns all companies", async () => {
     body.map((company: ShippingCompany) => company.name),
     ["شركة شحن أ", "شركة شحن ب"],
   );
+});
+
+test("POST /api/shipping-companies creates a company for allowed roles", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/shipping-companies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "شركة الشحن الجديدة", isActive: true }),
+  });
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.name, "شركة الشحن الجديدة");
+  assert.equal(mockedCreateShippingCompany.mock.calls.length, 1);
+});
+
+test("POST /api/shipping-companies returns 403 for unauthorized role", async () => {
+  const { port, close } = await createTestServer({ id: "viewer-1", role: "مشاهد" });
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/shipping-companies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "شركة شحن" }),
+  });
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 403);
+  assert.equal(body.message, "لا تملك صلاحية لتنفيذ هذا الإجراء");
+});
+
+test("POST /api/shipping-companies returns 409 for duplicate name", async () => {
+  mockedGetShippingCompanyByName.mock.mockImplementationOnce(async () =>
+    buildCompany({ id: 9, name: "شركة متكررة" }),
+  );
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/shipping-companies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "شركة متكررة" }),
+  });
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 409);
+  assert.equal(body.error.message, "Shipping company name already exists");
 });

@@ -1,6 +1,8 @@
 export type ErrorCode =
   | "AUTH_REQUIRED"
   | "PERMISSION_DENIED"
+  | "VALIDATION_ERROR"
+  | "SHIPPING_COMPANY_NAME_EXISTS"
   | "SHIPMENT_NOT_FOUND"
   | "SHIPMENT_LOCKED"
   | "PAYMENT_DATE_INVALID"
@@ -26,6 +28,8 @@ export interface ApiErrorShape {
 const defaultMessages: Record<ErrorCode, string> = {
   AUTH_REQUIRED: "انتهت جلستك. سجّل الدخول لإكمال العملية.",
   PERMISSION_DENIED: "لا تملك صلاحية لإتمام هذه العملية.",
+  VALIDATION_ERROR: "Validation error.",
+  SHIPPING_COMPANY_NAME_EXISTS: "Shipping company name already exists",
   SHIPMENT_NOT_FOUND: "الشحنة غير موجودة. تأكد من اختيار شحنة صحيحة.",
   SHIPMENT_LOCKED: "لا يمكن إضافة دفعات على شحنة مغلقة أو مؤرشفة.",
   PAYMENT_DATE_INVALID: "تاريخ الدفع غير صالح. الرجاء اختيار تاريخ بصيغة YYYY-MM-DD.",

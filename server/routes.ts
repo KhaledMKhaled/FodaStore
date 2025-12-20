@@ -19,6 +19,7 @@ import bcrypt from "bcryptjs";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { ZodError } from "zod";
 
 // Configure multer for item image uploads
 const itemImageStorage = multer.diskStorage({
@@ -502,6 +503,13 @@ export async function registerRoutes(
     async (req, res) => {
       try {
         const data = insertShippingCompanySchema.parse(req.body);
+        const existing = await routeStorage.getShippingCompanyByName(data.name);
+        if (existing) {
+          throw new ApiError("SHIPPING_COMPANY_NAME_EXISTS", undefined, 409, {
+            field: "name",
+            value: data.name,
+          });
+        }
         const company = await routeStorage.createShippingCompany(data);
 
         auditLogger({
@@ -514,7 +522,24 @@ export async function registerRoutes(
 
         res.json(company);
       } catch (error) {
-        res.status(400).json({ message: "Invalid data" });
+        if (error instanceof ZodError) {
+          const details = {
+            fields: error.errors.map((issue) => ({
+              field: issue.path.join(".") || "name",
+              message: issue.message,
+            })),
+          };
+          const { status, body } = formatError(
+            new ApiError("VALIDATION_ERROR", undefined, 400, details),
+          );
+          return res.status(status).json(body);
+        }
+        if (error instanceof ApiError) {
+          const { status, body } = formatError(error);
+          return res.status(status).json(body);
+        }
+        console.error("Error creating shipping company:", error);
+        res.status(500).json({ message: "تعذر إنشاء شركة الشحن حالياً. حاول مرة أخرى." });
       }
     },
   );
