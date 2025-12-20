@@ -18,6 +18,9 @@ import {
   Receipt,
   ChevronsUpDown,
   Check,
+  Image,
+  Wallet,
+  Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1192,39 +1195,88 @@ export default function Payments() {
                                         {shipmentPayments.map((payment) => (
                                           <div
                                             key={payment.id}
-                                            className="p-3 border rounded-md bg-background flex flex-wrap gap-3 justify-between"
+                                            className="border rounded-md bg-background overflow-hidden"
                                           >
-                                            <div className="space-y-1">
-                                              <div className="text-sm text-muted-foreground">
+                                            {/* Header row: Date, Amount, Attachment */}
+                                            <div className="flex items-start justify-between gap-3 p-3 border-b bg-muted/20">
+                                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                <Calendar className="w-4 h-4" />
                                                 {new Date(payment.paymentDate).toLocaleString("ar-EG")}
                                               </div>
-                                              <div className="font-semibold">
+                                              <div className="font-bold text-base flex items-center gap-1 whitespace-nowrap">
                                                 {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}
-                                                {" "}
                                                 {formatCurrency(payment.amountOriginal)}
-                                                <span className="text-sm text-muted-foreground mr-2">
-                                                  ({payment.amountEgp} ج.م)
-                                                </span>
                                               </div>
-                                              <div className="text-sm">طريقة الدفع: {payment.paymentMethod}</div>
-                                            </div>
-                                            <div className="text-sm space-y-1 text-right">
-                                              <div>تحت حساب: {payment.costComponent}</div>
-                                              {payment.cashReceiverName && (
-                                                <div>المستلم: {payment.cashReceiverName}</div>
+                                              {payment.attachmentUrl && (
+                                                <PaymentAttachmentIcon
+                                                  paymentId={payment.id}
+                                                  attachmentUrl={payment.attachmentUrl}
+                                                  attachmentOriginalName={payment.attachmentOriginalName}
+                                                  className="text-primary hover:text-primary/80 transition-colors"
+                                                />
                                               )}
-                                              {payment.referenceNumber && (
-                                                <div>المرجع: {payment.referenceNumber}</div>
-                                              )}
-                                              {payment.note && <div>ملاحظة: {payment.note}</div>}
                                             </div>
-                                            <div className="flex items-start">
-                                              <PaymentAttachmentIcon
-                                                paymentId={payment.id}
-                                                attachmentUrl={payment.attachmentUrl}
-                                                attachmentOriginalName={payment.attachmentOriginalName}
-                                              />
+
+                                            {/* Details row */}
+                                            <div className="grid grid-cols-2 gap-4 p-3 text-sm">
+                                              {/* Left column */}
+                                              <div className="space-y-2">
+                                                <div className="flex items-center gap-2">
+                                                  <Wallet className="w-4 h-4 text-muted-foreground" />
+                                                  <div>
+                                                    <div className="text-xs text-muted-foreground">طريقة الدفع</div>
+                                                    <div className="font-medium">{payment.paymentMethod}</div>
+                                                  </div>
+                                                </div>
+                                                {payment.cashReceiverName && (
+                                                  <div className="flex items-center gap-2">
+                                                    <User className="w-4 h-4 text-muted-foreground" />
+                                                    <div>
+                                                      <div className="text-xs text-muted-foreground">المستلم</div>
+                                                      <div className="font-medium">{payment.cashReceiverName}</div>
+                                                    </div>
+                                                  </div>
+                                                )}
+                                              </div>
+
+                                              {/* Right column */}
+                                              <div className="space-y-2 text-right">
+                                                <div className="flex items-center justify-end gap-2">
+                                                  <div className="text-left">
+                                                    <div className="text-xs text-muted-foreground">تحت حساب</div>
+                                                    <div className="font-medium text-primary">{payment.costComponent}</div>
+                                                  </div>
+                                                  <Building2 className="w-4 h-4 text-muted-foreground" />
+                                                </div>
+                                                {payment.referenceNumber && (
+                                                  <div className="flex items-center justify-end gap-2">
+                                                    <div className="text-left">
+                                                      <div className="text-xs text-muted-foreground">المرجع</div>
+                                                      <div className="font-medium">{payment.referenceNumber}</div>
+                                                    </div>
+                                                    <FileText className="w-4 h-4 text-muted-foreground" />
+                                                  </div>
+                                                )}
+                                              </div>
                                             </div>
+
+                                            {/* EGP equivalent and notes */}
+                                            {(payment.amountEgp !== payment.amountOriginal || payment.note) && (
+                                              <div className="border-t px-3 py-2 bg-muted/10 space-y-2">
+                                                {payment.amountEgp !== payment.amountOriginal && (
+                                                  <div className="text-sm flex items-center justify-between">
+                                                    <span className="text-muted-foreground">المعادل بالجنيه</span>
+                                                    <span className="font-mono">{formatCurrency(payment.amountEgp)} ج.م</span>
+                                                  </div>
+                                                )}
+                                                {payment.note && (
+                                                  <div className="text-sm">
+                                                    <span className="text-muted-foreground text-xs">ملاحظة: </span>
+                                                    <span className="text-sm">{payment.note}</span>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
                                           </div>
                                         ))}
                                       </div>
