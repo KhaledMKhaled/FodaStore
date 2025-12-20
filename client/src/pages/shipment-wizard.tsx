@@ -39,6 +39,7 @@ import type {
   ShipmentItem,
   ShipmentShippingDetails,
   Supplier,
+  ShippingCompany,
   ProductType,
   ExchangeRate,
 } from "@shared/schema";
@@ -68,7 +69,7 @@ export default function ShipmentWizard() {
     purchaseRmbToEgpRate: "",
     partialDiscountRmb: "0",
     discountNotes: "",
-    shippingCompanySupplierId: null as number | null,
+    shippingCompanyId: null as number | null,
   });
 
   const [items, setItems] = useState<Partial<ShipmentItem>[]>([
@@ -113,8 +114,8 @@ export default function ShipmentWizard() {
     queryKey: ["/api/suppliers"],
   });
 
-  const { data: shippingSuppliers } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers?includeHidden=true"],
+  const { data: shippingCompanies } = useQuery<ShippingCompany[]>({
+    queryKey: ["/api/shipping-companies"],
   });
 
   const { data: productTypes } = useQuery<ProductType[]>({
@@ -133,7 +134,7 @@ export default function ShipmentWizard() {
           existingShipment.purchaseRmbToEgpRate?.toString() || shipmentData.purchaseRmbToEgpRate,
         partialDiscountRmb: existingShipment.partialDiscountRmb?.toString() || "0",
         discountNotes: existingShipment.discountNotes || "",
-        shippingCompanySupplierId: existingShipment.shippingCompanySupplierId ?? null,
+        shippingCompanyId: existingShipment.shippingCompanyId ?? null,
       });
     }
   }, [existingShipment]);
@@ -513,7 +514,7 @@ export default function ShipmentWizard() {
               setShipmentData={setShipmentData}
               shippingData={shippingData}
               setShippingData={setShippingData}
-              shippingSuppliers={shippingSuppliers || []}
+              shippingCompanies={shippingCompanies || []}
               totalPurchaseCostRmb={totalPurchaseCostRmb}
               commissionRmb={commissionRmb}
               commissionEgp={commissionEgp}
@@ -537,9 +538,9 @@ export default function ShipmentWizard() {
           {currentStep === 4 && (
             <Step4Summary
               shipmentData={shipmentData}
-              shippingCompanySupplierName={
-                shippingSuppliers?.find(
-                  (supplier) => supplier.id === shipmentData.shippingCompanySupplierId,
+              shippingCompanyName={
+                shippingCompanies?.find(
+                  (company) => company.id === shipmentData.shippingCompanyId,
                 )?.name || ""
               }
               items={items}
@@ -695,7 +696,7 @@ function Step1Import({
     purchaseRmbToEgpRate: string;
     partialDiscountRmb: string;
     discountNotes: string;
-    shippingCompanySupplierId: number | null;
+    shippingCompanyId: number | null;
   };
   setShipmentData: (data: {
     shipmentCode: string;
@@ -705,7 +706,7 @@ function Step1Import({
     purchaseRmbToEgpRate: string;
     partialDiscountRmb: string;
     discountNotes: string;
-    shippingCompanySupplierId: number | null;
+    shippingCompanyId: number | null;
   }) => void;
   items: Partial<ShipmentItem>[];
   updateItem: (index: number, field: string, value: string | number) => void;
@@ -911,13 +912,11 @@ function Step1Import({
                         <SelectValue placeholder="اختر المورد" />
                       </SelectTrigger>
                       <SelectContent>
-                        {(suppliers || [])
-                          .filter((s) => !s.isHidden)
-                          .map((supplier) => (
-                            <SelectItem key={supplier.id} value={supplier.id.toString()}>
-                              {supplier.name}
-                            </SelectItem>
-                          ))}
+                        {(suppliers || []).map((supplier) => (
+                          <SelectItem key={supplier.id} value={supplier.id.toString()}>
+                            {supplier.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1114,7 +1113,7 @@ export function Step2Shipping({
   setShipmentData,
   shippingData,
   setShippingData,
-  shippingSuppliers,
+  shippingCompanies,
   totalPurchaseCostRmb,
   commissionRmb,
   commissionEgp,
@@ -1132,7 +1131,7 @@ export function Step2Shipping({
     purchaseRmbToEgpRate: string;
     partialDiscountRmb: string;
     discountNotes: string;
-    shippingCompanySupplierId: number | null;
+    shippingCompanyId: number | null;
   };
   setShipmentData: (data: {
     shipmentCode: string;
@@ -1142,7 +1141,7 @@ export function Step2Shipping({
     purchaseRmbToEgpRate: string;
     partialDiscountRmb: string;
     discountNotes: string;
-    shippingCompanySupplierId: number | null;
+    shippingCompanyId: number | null;
   }) => void;
   shippingData: {
     commissionRatePercent: string;
@@ -1162,7 +1161,7 @@ export function Step2Shipping({
     usdToRmbRate: string;
     ratesUpdatedAt: string;
   }) => void;
-  shippingSuppliers: Supplier[];
+  shippingCompanies: ShippingCompany[];
   totalPurchaseCostRmb: number;
   commissionRmb: number;
   commissionEgp: number;
@@ -1258,26 +1257,26 @@ export function Step2Shipping({
             <div className="space-y-2">
               <Label>اسم شركة الشحن</Label>
               <Select
-                value={shipmentData.shippingCompanySupplierId?.toString() || ""}
+                value={shipmentData.shippingCompanyId?.toString() || ""}
                 onValueChange={(value) =>
                   setShipmentData({
                     ...shipmentData,
-                    shippingCompanySupplierId: value ? parseInt(value, 10) : null,
+                    shippingCompanyId: value ? parseInt(value, 10) : null,
                   })
                 }
               >
                 <SelectTrigger data-testid="select-shipping-company">
                   <SelectValue placeholder="اختر شركة الشحن…" />
                 </SelectTrigger>
-                <SelectContent>
-                  {shippingSuppliers.map((supplier) => (
-                    <SelectItem key={supplier.id} value={supplier.id.toString()}>
-                      {supplier.name}
+              <SelectContent>
+                  {shippingCompanies.map((company) => (
+                    <SelectItem key={company.id} value={company.id.toString()}>
+                      {company.name}
                     </SelectItem>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
+              </SelectContent>
+            </Select>
+          </div>
             <div className="space-y-2">
               <Label>مساحة الشحن (م²)</Label>
               <Input
@@ -1501,7 +1500,7 @@ function Step3Customs({
 // Step 4: Summary
 function Step4Summary({
   shipmentData,
-  shippingCompanySupplierName,
+  shippingCompanyName,
   items,
   totalPurchaseCostRmb,
   purchaseCostEgp,
@@ -1518,7 +1517,7 @@ function Step4Summary({
   purchaseRate,
 }: {
   shipmentData: { shipmentCode: string; shipmentName: string; purchaseDate: string; status: string };
-  shippingCompanySupplierName?: string;
+  shippingCompanyName?: string;
   items: Partial<ShipmentItem>[];
   totalPurchaseCostRmb: number;
   purchaseCostEgp: number;
@@ -1575,7 +1574,7 @@ function Step4Summary({
             </div>
             <div>
               <p className="text-sm text-muted-foreground">شركة الشحن</p>
-              <p className="font-medium">{shippingCompanySupplierName || "غير محدد"}</p>
+              <p className="font-medium">{shippingCompanyName || "غير محدد"}</p>
             </div>
           </div>
         </CardContent>

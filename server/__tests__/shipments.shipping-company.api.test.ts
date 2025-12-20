@@ -48,7 +48,7 @@ const shipmentFixture = (id: number, overrides: Partial<Shipment> = {}): Shipmen
     purchaseDate: now,
     status: "جديدة",
     invoiceCustomsDate: null,
-    shippingCompanySupplierId: null,
+    shippingCompanyId: null,
     createdByUserId: null,
     purchaseCostRmb: "0",
     purchaseCostEgp: "0",
@@ -78,7 +78,7 @@ const shipmentsService = {
       shipmentName: payload.shipmentName,
       purchaseDate: payload.purchaseDate ? new Date(payload.purchaseDate) : new Date(),
       purchaseRmbToEgpRate: payload.purchaseRmbToEgpRate ?? "0",
-      shippingCompanySupplierId: payload.shippingCompanySupplierId ?? null,
+      shippingCompanyId: payload.shippingCompanyId ?? null,
     });
     storage.shipments.push(shipment);
     return shipment;
@@ -115,9 +115,9 @@ beforeEach(() => {
   auditEvents.length = 0;
 });
 
-test("POST /api/shipments persists shippingCompanySupplierId and can be fetched", async () => {
+test("POST /api/shipments persists shippingCompanyId and can be fetched", async () => {
   const { httpServer, baseUrl } = await createTestServer();
-  const hiddenSupplierId = 42;
+  const shippingCompanyId = 42;
 
   const response = await fetch(`${baseUrl}/api/shipments`, {
     method: "POST",
@@ -127,19 +127,19 @@ test("POST /api/shipments persists shippingCompanySupplierId and can be fetched"
       shipmentName: "Hidden Supplier Shipment",
       purchaseDate: "2024-02-10",
       purchaseRmbToEgpRate: "7.1",
-      shippingCompanySupplierId: hiddenSupplierId,
+      shippingCompanyId,
       items: [],
     }),
   });
 
   assert.equal(response.status, 200);
   const created = await response.json();
-  assert.equal(created.shippingCompanySupplierId, hiddenSupplierId);
+  assert.equal(created.shippingCompanyId, shippingCompanyId);
 
   const fetchResponse = await fetch(`${baseUrl}/api/shipments/${created.id}`);
   assert.equal(fetchResponse.status, 200);
   const fetched = await fetchResponse.json();
-  assert.equal(fetched.shippingCompanySupplierId, hiddenSupplierId);
+  assert.equal(fetched.shippingCompanyId, shippingCompanyId);
 
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
 });

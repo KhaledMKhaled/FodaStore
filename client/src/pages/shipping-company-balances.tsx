@@ -19,26 +19,26 @@ import {
 } from "@/components/ui/table";
 import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { 
-  Users, 
+  Truck, 
   TrendingUp, 
   TrendingDown, 
   Filter,
   FileText,
   ArrowUpDown,
 } from "lucide-react";
-import type { Supplier } from "@shared/schema";
+import type { ShippingCompany } from "@shared/schema";
 
-interface SupplierBalance {
-  supplierId: number;
-  supplierName: string;
+interface ShippingCompanyBalance {
+  shippingCompanyId: number;
+  shippingCompanyName: string;
   totalCostEgp: string;
   totalPaidEgp: string;
   balanceEgp: string;
   balanceStatus: 'owing' | 'settled' | 'credit';
 }
 
-interface SupplierStatement {
-  supplier: Supplier;
+interface ShippingCompanyStatement {
+  shippingCompany: ShippingCompany;
   movements: Array<{
     date: Date | string;
     type: 'shipment' | 'payment';
@@ -66,23 +66,23 @@ function formatDate(date: string | Date | null) {
   return new Date(date).toLocaleDateString("ar-EG");
 }
 
-export default function SupplierBalancesPage() {
+export default function ShippingCompanyBalancesPage() {
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [supplierId, setSupplierId] = useState<string>("");
+  const [shippingCompanyId, setShippingCompanyId] = useState<string>("");
   const [balanceType, setBalanceType] = useState<string>("all");
-  const [selectedSupplier, setSelectedSupplier] = useState<number | null>(null);
+  const [selectedShippingCompany, setSelectedShippingCompany] = useState<number | null>(null);
 
   const queryParams = new URLSearchParams();
   if (dateFrom) queryParams.append("dateFrom", dateFrom);
   if (dateTo) queryParams.append("dateTo", dateTo);
-  if (supplierId && supplierId !== "all") queryParams.append("supplierId", supplierId);
+  if (shippingCompanyId && shippingCompanyId !== "all") queryParams.append("shippingCompanyId", shippingCompanyId);
   if (balanceType && balanceType !== "all") queryParams.append("balanceType", balanceType);
 
-  const { data: balances, isLoading } = useQuery<SupplierBalance[]>({
-    queryKey: ["/api/accounting/supplier-balances", dateFrom, dateTo, supplierId, balanceType],
+  const { data: balances, isLoading } = useQuery<ShippingCompanyBalance[]>({
+    queryKey: ["/api/accounting/shipping-company-balances", dateFrom, dateTo, shippingCompanyId, balanceType],
     queryFn: async () => {
-      const response = await fetch(`/api/accounting/supplier-balances?${queryParams.toString()}`, {
+      const response = await fetch(`/api/accounting/shipping-company-balances?${queryParams.toString()}`, {
         credentials: "include",
       });
       if (!response.ok) throw new Error("Failed to fetch");
@@ -90,31 +90,31 @@ export default function SupplierBalancesPage() {
     },
   });
 
-  const { data: suppliers } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers"],
+  const { data: shippingCompanies } = useQuery<ShippingCompany[]>({
+    queryKey: ["/api/shipping-companies"],
   });
 
   const statementQueryParams = new URLSearchParams();
   if (dateFrom) statementQueryParams.append("dateFrom", dateFrom);
   if (dateTo) statementQueryParams.append("dateTo", dateTo);
 
-  const { data: statement, isLoading: statementLoading } = useQuery<SupplierStatement>({
-    queryKey: ["/api/accounting/supplier-statement", selectedSupplier, dateFrom, dateTo],
+  const { data: statement, isLoading: statementLoading } = useQuery<ShippingCompanyStatement>({
+    queryKey: ["/api/accounting/shipping-company-statement", selectedShippingCompany, dateFrom, dateTo],
     queryFn: async () => {
       const response = await fetch(
-        `/api/accounting/supplier-statement/${selectedSupplier}?${statementQueryParams.toString()}`,
+        `/api/accounting/shipping-company-statement/${selectedShippingCompany}?${statementQueryParams.toString()}`,
         { credentials: "include" }
       );
       if (!response.ok) throw new Error("Failed to fetch");
       return response.json();
     },
-    enabled: !!selectedSupplier,
+    enabled: !!selectedShippingCompany,
   });
 
   const clearFilters = () => {
     setDateFrom("");
     setDateTo("");
-    setSupplierId("");
+    setShippingCompanyId("");
     setBalanceType("all");
   };
 
@@ -146,7 +146,7 @@ export default function SupplierBalancesPage() {
   if (isLoading) {
     return (
       <div className="p-6 space-y-6" dir="rtl">
-        <h1 className="text-2xl font-bold">كشف حساب الموردين</h1>
+        <h1 className="text-2xl font-bold">كشف حساب شركات الشحن</h1>
         <div className="space-y-4">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-16 w-full" />
@@ -159,10 +159,10 @@ export default function SupplierBalancesPage() {
   return (
     <div className="p-6 space-y-6" dir="rtl">
       <div className="flex items-center gap-3">
-        <Users className="w-8 h-8 text-primary" />
+        <Truck className="w-8 h-8 text-primary" />
         <div>
-          <h1 className="text-2xl font-bold" data-testid="text-page-title">كشف حساب الموردين</h1>
-          <p className="text-muted-foreground text-sm">الفلوس اللي عليك وليك لكل مورد</p>
+          <h1 className="text-2xl font-bold" data-testid="text-page-title">كشف حساب شركات الشحن</h1>
+          <p className="text-muted-foreground text-sm">الفلوس اللي عليك وليك لكل شركة شحن</p>
         </div>
       </div>
 
@@ -194,14 +194,14 @@ export default function SupplierBalancesPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>المورد</Label>
-              <Select value={supplierId} onValueChange={setSupplierId}>
-                <SelectTrigger data-testid="select-supplier">
-                  <SelectValue placeholder="جميع الموردين" />
+              <Label>شركة الشحن</Label>
+              <Select value={shippingCompanyId} onValueChange={setShippingCompanyId}>
+              <SelectTrigger data-testid="select-shipping-company">
+                  <SelectValue placeholder="جميع شركات الشحن" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">جميع الموردين</SelectItem>
-                  {suppliers?.map((s) => (
+                  <SelectItem value="all">جميع شركات الشحن</SelectItem>
+                  {shippingCompanies?.map((s) => (
                     <SelectItem key={s.id} value={s.id.toString()}>
                       {s.name}
                     </SelectItem>
@@ -235,14 +235,14 @@ export default function SupplierBalancesPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ArrowUpDown className="w-5 h-5" />
-            أرصدة الموردين
+            أرصدة شركات الشحن
           </CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="text-right">اسم المورد</TableHead>
+                <TableHead className="text-right">اسم شركة الشحن</TableHead>
                 <TableHead className="text-right">إجمالي تكلفة الشحنات</TableHead>
                 <TableHead className="text-right">إجمالي المدفوع</TableHead>
                 <TableHead className="text-right">الرصيد الحالي</TableHead>
@@ -258,8 +258,8 @@ export default function SupplierBalancesPage() {
                 </TableRow>
               ) : (
                 balances?.map((balance) => (
-                  <TableRow key={balance.supplierId} data-testid={`row-supplier-${balance.supplierId}`}>
-                    <TableCell className="font-medium">{balance.supplierName}</TableCell>
+                  <TableRow key={balance.shippingCompanyId} data-testid={`row-shippingCompany-${balance.shippingCompanyId}`}>
+                    <TableCell className="font-medium">{balance.shippingCompanyName}</TableCell>
                     <TableCell>{formatCurrency(balance.totalCostEgp)} جنيه</TableCell>
                     <TableCell className="text-green-600">
                       {formatCurrency(balance.totalPaidEgp)} جنيه
@@ -271,8 +271,8 @@ export default function SupplierBalancesPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setSelectedSupplier(balance.supplierId)}
-                        data-testid={`button-view-statement-${balance.supplierId}`}
+                        onClick={() => setSelectedShippingCompany(balance.shippingCompanyId)}
+                        data-testid={`button-view-statement-${balance.shippingCompanyId}`}
                       >
                         <FileText className="w-4 h-4 ml-1" />
                         كشف الحساب
@@ -286,12 +286,12 @@ export default function SupplierBalancesPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={!!selectedSupplier} onOpenChange={() => setSelectedSupplier(null)}>
+      <Dialog open={!!selectedShippingCompany} onOpenChange={() => setSelectedShippingCompany(null)}>
         <DialogContent className="max-w-4xl max-h-[90vh]" dir="rtl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5" />
-              كشف حساب: {statement?.supplier?.name}
+              كشف حساب: {statement?.shippingCompany?.name}
             </DialogTitle>
           </DialogHeader>
           <ScrollArea className="max-h-[60vh]">

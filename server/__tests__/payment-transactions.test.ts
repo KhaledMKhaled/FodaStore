@@ -46,7 +46,7 @@ const buildPayment = (shipmentId: number) => ({
   paymentCurrency: "EGP",
   amountOriginal: "100.00",
   amountEgp: "100.00",
-  costComponent: "شراء",
+  costComponent: "تكلفة البضاعة",
   paymentMethod: "نقدي",
   createdByUserId: "tester",
 });

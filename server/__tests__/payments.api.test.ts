@@ -33,7 +33,7 @@ const baseBody = {
   paymentCurrency: "EGP",
   amountOriginal: "100",
   amountEgp: "100",
-  costComponent: "شراء",
+  costComponent: "تكلفة البضاعة",
   paymentMethod: "نقدي",
 };
 
@@ -42,6 +42,7 @@ function createHandler(
     createPayment?: (...args: any[]) => any;
     getShipmentSupplierContext?: (...args: any[]) => any;
     getSupplier?: (...args: any[]) => any;
+    getShippingCompany?: (...args: any[]) => any;
   } = {},
 ) {
   const storage = {
@@ -50,10 +51,11 @@ function createHandler(
       overrides.getShipmentSupplierContext ||
       (async () => ({
         itemSuppliers: [],
-        shippingCompanySupplierId: null,
+        shippingCompanyId: null,
         shipmentSuppliers: [],
       })),
     getSupplier: overrides.getSupplier || (async (id: number) => ({ id })),
+    getShippingCompany: overrides.getShippingCompany || (async (id: number) => ({ id })),
   } as any;
 
   const handler = createPaymentHandler({ storage, logAuditEvent: () => {} });
@@ -75,10 +77,11 @@ test("POST /api/payments writes an audit log entry", async () => {
     })),
     getShipmentSupplierContext: mock.fn(async () => ({
       itemSuppliers: [],
-      shippingCompanySupplierId: null,
+      shippingCompanyId: null,
       shipmentSuppliers: [],
     })),
     getSupplier: mock.fn(async (id) => ({ id })),
+    getShippingCompany: mock.fn(async (id) => ({ id })),
   };
 
   const auditLogger = mock.fn();
@@ -95,7 +98,7 @@ test("POST /api/payments writes an audit log entry", async () => {
     amountOriginal: "150.00",
     exchangeRateToEgp: null,
     amountEgp: "150.00",
-    costComponent: "purchase",
+    costComponent: "تكلفة البضاعة",
     paymentMethod: "نقدي",
     cashReceiverName: "Ali",
     referenceNumber: "REF-123",
@@ -138,8 +141,9 @@ test("POST /api/payments writes an audit log entry", async () => {
   assert.equal(auditEvent.userId, actor.id);
   assert.deepEqual(auditEvent.details, {
     shipmentId: payload.shipmentId,
-    supplierId: null,
-    supplierRule: {
+    partyType: null,
+    partyId: null,
+    partyRule: {
       shipmentSuppliers: [],
       required: false,
       defaulted: false,
@@ -153,11 +157,11 @@ test("POST /api/payments writes an audit log entry", async () => {
   mock.restoreAll();
 });
 
-test("accepts payment creation with a valid supplierId", async () => {
+test("accepts payment creation with a valid supplier party", async () => {
   const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
   const getShipmentSupplierContext = mock.fn(async () => ({
     itemSuppliers: [55],
-    shippingCompanySupplierId: null,
+    shippingCompanyId: null,
     shipmentSuppliers: [55],
   }));
   const getSupplier = mock.fn(async (id: number) => (id === 55 ? { id } : undefined));
@@ -169,7 +173,7 @@ test("accepts payment creation with a valid supplierId", async () => {
   });
 
   const req = {
-    body: { ...baseBody, supplierId: 55 },
+    body: { ...baseBody, partyType: "supplier", partyId: 55 },
     user: { id: "user-1" },
   } as any;
   const res = createResponse();
@@ -178,10 +182,11 @@ test("accepts payment creation with a valid supplierId", async () => {
 
   assert.equal(res.statusCode, 200);
   assert.equal(createPayment.mock.calls.length, 1);
-  assert.equal(createPayment.mock.calls[0].arguments[0].supplierId, 55);
+  assert.equal(createPayment.mock.calls[0].arguments[0].partyId, 55);
+  assert.equal(createPayment.mock.calls[0].arguments[0].partyType, "supplier");
 });
 
-test("returns 400 for invalid supplierId", async () => {
+test("returns 400 for invalid supplier party", async () => {
   const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
   const getSupplier = mock.fn(async () => undefined);
 
@@ -191,7 +196,7 @@ test("returns 400 for invalid supplierId", async () => {
   });
 
   const req = {
-    body: { ...baseBody, supplierId: 999 },
+    body: { ...baseBody, partyType: "supplier", partyId: 999 },
     user: { id: "user-1" },
   } as any;
   const res = createResponse();
@@ -203,11 +208,11 @@ test("returns 400 for invalid supplierId", async () => {
   assert.equal(createPayment.mock.calls.length, 0);
 });
 
-test("requires supplierId when shipment has supplier attribution", async () => {
+test("requires partyId when shipment has supplier attribution", async () => {
   const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
   const getShipmentSupplierContext = mock.fn(async () => ({
     itemSuppliers: [5],
-    shippingCompanySupplierId: null,
+    shippingCompanyId: null,
     shipmentSuppliers: [5],
   }));
 
@@ -217,7 +222,7 @@ test("requires supplierId when shipment has supplier attribution", async () => {
   });
 
   const req = {
-    body: { ...baseBody, supplierId: null },
+    body: { ...baseBody, partyId: null },
     user: { id: "user-1" },
   } as any;
   const res = createResponse();
@@ -225,19 +230,19 @@ test("requires supplierId when shipment has supplier attribution", async () => {
   await handler(req, res);
 
   assert.equal(res.statusCode, 400);
-  assert.equal(res.body?.error?.code, "SUPPLIER_REQUIRED");
+  assert.equal(res.body?.error?.code, "PARTY_REQUIRED");
   assert.equal(createPayment.mock.calls.length, 0);
 });
 
-test("defaults supplier allocation for shipping and purchase payments", async () => {
+test("defaults party allocation for shipping and purchase payments", async () => {
   const createPayment = mock.fn(async (data) => ({
     id: createPayment.mock.calls.length + 1,
     ...data,
   }));
   const getShipmentSupplierContext = mock.fn(async () => ({
     itemSuppliers: [11],
-    shippingCompanySupplierId: 22,
-    shipmentSuppliers: [11, 22],
+    shippingCompanyId: 22,
+    shipmentSuppliers: [11],
   }));
   const getSupplier = mock.fn(async (id: number) => ({ id }));
 
@@ -251,7 +256,7 @@ test("defaults supplier allocation for shipping and purchase payments", async ()
     body: {
       ...baseBody,
       costComponent: "الشحن",
-      supplierId: null,
+      partyId: null,
     },
     user: { id: "user-1" },
   } as any;
@@ -260,13 +265,14 @@ test("defaults supplier allocation for shipping and purchase payments", async ()
   await handler(shippingReq, shippingRes);
 
   assert.equal(shippingRes.statusCode, 200);
-  assert.equal(createPayment.mock.calls[0].arguments[0].supplierId, 22);
+  assert.equal(createPayment.mock.calls[0].arguments[0].partyId, 22);
+  assert.equal(createPayment.mock.calls[0].arguments[0].partyType, "shipping_company");
 
   const purchaseReq = {
     body: {
       ...baseBody,
       costComponent: "تكلفة البضاعة",
-      supplierId: null,
+      partyId: null,
     },
     user: { id: "user-1" },
   } as any;
@@ -275,7 +281,8 @@ test("defaults supplier allocation for shipping and purchase payments", async ()
   await handler(purchaseReq, purchaseRes);
 
   assert.equal(purchaseRes.statusCode, 200);
-  assert.equal(createPayment.mock.calls[1].arguments[0].supplierId, 11);
+  assert.equal(createPayment.mock.calls[1].arguments[0].partyId, 11);
+  assert.equal(createPayment.mock.calls[1].arguments[0].partyType, "supplier");
 });
 
 test("returns PAYMENT_DATE_INVALID for malformed paymentDate", async () => {

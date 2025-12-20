@@ -10,9 +10,9 @@ import { ApiError, formatError, success } from "./errors";
 import type { User } from "@shared/schema";
 import {
   insertSupplierSchema,
+  insertShippingCompanySchema,
   insertProductTypeSchema,
   insertExchangeRateSchema,
-  insertShipmentPaymentSchema,
 } from "@shared/schema";
 import { calculatePaymentSnapshot, parseAmountOrZero } from "./services/paymentCalculations";
 import bcrypt from "bcryptjs";
@@ -130,7 +130,7 @@ type RouteDependencies = {
 type CreatePaymentHandlerDeps = {
   storage: Pick<
     IStorage,
-    "createPayment" | "getSupplier" | "getShipmentSupplierContext"
+    "createPayment" | "getSupplier" | "getShippingCompany" | "getShipmentSupplierContext"
   >;
   logAuditEvent: (event: Parameters<typeof logAuditEvent>[0]) => void;
 };
@@ -141,14 +141,30 @@ const SHIPPING_COST_COMPONENTS = new Set(["الشحن", "العمولة", "ال�
 export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHandler {
   return async (req, res) => {
     try {
-      const { shipmentId, supplierId, paymentDate, paymentCurrency, amountOriginal, exchangeRateToEgp, costComponent, paymentMethod, cashReceiverName, referenceNumber, note, notes } = req.body;
+      const {
+        shipmentId,
+        partyType,
+        partyId,
+        paymentDate,
+        paymentCurrency,
+        amountOriginal,
+        exchangeRateToEgp,
+        costComponent,
+        paymentMethod,
+        cashReceiverName,
+        referenceNumber,
+        note,
+        notes,
+      } = req.body;
       const actorId = (req.user as any)?.id;
       const attachment = req.file;
       const parsedShipmentId = Number(shipmentId);
-      const parsedSupplierId =
-        supplierId !== undefined && supplierId !== null && supplierId !== ""
-          ? Number(supplierId)
+      const parsedPartyId =
+        partyId !== undefined && partyId !== null && partyId !== ""
+          ? Number(partyId)
           : null;
+      const normalizedPartyType =
+        partyType === "supplier" || partyType === "shipping_company" ? partyType : null;
 
       if (Number.isNaN(parsedShipmentId)) {
         return res.status(400).json({
@@ -159,45 +175,66 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
           },
         });
       }
-      const { itemSuppliers, shippingCompanySupplierId, shipmentSuppliers } =
+      const { itemSuppliers, shippingCompanyId, shipmentSuppliers } =
         await deps.storage.getShipmentSupplierContext(parsedShipmentId);
       const isShippingComponent = SHIPPING_COST_COMPONENTS.has(costComponent);
       const isPurchaseComponent = costComponent === PURCHASE_COST_COMPONENT;
-      const relevantSuppliers = isShippingComponent
-        ? (shippingCompanySupplierId !== null ? [shippingCompanySupplierId] : itemSuppliers)
-        : isPurchaseComponent
-          ? itemSuppliers
-          : shipmentSuppliers;
-      const shouldRequireSupplier = relevantSuppliers.length > 0;
-      const shouldDefaultSupplier = !supplierId && relevantSuppliers.length === 1;
-      const resolvedSupplierId = shouldDefaultSupplier ? relevantSuppliers[0] : parsedSupplierId;
+      const allowedSuppliers = isPurchaseComponent ? itemSuppliers : shipmentSuppliers;
+      const allowedShippingCompanies = shippingCompanyId ? [shippingCompanyId] : [];
 
-      if (shouldRequireSupplier && !resolvedSupplierId) {
+      const allowedPartyTypes = new Map<
+        "supplier" | "shipping_company",
+        number[]
+      >();
+
+      if (!isShippingComponent) {
+        allowedPartyTypes.set("supplier", allowedSuppliers);
+      }
+
+      if (!isPurchaseComponent) {
+        allowedPartyTypes.set("shipping_company", allowedShippingCompanies);
+      }
+
+      const allowedPartyCandidates = Array.from(allowedPartyTypes.entries()).flatMap(
+        ([type, ids]) => ids.map((id) => ({ type, id })),
+      );
+
+      const shouldRequireParty = allowedPartyCandidates.length > 0;
+      const shouldDefaultParty =
+        !normalizedPartyType &&
+        parsedPartyId === null &&
+        allowedPartyCandidates.length === 1;
+      const resolvedParty =
+        shouldDefaultParty ? allowedPartyCandidates[0] : null;
+
+      const resolvedPartyType = resolvedParty?.type ?? normalizedPartyType;
+      const resolvedPartyId = resolvedParty?.id ?? parsedPartyId;
+
+      if (shouldRequireParty && (!resolvedPartyType || !resolvedPartyId)) {
         return res.status(400).json({
           error: {
-            code: "SUPPLIER_REQUIRED",
-            message: "يجب تحديد المورد المرتبط بهذه الشحنة.",
-            details: { field: "supplierId", shipmentSuppliers },
+            code: "PARTY_REQUIRED",
+            message: "يجب تحديد الطرف المرتبط بهذه الشحنة.",
+            details: { field: "partyId", shipmentSuppliers },
           },
         });
       }
 
-      if (
-        resolvedSupplierId &&
-        shouldRequireSupplier &&
-        !relevantSuppliers.includes(resolvedSupplierId)
-      ) {
+      if (resolvedPartyType && resolvedPartyId) {
+        const allowedIds = allowedPartyTypes.get(resolvedPartyType) ?? [];
+        if (allowedIds.length === 0 || !allowedIds.includes(resolvedPartyId)) {
         return res.status(400).json({
           error: {
-            code: "SUPPLIER_MISMATCH",
-            message: "المورد المحدد لا يطابق موردي الشحنة.",
+            code: "PARTY_MISMATCH",
+            message: "الطرف المحدد لا يطابق أطراف الشحنة.",
             details: {
-              field: "supplierId",
-              supplierId: resolvedSupplierId,
-              shipmentSuppliers: relevantSuppliers,
+              field: "partyId",
+              partyId: resolvedPartyId,
+              shipmentSuppliers,
             },
           },
         });
+        }
       }
 
       // Validate payment date
@@ -247,17 +284,31 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         }
       }
 
-      // Validate supplierId if provided
-      if (resolvedSupplierId) {
-        const supplier = await deps.storage.getSupplier(resolvedSupplierId);
-        if (!supplier) {
-          return res.status(400).json({
-            error: {
-              code: "SUPPLIER_NOT_FOUND",
-              message: "المورد المحدد غير موجود",
-              details: { field: "supplierId", supplierId: resolvedSupplierId },
-            },
-          });
+      // Validate party if provided
+      if (resolvedPartyType && resolvedPartyId) {
+        if (resolvedPartyType === "supplier") {
+          const supplier = await deps.storage.getSupplier(resolvedPartyId);
+          if (!supplier) {
+            return res.status(400).json({
+              error: {
+                code: "SUPPLIER_NOT_FOUND",
+                message: "المورد المحدد غير موجود",
+                details: { field: "partyId", partyId: resolvedPartyId },
+              },
+            });
+          }
+        }
+        if (resolvedPartyType === "shipping_company") {
+          const company = await deps.storage.getShippingCompany(resolvedPartyId);
+          if (!company) {
+            return res.status(400).json({
+              error: {
+                code: "SHIPPING_COMPANY_NOT_FOUND",
+                message: "شركة الشحن المحددة غير موجودة",
+                details: { field: "partyId", partyId: resolvedPartyId },
+              },
+            });
+          }
         }
       }
 
@@ -270,7 +321,8 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
 
       const payment = await deps.storage.createPayment({
         shipmentId: parsedShipmentId,
-        supplierId: resolvedSupplierId || null,
+        partyType: resolvedPartyType,
+        partyId: resolvedPartyId || null,
         paymentDate: parsedDate,
         paymentCurrency,
         amountOriginal: amountOriginal.toString(),
@@ -296,11 +348,12 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         actionType: "CREATE",
         details: {
           shipmentId,
-          supplierId: resolvedSupplierId || null,
-          supplierRule: {
+          partyType: resolvedPartyType,
+          partyId: resolvedPartyId || null,
+          partyRule: {
             shipmentSuppliers,
-            required: shouldRequireSupplier,
-            defaulted: shouldDefaultSupplier,
+            required: shouldRequireParty,
+            defaulted: shouldDefaultParty,
           },
           amount: normalizedAmounts.amountEgp.toString(),
           currency: paymentCurrency,
@@ -371,12 +424,8 @@ export async function registerRoutes(
   // Suppliers
   app.get("/api/suppliers", isAuthenticated, async (req, res) => {
     try {
-      const includeHidden = req.query.includeHidden === "true";
       const suppliers = await routeStorage.getAllSuppliers();
-      const filteredSuppliers = includeHidden
-        ? suppliers
-        : suppliers.filter((supplier) => !supplier.isHidden);
-      res.json(filteredSuppliers);
+      res.json(suppliers);
     } catch (error) {
       res.status(500).json({ message: "Error fetching suppliers" });
     }
@@ -424,6 +473,101 @@ export async function registerRoutes(
       res.status(500).json({ message: "Error deleting supplier" });
     }
   });
+
+  // Shipping Companies
+  app.get("/api/shipping-companies", isAuthenticated, async (_req, res) => {
+    try {
+      const companies = await routeStorage.getAllShippingCompanies();
+      res.json(companies);
+    } catch (error) {
+      res.status(500).json({ message: "Error fetching shipping companies" });
+    }
+  });
+
+  app.get("/api/shipping-companies/:id", isAuthenticated, async (req, res) => {
+    try {
+      const company = await routeStorage.getShippingCompany(parseInt(req.params.id));
+      if (!company) {
+        return res.status(404).json({ message: "Shipping company not found" });
+      }
+      res.json(company);
+    } catch (error) {
+      res.status(500).json({ message: "Error fetching shipping company" });
+    }
+  });
+
+  app.post(
+    "/api/shipping-companies",
+    requireRole(["مدير", "محاسب"]),
+    async (req, res) => {
+      try {
+        const data = insertShippingCompanySchema.parse(req.body);
+        const company = await routeStorage.createShippingCompany(data);
+
+        auditLogger({
+          userId: (req.user as any)?.id,
+          entityType: "SHIPPING_COMPANY",
+          entityId: String(company.id),
+          actionType: "CREATE",
+          details: { name: company.name },
+        });
+
+        res.json(company);
+      } catch (error) {
+        res.status(400).json({ message: "Invalid data" });
+      }
+    },
+  );
+
+  app.patch(
+    "/api/shipping-companies/:id",
+    requireRole(["مدير", "محاسب"]),
+    async (req, res) => {
+      try {
+        const company = await routeStorage.updateShippingCompany(
+          parseInt(req.params.id),
+          req.body,
+        );
+        if (!company) {
+          return res.status(404).json({ message: "Shipping company not found" });
+        }
+
+        auditLogger({
+          userId: (req.user as any)?.id,
+          entityType: "SHIPPING_COMPANY",
+          entityId: String(company.id),
+          actionType: "UPDATE",
+          details: { name: company.name },
+        });
+
+        res.json(company);
+      } catch (error) {
+        res.status(500).json({ message: "Error updating shipping company" });
+      }
+    },
+  );
+
+  app.delete(
+    "/api/shipping-companies/:id",
+    requireRole(["مدير", "محاسب"]),
+    async (req, res) => {
+      try {
+        const id = parseInt(req.params.id);
+        await routeStorage.deleteShippingCompany(id);
+
+        auditLogger({
+          userId: (req.user as any)?.id,
+          entityType: "SHIPPING_COMPANY",
+          entityId: String(id),
+          actionType: "DELETE",
+        });
+
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({ message: "Error deleting shipping company" });
+      }
+    },
+  );
 
   // Product Types
   app.get("/api/product-types", isAuthenticated, async (req, res) => {
@@ -500,7 +644,7 @@ export async function registerRoutes(
         actionType: "CREATE",
         details: {
           status: shipment.status,
-          shippingCompanySupplierId: shipment.shippingCompanySupplierId ?? null,
+          shippingCompanyId: shipment.shippingCompanyId ?? null,
         },
       });
       
@@ -518,12 +662,12 @@ export async function registerRoutes(
       
       const existingShipment = await routeStorage.getShipment(shipmentId);
       const previousStatus = existingShipment?.status;
-      const previousShippingCompanySupplierId =
-        existingShipment?.shippingCompanySupplierId ?? null;
+      const previousShippingCompanyId =
+        existingShipment?.shippingCompanyId ?? null;
       
       const updatedShipment = await shipmentService.updateShipmentWithItems(shipmentId, req.body);
-      const nextShippingCompanySupplierId =
-        updatedShipment?.shippingCompanySupplierId ?? null;
+      const nextShippingCompanyId =
+        updatedShipment?.shippingCompanyId ?? null;
       
       auditLogger({
         userId,
@@ -533,12 +677,12 @@ export async function registerRoutes(
         details: {
           step: req.body.step,
           status: updatedShipment?.status,
-          shippingCompanySupplierId: nextShippingCompanySupplierId,
-          shippingCompanySupplierChange:
-            previousShippingCompanySupplierId !== nextShippingCompanySupplierId
+          shippingCompanyId: nextShippingCompanyId,
+          shippingCompanyChange:
+            previousShippingCompanyId !== nextShippingCompanyId
               ? {
-                  from: previousShippingCompanySupplierId,
-                  to: nextShippingCompanySupplierId,
+                  from: previousShippingCompanyId,
+                  to: nextShippingCompanyId,
                 }
               : undefined,
         },
@@ -1137,7 +1281,8 @@ export async function registerRoutes(
       const filters = {
         dateFrom: req.query.dateFrom as string | undefined,
         dateTo: req.query.dateTo as string | undefined,
-        supplierId: req.query.supplierId ? parseInt(req.query.supplierId as string) : undefined,
+        partyType: req.query.partyType as "supplier" | "shipping_company" | undefined,
+        partyId: req.query.partyId ? parseInt(req.query.partyId as string) : undefined,
         shipmentCode: req.query.shipmentCode as string | undefined,
         shipmentStatus: req.query.shipmentStatus as string | undefined,
         paymentStatus: req.query.paymentStatus as string | undefined,
@@ -1182,13 +1327,56 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/accounting/shipping-company-balances", isAuthenticated, async (req, res) => {
+    try {
+      const filters = {
+        dateFrom: req.query.dateFrom as string | undefined,
+        dateTo: req.query.dateTo as string | undefined,
+        shippingCompanyId: req.query.shippingCompanyId
+          ? parseInt(req.query.shippingCompanyId as string)
+          : undefined,
+        balanceType: req.query.balanceType as 'owing' | 'credit' | 'all' | undefined,
+      };
+      const balances = await routeStorage.getShippingCompanyBalances(filters);
+      res.json(balances);
+    } catch (error) {
+      console.error("Error fetching shipping company balances:", error);
+      res.status(500).json({ message: "Error fetching shipping company balances" });
+    }
+  });
+
+  app.get(
+    "/api/accounting/shipping-company-statement/:shippingCompanyId",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const shippingCompanyId = parseInt(req.params.shippingCompanyId);
+        const filters = {
+          dateFrom: req.query.dateFrom as string | undefined,
+          dateTo: req.query.dateTo as string | undefined,
+        };
+        const statement = await routeStorage.getShippingCompanyStatement(
+          shippingCompanyId,
+          filters,
+        );
+        res.json(statement);
+      } catch (error) {
+        console.error("Error fetching shipping company statement:", error);
+        res
+          .status(500)
+          .json({ message: "Error fetching shipping company statement" });
+      }
+    },
+  );
+
   app.get("/api/accounting/movement-report", isAuthenticated, async (req, res) => {
     try {
       const filters = {
         dateFrom: req.query.dateFrom as string | undefined,
         dateTo: req.query.dateTo as string | undefined,
         shipmentId: req.query.shipmentId ? parseInt(req.query.shipmentId as string) : undefined,
-        supplierId: req.query.supplierId ? parseInt(req.query.supplierId as string) : undefined,
+        partyType: req.query.partyType as "supplier" | "shipping_company" | undefined,
+        partyId: req.query.partyId ? parseInt(req.query.partyId as string) : undefined,
         movementType: req.query.movementType as string | undefined,
         costComponent: req.query.costComponent as string | undefined,
         paymentMethod: req.query.paymentMethod as string | undefined,

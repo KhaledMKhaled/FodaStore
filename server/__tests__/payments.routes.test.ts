@@ -61,6 +61,22 @@ class FakeStorage {
     return this.payments;
   }
 
+  async getShipmentSupplierContext() {
+    return {
+      itemSuppliers: [],
+      shippingCompanyId: null,
+      shipmentSuppliers: [],
+    };
+  }
+
+  async getSupplier(id: number) {
+    return { id };
+  }
+
+  async getShippingCompany(id: number) {
+    return { id };
+  }
+
   async getLatestRate(from: string, to: string) {
     const sorted = this.exchangeRates
       .filter((rate) => rate.fromCurrency === from && rate.toCurrency === to)
@@ -285,6 +301,7 @@ function shipmentFixture(id: number, overrides: Partial<Shipment> = {}): Shipmen
     purchaseDate: baseDate,
     status: "جديدة",
     invoiceCustomsDate: null,
+    shippingCompanyId: null,
     createdByUserId: null,
     purchaseCostRmb: "0",
     purchaseCostEgp: "0",
@@ -362,7 +379,7 @@ test("creates EGP and RMB payments and updates shipment aggregates", async () =>
       paymentCurrency: "EGP",
       amountOriginal: "120",
       amountEgp: "120",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "نقدي",
       cashReceiverName: "Ali",
     }),
@@ -382,7 +399,7 @@ test("creates EGP and RMB payments and updates shipment aggregates", async () =>
       amountOriginal: "10",
       exchangeRateToEgp: "5.5",
       amountEgp: "55",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "تحويل بنكي",
     }),
   });
@@ -427,7 +444,7 @@ test("blocks overpayment and keeps storage unchanged", async () => {
       paymentCurrency: "EGP",
       amountOriginal: "150",
       amountEgp: "150",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "نقدي",
     }),
   });
@@ -467,7 +484,7 @@ test("uses stored exchange rate for RMB payments and errors when missing", async
       amountOriginal: "10",
       exchangeRateToEgp: null,
       amountEgp: "0",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "نقدي",
     }),
   });
@@ -489,7 +506,7 @@ test("uses stored exchange rate for RMB payments and errors when missing", async
       paymentCurrency: "RMB",
       amountOriginal: "5",
       amountEgp: "0",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "نقدي",
     }),
   });
@@ -524,7 +541,7 @@ test("allows payments when optional costs are null or zero", async () => {
       paymentCurrency: "EGP",
       amountOriginal: "125",
       amountEgp: "125",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "نقدي",
     }),
   });
@@ -555,7 +572,7 @@ test("applies overpayment tolerance but rejects amounts above it", async () => {
       paymentCurrency: "EGP",
       amountOriginal: "0.01009",
       amountEgp: "0.01009",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "نقدي",
     }),
   });
@@ -573,7 +590,7 @@ test("applies overpayment tolerance but rejects amounts above it", async () => {
       paymentCurrency: "EGP",
       amountOriginal: "0.01011",
       amountEgp: "0.01011",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "نقدي",
     }),
   });
@@ -599,7 +616,7 @@ test("returns 404 for missing shipments and 400 for invalid dates", async () => 
       paymentCurrency: "EGP",
       amountOriginal: "10",
       amountEgp: "10",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "نقدي",
     }),
   });
@@ -617,7 +634,7 @@ test("returns 404 for missing shipments and 400 for invalid dates", async () => 
       paymentCurrency: "EGP",
       amountOriginal: "10",
       amountEgp: "10",
-      costComponent: "شراء",
+      costComponent: "تكلفة البضاعة",
       paymentMethod: "نقدي",
     }),
   });

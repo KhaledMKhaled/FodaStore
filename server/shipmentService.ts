@@ -8,7 +8,7 @@ import {
   shipmentItems,
   shipments,
   shipmentShippingDetails,
-  suppliers,
+  shippingCompanies,
   type InsertShipmentItem,
   type Shipment,
   type ShipmentItem,
@@ -59,19 +59,19 @@ function calculateItemTotals(items: ShipmentItem[]) {
   };
 }
 
-async function ensureShippingCompanySupplierExists(
-  shippingCompanySupplierId?: number | null
+async function ensureShippingCompanyExists(
+  shippingCompanyId?: number | null
 ) {
-  if (shippingCompanySupplierId === undefined || shippingCompanySupplierId === null) {
+  if (shippingCompanyId === undefined || shippingCompanyId === null) {
     return;
   }
 
-  const [supplier] = await db
+  const [company] = await db
     .select()
-    .from(suppliers)
-    .where(eq(suppliers.id, shippingCompanySupplierId));
+    .from(shippingCompanies)
+    .where(eq(shippingCompanies.id, shippingCompanyId));
 
-  if (!supplier) {
+  if (!company) {
     throw new Error("شركة الشحن غير موجودة");
   }
 }
@@ -88,7 +88,7 @@ export async function createShipmentWithItems(
       createdByUserId: userId,
     });
 
-    await ensureShippingCompanySupplierExists(validatedShipment.shippingCompanySupplierId ?? null);
+    await ensureShippingCompanyExists(validatedShipment.shippingCompanyId ?? null);
 
     const purchaseRateFromPayload = validatedShipment.purchaseRmbToEgpRate
       ? parseFloat(validatedShipment.purchaseRmbToEgpRate)
@@ -186,9 +186,9 @@ export async function updateShipmentWithItems(
       ? insertShipmentSchema.partial().parse(shipmentData)
       : undefined;
 
-    if (validatedShipmentData?.shippingCompanySupplierId !== undefined) {
-      await ensureShippingCompanySupplierExists(
-        validatedShipmentData.shippingCompanySupplierId ?? null
+    if (validatedShipmentData?.shippingCompanyId !== undefined) {
+      await ensureShippingCompanyExists(
+        validatedShipmentData.shippingCompanyId ?? null
       );
     }
 

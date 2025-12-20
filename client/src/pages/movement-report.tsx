@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,7 @@ import {
   TrendingDown,
   ArrowUpDown,
 } from "lucide-react";
-import type { Supplier, Shipment } from "@shared/schema";
+import type { Shipment, ShippingCompany, Supplier } from "@shared/schema";
 import { costComponentColors } from "@/lib/colorMaps";
 
 interface MovementReportData {
@@ -34,8 +34,9 @@ interface MovementReportData {
     date: Date | string;
     shipmentCode: string;
     shipmentName: string;
-    supplierName?: string;
-    supplierId?: number;
+    partyName?: string;
+    partyId?: number;
+    partyType?: "supplier" | "shipping_company";
     movementType: string;
     costComponent?: string;
     paymentMethod?: string;
@@ -95,7 +96,8 @@ const paymentMethods = [
 export default function MovementReportPage() {
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [supplierId, setSupplierId] = useState<string>("");
+  const [partyType, setPartyType] = useState<"supplier" | "shipping_company">("supplier");
+  const [partyId, setPartyId] = useState<string>("");
   const [shipmentId, setShipmentId] = useState<string>("");
   const [movementType, setMovementType] = useState<string>("all");
   const [costComponent, setCostComponent] = useState<string>("all");
@@ -107,7 +109,10 @@ export default function MovementReportPage() {
   const queryParams = new URLSearchParams();
   if (dateFrom) queryParams.append("dateFrom", dateFrom);
   if (dateTo) queryParams.append("dateTo", dateTo);
-  if (supplierId && supplierId !== "all") queryParams.append("supplierId", supplierId);
+  if (partyId && partyId !== "all") {
+    queryParams.append("partyType", partyType);
+    queryParams.append("partyId", partyId);
+  }
   if (shipmentId && shipmentId !== "all") queryParams.append("shipmentId", shipmentId);
   if (movementType && movementType !== "all") queryParams.append("movementType", movementType);
   if (costComponent && costComponent !== "all") queryParams.append("costComponent", costComponent);
@@ -119,7 +124,17 @@ export default function MovementReportPage() {
   const { data: report, isLoading } = useQuery<MovementReportData>({
     queryKey: [
       "/api/accounting/movement-report",
-      dateFrom, dateTo, supplierId, shipmentId, movementType, costComponent, paymentMethod, shipmentStatus, paymentStatus, includeArchived
+      dateFrom,
+      dateTo,
+      partyType,
+      partyId,
+      shipmentId,
+      movementType,
+      costComponent,
+      paymentMethod,
+      shipmentStatus,
+      paymentStatus,
+      includeArchived
     ],
     queryFn: async () => {
       const response = await fetch(`/api/accounting/movement-report?${queryParams.toString()}`, {
@@ -131,7 +146,11 @@ export default function MovementReportPage() {
   });
 
   const { data: suppliers } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers?includeHidden=true"],
+    queryKey: ["/api/suppliers"],
+  });
+
+  const { data: shippingCompanies } = useQuery<ShippingCompany[]>({
+    queryKey: ["/api/shipping-companies"],
   });
 
   const { data: shipments } = useQuery<Shipment[]>({
@@ -141,7 +160,8 @@ export default function MovementReportPage() {
   const clearFilters = () => {
     setDateFrom("");
     setDateTo("");
-    setSupplierId("");
+    setPartyType("supplier");
+    setPartyId("");
     setShipmentId("");
     setMovementType("all");
     setCostComponent("all");
@@ -151,15 +171,19 @@ export default function MovementReportPage() {
     setIncludeArchived(false);
   };
 
+  useEffect(() => {
+    setPartyId("");
+  }, [partyType]);
+
   const exportToCSV = () => {
     if (!report?.movements) return;
     
-    const headers = ["التاريخ", "رقم الشحنة", "اسم الشحنة", "المورد", "نوع الحركة", "تحت حساب", "طريقة الدفع", "العملة", "المبلغ الأصلي", "المبلغ بالجنيه", "الاتجاه"];
+    const headers = ["التاريخ", "رقم الشحنة", "اسم الشحنة", "الطرف", "نوع الحركة", "تحت حساب", "طريقة الدفع", "العملة", "المبلغ الأصلي", "المبلغ بالجنيه", "الاتجاه"];
     const rows = report.movements.map(m => [
       formatDate(m.date),
       m.shipmentCode,
       m.shipmentName,
-      m.supplierName || "",
+      m.partyName || "",
       m.movementType,
       m.costComponent || "",
       m.paymentMethod || "",
@@ -214,7 +238,7 @@ export default function MovementReportPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
             <div className="space-y-2">
               <Label>من تاريخ</Label>
               <Input
@@ -250,16 +274,31 @@ export default function MovementReportPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>المورد</Label>
-              <Select value={supplierId} onValueChange={setSupplierId}>
-                <SelectTrigger data-testid="select-supplier">
-                  <SelectValue placeholder="جميع الموردين" />
+              <Label>نوع الطرف</Label>
+              <Select
+                value={partyType}
+                onValueChange={(value) => setPartyType(value as "supplier" | "shipping_company")}
+              >
+                <SelectTrigger data-testid="select-party-type">
+                  <SelectValue placeholder="اختر نوع الطرف" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">جميع الموردين</SelectItem>
-                  {suppliers?.map((s) => (
-                    <SelectItem key={s.id} value={s.id.toString()}>
-                      {s.name}
+                  <SelectItem value="supplier">مورد</SelectItem>
+                  <SelectItem value="shipping_company">شركة شحن</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>الطرف</Label>
+              <Select value={partyId} onValueChange={setPartyId}>
+                <SelectTrigger data-testid="select-party">
+                  <SelectValue placeholder="جميع الأطراف" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">جميع الأطراف</SelectItem>
+                  {(partyType === "supplier" ? suppliers : shippingCompanies)?.map((p) => (
+                    <SelectItem key={p.id} value={p.id.toString()}>
+                      {p.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -415,7 +454,7 @@ export default function MovementReportPage() {
                 <TableRow>
                   <TableHead className="text-right sticky top-0 bg-background">التاريخ</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">رقم الشحنة</TableHead>
-                  <TableHead className="text-right sticky top-0 bg-background">المورد</TableHead>
+                  <TableHead className="text-right sticky top-0 bg-background">الطرف</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">نوع الحركة</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">تحت حساب</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">طريقة الدفع</TableHead>
@@ -436,7 +475,7 @@ export default function MovementReportPage() {
                     <TableRow key={idx} data-testid={`row-movement-${idx}`}>
                       <TableCell>{formatDate(m.date)}</TableCell>
                       <TableCell className="font-mono">{m.shipmentCode}</TableCell>
-                      <TableCell>{m.supplierName || "-"}</TableCell>
+                      <TableCell>{m.partyName || "-"}</TableCell>
                       <TableCell>
                         <Badge variant="outline">{m.movementType}</Badge>
                       </TableCell>

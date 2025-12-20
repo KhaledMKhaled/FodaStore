@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
-  Users,
+  Truck,
   Plus,
   Search,
   Edit,
@@ -10,6 +10,7 @@ import {
   Mail,
   MapPin,
   Building,
+  User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,27 +29,27 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Supplier, InsertSupplier } from "@shared/schema";
+import type { InsertShippingCompany, ShippingCompany } from "@shared/schema";
 
-export default function Suppliers() {
+export default function ShippingCompanies() {
   const [search, setSearch] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [editingCompany, setEditingCompany] = useState<ShippingCompany | null>(null);
   const { toast } = useToast();
 
-  const { data: suppliers, isLoading } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers"],
+  const { data: companies, isLoading } = useQuery<ShippingCompany[]>({
+    queryKey: ["/api/shipping-companies"],
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: InsertSupplier) => {
-      return apiRequest("POST", "/api/suppliers", data);
+    mutationFn: async (data: InsertShippingCompany) => {
+      return apiRequest("POST", "/api/shipping-companies", data);
     },
     onSuccess: () => {
-      toast({ title: "تم إضافة المورد بنجاح" });
-      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      toast({ title: "تم إضافة شركة الشحن بنجاح" });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping-companies"] });
       setIsDialogOpen(false);
-      setEditingSupplier(null);
+      setEditingCompany(null);
     },
     onError: () => {
       toast({ title: "حدث خطأ", variant: "destructive" });
@@ -56,14 +57,14 @@ export default function Suppliers() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: Partial<InsertSupplier> }) => {
-      return apiRequest("PATCH", `/api/suppliers/${id}`, data);
+    mutationFn: async ({ id, data }: { id: number; data: Partial<InsertShippingCompany> }) => {
+      return apiRequest("PATCH", `/api/shipping-companies/${id}`, data);
     },
     onSuccess: () => {
-      toast({ title: "تم تحديث المورد بنجاح" });
-      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      toast({ title: "تم تحديث شركة الشحن بنجاح" });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping-companies"] });
       setIsDialogOpen(false);
-      setEditingSupplier(null);
+      setEditingCompany(null);
     },
     onError: () => {
       toast({ title: "حدث خطأ", variant: "destructive" });
@@ -72,51 +73,52 @@ export default function Suppliers() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      return apiRequest("DELETE", `/api/suppliers/${id}`);
+      return apiRequest("DELETE", `/api/shipping-companies/${id}`);
     },
     onSuccess: () => {
-      toast({ title: "تم حذف المورد بنجاح" });
-      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      toast({ title: "تم حذف شركة الشحن بنجاح" });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping-companies"] });
     },
     onError: () => {
       toast({ title: "حدث خطأ", variant: "destructive" });
     },
   });
 
-  const filteredSuppliers = suppliers?.filter(
-    (supplier) =>
+  const filteredCompanies = companies?.filter(
+    (company) =>
       !search ||
-      supplier.name.toLowerCase().includes(search.toLowerCase()) ||
-      supplier.country?.toLowerCase().includes(search.toLowerCase())
+      company.name.toLowerCase().includes(search.toLowerCase()) ||
+      company.phone?.toLowerCase().includes(search.toLowerCase()) ||
+      company.contactName?.toLowerCase().includes(search.toLowerCase())
   );
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    const data: InsertSupplier = {
+    const data: InsertShippingCompany = {
       name: formData.get("name") as string,
-      description: (formData.get("description") as string) || null,
-      country: (formData.get("country") as string) || "الصين",
+      contactName: (formData.get("contactName") as string) || null,
       phone: (formData.get("phone") as string) || null,
       email: (formData.get("email") as string) || null,
       address: (formData.get("address") as string) || null,
+      notes: (formData.get("notes") as string) || null,
       isActive: formData.get("isActive") === "on",
     };
 
-    if (editingSupplier) {
-      updateMutation.mutate({ id: editingSupplier.id, data });
+    if (editingCompany) {
+      updateMutation.mutate({ id: editingCompany.id, data });
     } else {
       createMutation.mutate(data);
     }
   };
 
-  const openEditDialog = (supplier: Supplier) => {
-    setEditingSupplier(supplier);
+  const openEditDialog = (company: ShippingCompany) => {
+    setEditingCompany(company);
     setIsDialogOpen(true);
   };
 
   const openNewDialog = () => {
-    setEditingSupplier(null);
+    setEditingCompany(null);
     setIsDialogOpen(true);
   };
 
@@ -125,42 +127,42 @@ export default function Suppliers() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">الموردون</h1>
+          <h1 className="text-3xl font-semibold">شركات الشحن</h1>
           <p className="text-muted-foreground mt-1">
-            إضافة وتعديل بيانات الموردين المرتبطين بكل صنف
+            إدارة بيانات شركات الشحن المرتبطة بالشحنات
           </p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button onClick={openNewDialog} data-testid="button-add-supplier">
+            <Button onClick={openNewDialog} data-testid="button-add-shipping-company">
               <Plus className="w-4 h-4 ml-2" />
-              إضافة مورد جديد
+              إضافة شركة شحن جديدة
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>
-                {editingSupplier ? "تعديل المورد" : "إضافة مورد جديد"}
+                {editingCompany ? "تعديل شركة الشحن" : "إضافة شركة شحن جديدة"}
               </DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="name">اسم المورد *</Label>
+                <Label htmlFor="name">اسم شركة الشحن *</Label>
                 <Input
                   id="name"
                   name="name"
-                  defaultValue={editingSupplier?.name || ""}
+                  defaultValue={editingCompany?.name || ""}
                   required
-                  data-testid="input-supplier-name"
+                  data-testid="input-shipping-company-name"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="country">البلد</Label>
+                <Label htmlFor="contactName">اسم جهة الاتصال</Label>
                 <Input
-                  id="country"
-                  name="country"
-                  defaultValue={editingSupplier?.country || "الصين"}
-                  data-testid="input-supplier-country"
+                  id="contactName"
+                  name="contactName"
+                  defaultValue={editingCompany?.contactName || ""}
+                  data-testid="input-shipping-company-contact"
                 />
               </div>
               <div className="space-y-2">
@@ -168,8 +170,8 @@ export default function Suppliers() {
                 <Input
                   id="phone"
                   name="phone"
-                  defaultValue={editingSupplier?.phone || ""}
-                  data-testid="input-supplier-phone"
+                  defaultValue={editingCompany?.phone || ""}
+                  data-testid="input-shipping-company-phone"
                 />
               </div>
               <div className="space-y-2">
@@ -178,8 +180,8 @@ export default function Suppliers() {
                   id="email"
                   name="email"
                   type="email"
-                  defaultValue={editingSupplier?.email || ""}
-                  data-testid="input-supplier-email"
+                  defaultValue={editingCompany?.email || ""}
+                  data-testid="input-shipping-company-email"
                 />
               </div>
               <div className="space-y-2">
@@ -187,26 +189,26 @@ export default function Suppliers() {
                 <Textarea
                   id="address"
                   name="address"
-                  defaultValue={editingSupplier?.address || ""}
+                  defaultValue={editingCompany?.address || ""}
                   rows={2}
-                  data-testid="input-supplier-address"
+                  data-testid="input-shipping-company-address"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="description">الوصف</Label>
+                <Label htmlFor="notes">ملاحظات</Label>
                 <Textarea
-                  id="description"
-                  name="description"
-                  defaultValue={editingSupplier?.description || ""}
+                  id="notes"
+                  name="notes"
+                  defaultValue={editingCompany?.notes || ""}
                   rows={2}
-                  data-testid="input-supplier-description"
+                  data-testid="input-shipping-company-notes"
                 />
               </div>
               <div className="flex items-center gap-2">
                 <Switch
                   id="isActive"
                   name="isActive"
-                  defaultChecked={editingSupplier?.isActive ?? true}
+                  defaultChecked={editingCompany?.isActive ?? true}
                 />
                 <Label htmlFor="isActive">نشط</Label>
               </div>
@@ -215,7 +217,7 @@ export default function Suppliers() {
                   type="submit"
                   className="flex-1"
                   disabled={createMutation.isPending || updateMutation.isPending}
-                  data-testid="button-save-supplier"
+                  data-testid="button-save-shipping-company"
                 >
                   {createMutation.isPending || updateMutation.isPending
                     ? "جاري الحفظ..."
@@ -240,30 +242,30 @@ export default function Suppliers() {
           <div className="relative max-w-md">
             <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="بحث بالاسم أو البلد..."
+              placeholder="بحث بالاسم أو جهة الاتصال..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pr-10"
-              data-testid="input-search-suppliers"
+              data-testid="input-search-shipping-companies"
             />
           </div>
         </CardContent>
       </Card>
 
-      {/* Suppliers Grid */}
+      {/* Companies Grid */}
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <Skeleton key={i} className="h-48" />
           ))}
         </div>
-      ) : filteredSuppliers && filteredSuppliers.length > 0 ? (
+      ) : filteredCompanies && filteredCompanies.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredSuppliers.map((supplier) => (
+          {filteredCompanies.map((company) => (
             <Card
-              key={supplier.id}
+              key={company.id}
               className="hover-elevate"
-              data-testid={`card-supplier-${supplier.id}`}
+              data-testid={`card-shipping-company-${company.id}`}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
@@ -272,44 +274,50 @@ export default function Suppliers() {
                       <Building className="w-5 h-5 text-primary" />
                     </div>
                     <div>
-                      <CardTitle className="text-lg">{supplier.name}</CardTitle>
+                      <CardTitle className="text-lg">{company.name}</CardTitle>
                       <div className="flex items-center gap-2 mt-1">
                         <MapPin className="w-3 h-3 text-muted-foreground" />
                         <span className="text-sm text-muted-foreground">
-                          {supplier.country || "الصين"}
+                          {company.address || "غير محدد"}
                         </span>
                       </div>
                     </div>
                   </div>
                   <Badge
-                    variant={supplier.isActive ? "default" : "secondary"}
+                    variant={company.isActive ? "default" : "secondary"}
                     className={
-                      supplier.isActive
+                      company.isActive
                         ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
                         : ""
                     }
                   >
-                    {supplier.isActive ? "نشط" : "غير نشط"}
+                    {company.isActive ? "نشط" : "غير نشط"}
                   </Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                {supplier.description && (
+                {company.notes && (
                   <p className="text-sm text-muted-foreground line-clamp-2">
-                    {supplier.description}
+                    {company.notes}
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-                  {supplier.phone && (
+                  {company.contactName && (
                     <div className="flex items-center gap-1">
-                      <Phone className="w-3 h-3" />
-                      <span>{supplier.phone}</span>
+                      <User className="w-3 h-3" />
+                      <span>{company.contactName}</span>
                     </div>
                   )}
-                  {supplier.email && (
+                  {company.phone && (
+                    <div className="flex items-center gap-1">
+                      <Phone className="w-3 h-3" />
+                      <span>{company.phone}</span>
+                    </div>
+                  )}
+                  {company.email && (
                     <div className="flex items-center gap-1">
                       <Mail className="w-3 h-3" />
-                      <span>{supplier.email}</span>
+                      <span>{company.email}</span>
                     </div>
                   )}
                 </div>
@@ -318,8 +326,8 @@ export default function Suppliers() {
                     variant="outline"
                     size="sm"
                     className="flex-1"
-                    onClick={() => openEditDialog(supplier)}
-                    data-testid={`button-edit-supplier-${supplier.id}`}
+                    onClick={() => openEditDialog(company)}
+                    data-testid={`button-edit-shipping-company-${company.id}`}
                   >
                     <Edit className="w-4 h-4 ml-1" />
                     تعديل
@@ -328,9 +336,9 @@ export default function Suppliers() {
                     variant="outline"
                     size="sm"
                     className="text-destructive"
-                    onClick={() => deleteMutation.mutate(supplier.id)}
+                    onClick={() => deleteMutation.mutate(company.id)}
                     disabled={deleteMutation.isPending}
-                    data-testid={`button-delete-supplier-${supplier.id}`}
+                    data-testid={`button-delete-shipping-company-${company.id}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -344,15 +352,15 @@ export default function Suppliers() {
           <CardContent className="py-16">
             <div className="flex flex-col items-center justify-center text-center">
               <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center mb-6">
-                <Users className="w-10 h-10 text-muted-foreground" />
+                <Truck className="w-10 h-10 text-muted-foreground" />
               </div>
-              <h3 className="text-xl font-medium mb-2">لا يوجد موردون</h3>
+              <h3 className="text-xl font-medium mb-2">لا توجد شركات شحن</h3>
               <p className="text-muted-foreground mb-6">
-                ابدأ بإضافة موردك الأول لربطه بالأصناف
+                ابدأ بإضافة شركة الشحن الأولى لربطها بالشحنات
               </p>
               <Button onClick={openNewDialog}>
                 <Plus className="w-4 h-4 ml-2" />
-                إضافة مورد جديد
+                إضافة شركة شحن جديدة
               </Button>
             </div>
           </CardContent>

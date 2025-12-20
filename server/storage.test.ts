@@ -18,6 +18,7 @@ const baseShipment: Shipment = {
   purchaseDate: new Date("2024-01-01"),
   status: "جديدة",
   invoiceCustomsDate: null,
+  shippingCompanyId: null,
   createdByUserId: null,
   purchaseCostRmb: "0",
   purchaseCostEgp: "0",
@@ -76,7 +77,6 @@ const buildSupplier = (overrides: Partial<Supplier>): Supplier => ({
   email: null,
   address: null,
   isActive: true,
-  isHidden: false,
   createdAt: new Date("2024-01-02"),
   updatedAt: new Date("2024-01-02"),
   ...overrides,
@@ -85,13 +85,14 @@ const buildSupplier = (overrides: Partial<Supplier>): Supplier => ({
 const buildPayment = (overrides: Partial<ShipmentPayment>): ShipmentPayment => ({
   id: 1,
   shipmentId: baseShipment.id,
-  supplierId: null,
+  partyType: null,
+  partyId: null,
   paymentDate: new Date("2024-01-05"),
   paymentCurrency: "EGP",
   amountOriginal: "40",
   exchangeRateToEgp: null,
   amountEgp: "40",
-  costComponent: "شراء",
+  costComponent: "تكلفة البضاعة",
   paymentMethod: "نقدي",
   cashReceiverName: null,
   referenceNumber: null,
@@ -109,6 +110,7 @@ const buildPayment = (overrides: Partial<ShipmentPayment>): ShipmentPayment => (
 
 const buildReportingStorage = (data: {
   suppliers: Supplier[];
+  shippingCompanies?: Array<{ id: number; name: string }>;
   shipments: Shipment[];
   payments: ShipmentPayment[];
   itemsByShipment: Map<number, ShipmentItem[]>;
@@ -118,6 +120,9 @@ const buildReportingStorage = (data: {
   storage.getAllSuppliers = async () => data.suppliers;
   storage.getSupplier = async (id: number) =>
     data.suppliers.find((supplier) => supplier.id === id);
+  storage.getAllShippingCompanies = async () => data.shippingCompanies ?? [];
+  storage.getShippingCompany = async (id: number) =>
+    data.shippingCompanies?.find((company) => company.id === id);
   storage.getAllShipments = async () => data.shipments;
   storage.getAllPayments = async () => data.payments;
   storage.getShipmentItems = async (shipmentId: number) =>
@@ -253,9 +258,9 @@ describe("computeShipmentKnownTotal", () => {
 });
 
 describe("supplier reporting with payment supplier overrides", () => {
-  it("prefers payment supplierId for supplier balances", async () => {
+  it("prefers payment supplier party for supplier balances", async () => {
     const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
-    const supplierB = buildSupplier({ id: 2, name: "Supplier B", isHidden: true });
+    const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
     const shipment = buildShipment({
       id: 10,
       shipmentCode: "S-10",
@@ -268,7 +273,8 @@ describe("supplier reporting with payment supplier overrides", () => {
     ]);
     const payment = buildPayment({
       shipmentId: shipment.id,
-      supplierId: 2,
+      partyType: "supplier",
+      partyId: 2,
       amountEgp: "40.00",
     });
 
@@ -293,7 +299,7 @@ describe("supplier reporting with payment supplier overrides", () => {
     assert.equal(balanceB?.balanceStatus, "credit");
   });
 
-  it("uses payment supplierId in supplier statements", async () => {
+  it("uses payment supplier party in supplier statements", async () => {
     const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
     const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
     const shipment = buildShipment({
@@ -308,7 +314,8 @@ describe("supplier reporting with payment supplier overrides", () => {
     ]);
     const payment = buildPayment({
       shipmentId: shipment.id,
-      supplierId: 2,
+      partyType: "supplier",
+      partyId: 2,
       amountEgp: "20.00",
       paymentDate: new Date("2024-01-06"),
     });
@@ -329,7 +336,7 @@ describe("supplier reporting with payment supplier overrides", () => {
     assert.equal(paymentMovement?.runningBalance, "-20.00");
   });
 
-  it("attributes movement report payments to payment supplierId", async () => {
+  it("attributes movement report payments to payment supplier party", async () => {
     const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
     const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
     const shipment = buildShipment({
@@ -345,7 +352,8 @@ describe("supplier reporting with payment supplier overrides", () => {
     ]);
     const payment = buildPayment({
       shipmentId: shipment.id,
-      supplierId: 2,
+      partyType: "supplier",
+      partyId: 2,
       amountEgp: "30.00",
       paymentDate: new Date("2024-01-07"),
     });
@@ -366,18 +374,15 @@ describe("supplier reporting with payment supplier overrides", () => {
       (movement) => movement.movementType === "تكلفة بضاعة",
     );
 
-    assert.equal(paymentMovement?.supplierId, supplierB.id);
-    assert.equal(paymentMovement?.supplierName, "Supplier B");
-    assert.equal(costMovement?.supplierId, supplierA.id);
+    assert.equal(paymentMovement?.partyId, supplierB.id);
+    assert.equal(paymentMovement?.partyName, "Supplier B");
+    assert.equal(paymentMovement?.partyType, "supplier");
+    assert.equal(costMovement?.partyId, supplierA.id);
   });
 
-  it("maps shipping company costs to shipping supplier while purchase stays with item supplier", async () => {
+  it("maps shipping company costs to shipping company while purchase stays with item supplier", async () => {
     const purchaseSupplier = buildSupplier({ id: 5, name: "Purchase Supplier" });
-    const shippingSupplier = buildSupplier({
-      id: 6,
-      name: "Shipping Supplier",
-      isHidden: true,
-    });
+    const shippingCompany = { id: 6, name: "Shipping Company" };
     const shipment = buildShipment({
       id: 20,
       shipmentCode: "S-20",
@@ -391,7 +396,7 @@ describe("supplier reporting with payment supplier overrides", () => {
       commissionCostEgp: "70.00",
       customsCostEgp: "40.00",
       takhreegCostEgp: "30.00",
-      shippingCompanySupplierId: shippingSupplier.id,
+      shippingCompanyId: shippingCompany.id,
       finalTotalCostEgp: "1890.00",
     });
     const itemsByShipment = new Map<number, ShipmentItem[]>([
@@ -399,7 +404,8 @@ describe("supplier reporting with payment supplier overrides", () => {
     ]);
 
     const storage = buildReportingStorage({
-      suppliers: [purchaseSupplier, shippingSupplier],
+      suppliers: [purchaseSupplier],
+      shippingCompanies: [shippingCompany],
       shipments: [shipment],
       payments: [],
       itemsByShipment,
@@ -410,10 +416,10 @@ describe("supplier reporting with payment supplier overrides", () => {
       report.movements.map((movement) => [movement.movementType, movement]),
     );
 
-    assert.equal(movementByType.get("تكلفة بضاعة")?.supplierId, purchaseSupplier.id);
-    assert.equal(movementByType.get("تكلفة شحن")?.supplierId, shippingSupplier.id);
-    assert.equal(movementByType.get("عمولة")?.supplierId, shippingSupplier.id);
-    assert.equal(movementByType.get("جمرك")?.supplierId, shippingSupplier.id);
-    assert.equal(movementByType.get("تخريج")?.supplierId, shippingSupplier.id);
+    assert.equal(movementByType.get("تكلفة بضاعة")?.partyId, purchaseSupplier.id);
+    assert.equal(movementByType.get("تكلفة شحن")?.partyId, shippingCompany.id);
+    assert.equal(movementByType.get("عمولة")?.partyId, shippingCompany.id);
+    assert.equal(movementByType.get("جمرك")?.partyId, shippingCompany.id);
+    assert.equal(movementByType.get("تخريج")?.partyId, shippingCompany.id);
   });
 });
