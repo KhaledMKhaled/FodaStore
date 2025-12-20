@@ -28,75 +28,37 @@
 [x] 28. Fix payment form cost component data display accuracy
 [x] 29. Fix supplier selection in payment form - TypeScript errors resolved
 [x] 30. npm install - installed all dependencies
-
-════════════════════════════════════════════════════════════════════
-ENVIRONMENT MIGRATION - December 20, 2025
-════════════════════════════════════════════════════════════════════
-
-[x] 30. npm install - installed all dependencies
 [x] 31. Workflow restart - application running on port 5000
 [x] 32. Import complete
-
-════════════════════════════════════════════════════════════════════
-UI/UX LAYOUT & SPACING IMPROVEMENTS - December 20, 2025
-════════════════════════════════════════════════════════════════════
-
 [x] 33. Improve spacing and layout for shipping commission and shipping fields
 [x] 34. Improve shipment wizard header layout with responsive design
 [x] 35. Format shipment info fields - 4 عمود منتاسق (رقم، اسم، تاريخ، سعر صرف)
-[x] 36. Format shipment items fields with better organization:
-    ✓ صف الأول: المورد + نوع الصنف (2 عمود متساوي)
-    ✓ الصف الثاني: اسم المنتج (سطر كامل)
-    ✓ الصف الثالث: البيانات المتقدمة (5 أعمدة: بلد + كراتين + قطع + إجمالي + سعر)
-    ✓ تحسين قسم الصورة والإجمالي (responsive flex layout)
+[x] 36. Format shipment items fields with better organization
 [x] 37. Workflow restarted - All changes applied successfully
-
-════════════════════════════════════════════════════════════════════
-FIX REMAINING AMOUNT PER COST COMPONENT - December 20, 2025
-════════════════════════════════════════════════════════════════════
-
 [x] 38. Add per-component remaining calculation to API (remainingByComponent)
 [x] 39. Update frontend to display remaining amount for each cost component
-[x] 40. Fix payment summary section to show correct paid/remaining for each component:
-    ✓ تكلفة البضاعة: Shows paid and remaining for goods only
-    ✓ الشحن: Shows paid and remaining for shipping only
-    ✓ العمولة: Shows paid and remaining for commission only
-    ✓ الجمرك: Shows paid and remaining for customs only
-    ✓ التخريج: Shows paid and remaining for takhreeg only
+[x] 40. Fix payment summary section to show correct paid/remaining for each component
 [x] 41. API returns paidByComponent and remainingByComponent with per-component breakdown
 [x] 42. Frontend uses correct data sources instead of total shipment values
 [x] 43. Workflow restarted - Payment system now shows correct remaining per component
-
-════════════════════════════════════════════════════════════════════
-FIX PAID AMOUNT CALCULATION - December 20, 2025
-════════════════════════════════════════════════════════════════════
-
-[x] 44. Fix paid amount calculation bug:
-    ✓ paidByComponentRmb: Tracks RMB payments for RMB components
-    ✓ paidByComponent: Tracks EGP payments for EGP components
-    ✓ Handles currency conversion when EGP paid toward RMB component
-    ✓ Correctly calculates remaining for each component
+[x] 44. Fix paid amount calculation bug
 [x] 45. Update API response to use paidByComponentRmb for RMB components
 [x] 46. Workflow restarted - Payment system now shows correct amounts per component
-
-════════════════════════════════════════════════════════════════════
-FIX SHIPPING COMPANY OPERATIONS - December 20, 2025
-════════════════════════════════════════════════════════════════════
-
 [x] 47. Fixed PATCH route validation - Added duplicate name checking on UPDATE
-    ✓ Validates partial data using insertShippingCompanySchema.partial()
-    ✓ Checks for duplicate names excluding current company
-    ✓ Returns proper 409 Conflict error for duplicates
-    ✓ Improved error handling matching POST route pattern
-    ✓ Added comprehensive error messages
-[x] 48. Fixed TypeScript type error in storage.ts:
-    ✓ Added proper type casting for partyType variable
-    ✓ Ensures consistency with movement report return type
+[x] 48. Fixed TypeScript type error in storage.ts
 [x] 49. Workflow restarted - Application compiling and running cleanly
-[x] 50. Final verification - All shipping company operations working:
-    ✓ POST /api/shipping-companies - Create with validation
-    ✓ PATCH /api/shipping-companies/:id - Update with validation
-    ✓ GET /api/shipping-companies - List all companies
-    ✓ DELETE /api/shipping-companies/:id - Delete company
-    ✓ Error handling and user feedback consistent across operations
+[x] 50. Final verification - All shipping company operations working
 [x] 51. Task completed - Shipping company operations production-ready
+
+════════════════════════════════════════════════════════════════════
+FIX PAYMENT TOTAL DISCOUNT CALCULATION - December 20, 2025
+════════════════════════════════════════════════════════════════════
+
+[x] 52. Fixed goods total calculation in invoice-summary endpoint
+    ✓ Applied partialDiscountRmb to goodsTotalRmb calculation
+    ✓ Gross goods total: purchaseCostRmb
+    ✓ Net goods total: purchaseCostRmb - partialDiscountRmb
+    ✓ Remaining calculation now uses net total
+    ✓ All per-component remaining amounts now reflect correct discount
+[x] 53. Workflow restarted - Payment total now shows correct net amount after discount
+[x] 54. Task complete - Total amount displays 234,000 (net of 750 discount)

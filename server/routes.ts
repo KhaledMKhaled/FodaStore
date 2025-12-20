@@ -858,7 +858,9 @@ export async function registerRoutes(
       const paidEgp = paymentSnapshot.paidByCurrency.EGP?.original ?? 0;
 
       // RMB costs breakdown
-      const goodsTotalRmb = parseAmountOrZero(shipment.purchaseCostRmb || "0");
+      const goodsTotalRmbGross = parseAmountOrZero(shipment.purchaseCostRmb || "0");
+      const partialDiscountRmb = parseAmountOrZero(shipment.partialDiscountRmb || "0");
+      const goodsTotalRmb = Math.max(0, goodsTotalRmbGross - partialDiscountRmb);
       const shippingTotalRmb = parseAmountOrZero(
         shipment.shippingCostRmb || "0",
       );
