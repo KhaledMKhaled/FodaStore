@@ -990,6 +990,53 @@ export async function registerRoutes(
     }
   });
 
+  app.get(
+    "/api/shipments/:id/payment-allocation-preview",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const shipmentId = parseInt(req.params.id);
+        const amountParam = req.query.amount as string | undefined;
+        const amountRmb = amountParam ? parseFloat(amountParam) : NaN;
+
+        if (Number.isNaN(amountRmb)) {
+          return res.status(400).json({
+            error: {
+              code: "PAYMENT_PREVIEW_INVALID",
+              message: "يرجى إدخال مبلغ صحيح لمعاينة التوزيع.",
+              details: { field: "amount" },
+            },
+          });
+        }
+
+        const shipment = await routeStorage.getShipment(shipmentId);
+        if (!shipment) {
+          return res.status(404).json({ message: "الشحنة غير موجودة" });
+        }
+
+        const preview = await routeStorage.getPaymentAllocationPreview(
+          shipmentId,
+          amountRmb,
+        );
+
+        res.json({
+          shipmentId: preview.shipmentId,
+          amountRmb: preview.amountRmb.toFixed(2),
+          totalOutstandingRmb: preview.totalOutstandingRmb.toFixed(2),
+          suppliers: preview.suppliers.map((supplier) => ({
+            supplierId: supplier.supplierId,
+            goodsTotalRmb: supplier.goodsTotalRmb.toFixed(2),
+            outstandingRmb: supplier.outstandingRmb.toFixed(2),
+            allocatedRmb: supplier.allocatedRmb.toFixed(2),
+          })),
+        });
+      } catch (error) {
+        console.error("Error fetching allocation preview:", error);
+        res.status(500).json({ message: "خطأ في تحميل معاينة التوزيع" });
+      }
+    },
+  );
+
   // Exchange Rates
   app.get("/api/exchange-rates", isAuthenticated, async (req, res) => {
     try {

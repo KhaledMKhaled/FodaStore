@@ -69,6 +69,7 @@ import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
 import { shipmentStatusColors } from "@/lib/colorMaps";
+import { Switch } from "@/components/ui/switch";
 import type {
   Shipment,
   ShipmentItem,
@@ -160,6 +161,18 @@ interface InvoiceSummary {
   computedAt: string;
 }
 
+interface AllocationPreview {
+  shipmentId: number;
+  amountRmb: string;
+  totalOutstandingRmb: string;
+  suppliers: Array<{
+    supplierId: number;
+    goodsTotalRmb: string;
+    outstandingRmb: string;
+    allocatedRmb: string;
+  }>;
+}
+
 export default function Payments() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -181,6 +194,8 @@ export default function Payments() {
   const [attachmentInputKey, setAttachmentInputKey] = useState(0);
   const [currentPageShipments, setCurrentPageShipments] = useState(1);
   const [currentPagePayments, setCurrentPagePayments] = useState(1);
+  const [amountOriginalValue, setAmountOriginalValue] = useState("");
+  const [autoAllocate, setAutoAllocate] = useState(false);
   const { toast } = useToast();
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
@@ -229,6 +244,11 @@ export default function Payments() {
   const autoSupplierId = supplierIds.size === 1 ? Array.from(supplierIds)[0] : null;
   const isShippingComponent = SHIPPING_COST_COMPONENTS.has(costComponent);
   const autoShippingCompanyId = typeof shippingCompanyId === "number" ? shippingCompanyId : null;
+  const showAutoAllocationSection =
+    costComponent === "تكلفة البضاعة" && partyType === "shipping_company" && !!selectedShipmentId;
+  const canAutoAllocate = showAutoAllocationSection && paymentCurrency === "RMB";
+  const amountOriginalNumber = parseFloat(amountOriginalValue);
+  const hasPreviewAmount = Number.isFinite(amountOriginalNumber) && amountOriginalNumber > 0;
 
   useEffect(() => {
     if (!isDialogOpen) return;
@@ -273,6 +293,12 @@ export default function Payments() {
   }, [partyType, isDialogOpen]);
 
   useEffect(() => {
+    if (!showAutoAllocationSection || paymentCurrency !== "RMB") {
+      setAutoAllocate(false);
+    }
+  }, [paymentCurrency, showAutoAllocationSection]);
+
+  useEffect(() => {
     setClientValidationError(null);
   }, [
     selectedShipmentId,
@@ -315,6 +341,8 @@ export default function Payments() {
     setAttachmentFile(null);
     setAttachmentError(null);
     setAttachmentInputKey((prev) => prev + 1);
+    setAmountOriginalValue("");
+    setAutoAllocate(false);
   };
 
   const handleAttachmentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -503,6 +531,9 @@ export default function Payments() {
       (formData.get("referenceNumber") as string) || "",
     );
     payload.append("note", (formData.get("note") as string) || "");
+    if (autoAllocate) {
+      payload.append("autoAllocate", "true");
+    }
     if (attachmentFile) {
       payload.append("attachment", attachmentFile);
     }
@@ -522,6 +553,25 @@ export default function Payments() {
     if (!date) return "-";
     return new Date(date).toLocaleDateString("ar-EG");
   };
+
+  const allocationPreviewQueryKey = showAutoAllocationSection && hasPreviewAmount && canAutoAllocate
+    ? [
+        "/api/shipments",
+        selectedShipmentId,
+        `payment-allocation-preview?amount=${encodeURIComponent(
+          amountOriginalNumber.toFixed(2),
+        )}`,
+      ]
+    : null;
+
+  const {
+    data: allocationPreview,
+    isLoading: allocationPreviewLoading,
+    isError: allocationPreviewError,
+  } = useQuery<AllocationPreview>({
+    queryKey: allocationPreviewQueryKey ?? ["/api/shipments", "allocation-preview", "disabled"],
+    enabled: Boolean(allocationPreviewQueryKey && autoAllocate),
+  });
 
   const toggleShipmentExpand = (shipmentId: number) => {
     setExpandedShipments(prev => {
@@ -875,6 +925,8 @@ export default function Payments() {
                     required
                     placeholder="0.00"
                     data-testid="input-amount"
+                    value={amountOriginalValue}
+                    onChange={(event) => setAmountOriginalValue(event.target.value)}
                   />
                 </div>
                 {paymentCurrency === "RMB" && (
@@ -892,6 +944,89 @@ export default function Payments() {
                   </div>
                 )}
               </div>
+
+              {showAutoAllocationSection && (
+                <div className="space-y-3 rounded-md border border-border p-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <Label htmlFor="autoAllocate" className="text-sm">
+                        توزيع التكلفة
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        توزيع مبلغ دفعة شركة الشحن على الموردين تلقائيًا بحسب إجمالي البضاعة والمتبقي.
+                      </p>
+                      {!canAutoAllocate && (
+                        <p className="text-xs text-amber-600">
+                          يتطلب تفعيل التوزيع الدفع بالرنمبي (RMB).
+                        </p>
+                      )}
+                    </div>
+                    <Switch
+                      id="autoAllocate"
+                      checked={autoAllocate}
+                      onCheckedChange={setAutoAllocate}
+                      disabled={!canAutoAllocate}
+                    />
+                  </div>
+                  {autoAllocate && canAutoAllocate && (
+                    <div className="space-y-2">
+                      {!hasPreviewAmount && (
+                        <p className="text-xs text-muted-foreground">
+                          أدخل مبلغًا لعرض توزيع التكلفة المقترح.
+                        </p>
+                      )}
+                      {hasPreviewAmount && allocationPreviewLoading && (
+                        <p className="text-xs text-muted-foreground">جاري تحميل معاينة التوزيع...</p>
+                      )}
+                      {hasPreviewAmount && allocationPreviewError && (
+                        <p className="text-xs text-destructive">
+                          تعذر تحميل معاينة التوزيع.
+                        </p>
+                      )}
+                      {hasPreviewAmount &&
+                        allocationPreview &&
+                        allocationPreview.suppliers.length > 0 && (
+                          <div className="overflow-x-auto rounded-md border border-border">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="text-right">المورد</TableHead>
+                                  <TableHead className="text-right">إجمالي البضاعة (¥)</TableHead>
+                                  <TableHead className="text-right">المتبقي (¥)</TableHead>
+                                  <TableHead className="text-right">التوزيع المقترح (¥)</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {allocationPreview.suppliers.map((supplier) => {
+                                  const supplierName =
+                                    suppliers?.find((entry) => entry.id === supplier.supplierId)?.name ||
+                                    `مورد #${supplier.supplierId}`;
+                                  return (
+                                    <TableRow key={supplier.supplierId}>
+                                      <TableCell className="font-medium">{supplierName}</TableCell>
+                                      <TableCell>{formatCurrency(supplier.goodsTotalRmb)}</TableCell>
+                                      <TableCell>{formatCurrency(supplier.outstandingRmb)}</TableCell>
+                                      <TableCell className="font-semibold text-primary">
+                                        {formatCurrency(supplier.allocatedRmb)}
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        )}
+                      {hasPreviewAmount &&
+                        allocationPreview &&
+                        allocationPreview.suppliers.length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            لا توجد بيانات كافية لعرض التوزيع.
+                          </p>
+                        )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>طريقة الدفع *</Label>
