@@ -50,3 +50,19 @@ UI/UX LAYOUT & SPACING IMPROVEMENTS - December 20, 2025
     ✓ الصف الثالث: البيانات المتقدمة (5 أعمدة: بلد + كراتين + قطع + إجمالي + سعر)
     ✓ تحسين قسم الصورة والإجمالي (responsive flex layout)
 [x] 37. Workflow restarted - All changes applied successfully
+
+════════════════════════════════════════════════════════════════════
+FIX REMAINING AMOUNT PER COST COMPONENT - December 20, 2025
+════════════════════════════════════════════════════════════════════
+
+[x] 38. Add per-component remaining calculation to API (remainingByComponent)
+[x] 39. Update frontend to display remaining amount for each cost component
+[x] 40. Fix payment summary section to show correct paid/remaining for each component:
+    ✓ تكلفة البضاعة: Shows paid and remaining for goods only
+    ✓ الشحن: Shows paid and remaining for shipping only
+    ✓ العمولة: Shows paid and remaining for commission only
+    ✓ الجمرك: Shows paid and remaining for customs only
+    ✓ التخريج: Shows paid and remaining for takhreeg only
+[x] 41. API returns paidByComponent and remainingByComponent with per-component breakdown
+[x] 42. Frontend uses correct data sources instead of total shipment values
+[x] 43. Workflow restarted - Payment system now shows correct remaining per component

@@ -568,8 +568,16 @@ export async function registerRoutes(
       const egpSubtotal = customsTotalEgp + takhreegTotalEgp;
       const egpRemaining = Math.max(0, egpSubtotal - paidEgp);
 
-      // Calculate per-component remaining amounts
+      // Calculate per-component paid and remaining amounts
       const paidByComponent: { [key: string]: number } = {};
+      const componentTotals: { [key: string]: number } = {
+        "تكلفة البضاعة": goodsTotalRmb,
+        "الشحن": shippingTotalRmb,
+        "العمولة": commissionTotalRmb,
+        "الجمرك": customsTotalEgp,
+        "التخريج": takhreegTotalEgp,
+      };
+
       payments?.forEach(payment => {
         if (!paidByComponent[payment.costComponent]) {
           paidByComponent[payment.costComponent] = 0;
@@ -578,9 +586,9 @@ export async function registerRoutes(
       });
 
       const remainingByComponent = {
-        "تكلفة البضاعة": goodsTotalRmb, // Will be converted in frontend
-        "الشحن": shippingTotalRmb, // Will be converted in frontend
-        "العمولة": commissionTotalRmb, // Will be converted in frontend
+        "تكلفة البضاعة": Math.max(0, goodsTotalRmb - (paidByComponent["تكلفة البضاعة"] ?? 0)),
+        "الشحن": Math.max(0, shippingTotalRmb - (paidByComponent["الشحن"] ?? 0)),
+        "العمولة": Math.max(0, commissionTotalRmb - (paidByComponent["العمولة"] ?? 0)),
         "الجمرك": Math.max(0, customsTotalEgp - (paidByComponent["الجمرك"] ?? 0)),
         "التخريج": Math.max(0, takhreegTotalEgp - (paidByComponent["التخريج"] ?? 0)),
       };
@@ -617,6 +625,13 @@ export async function registerRoutes(
           subtotal: egpSubtotal.toFixed(2),
           paid: paidEgp.toFixed(2),
           remaining: egpRemaining.toFixed(2),
+        },
+        paidByComponent: {
+          "تكلفة البضاعة": (paidByComponent["تكلفة البضاعة"] ?? 0).toFixed(2),
+          "الشحن": (paidByComponent["الشحن"] ?? 0).toFixed(2),
+          "العمولة": (paidByComponent["العمولة"] ?? 0).toFixed(2),
+          "الجمرك": (paidByComponent["الجمرك"] ?? 0).toFixed(2),
+          "التخريج": (paidByComponent["التخريج"] ?? 0).toFixed(2),
         },
         remainingByComponent: {
           "تكلفة البضاعة": remainingByComponent["تكلفة البضاعة"].toFixed(2),

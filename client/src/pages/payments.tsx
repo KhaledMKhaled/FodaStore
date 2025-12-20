@@ -657,11 +657,11 @@ export default function Payments() {
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.rmb.paid)} ¥</span>
+                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["تكلفة البضاعة"] || "0")} ¥</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.rmb.remaining)} ¥</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["تكلفة البضاعة"] || "0")} ¥</span>
                         </div>
                       </>
                     )}
@@ -673,11 +673,11 @@ export default function Payments() {
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.rmb.paid)} ¥</span>
+                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["الشحن"] || "0")} ¥</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.rmb.remaining)} ¥</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["الشحن"] || "0")} ¥</span>
                         </div>
                       </>
                     )}
@@ -689,11 +689,11 @@ export default function Payments() {
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.rmb.paid)} ¥</span>
+                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["العمولة"] || "0")} ¥</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.rmb.remaining)} ¥</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["العمولة"] || "0")} ¥</span>
                         </div>
                       </>
                     )}
@@ -705,11 +705,11 @@ export default function Payments() {
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.egp.paid)} ج.م</span>
+                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["الجمرك"] || "0")} ج.م</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.egp.remaining)} ج.م</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["الجمرك"] || "0")} ج.م</span>
                         </div>
                       </>
                     )}
@@ -721,11 +721,11 @@ export default function Payments() {
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency(invoiceSummary.egp.paid)} ج.م</span>
+                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["التخريج"] || "0")} ج.م</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency(invoiceSummary.egp.remaining)} ج.م</span>
+                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["التخريج"] || "0")} ج.م</span>
                         </div>
                       </>
                     )}
