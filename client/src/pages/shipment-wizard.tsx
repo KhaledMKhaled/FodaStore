@@ -734,13 +734,13 @@ function Step1Import({
     <div className="space-y-6">
       {/* Sticky Shipment Info */}
       <Card className="sticky top-0 z-50 shadow-md">
-        <CardHeader className="pb-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <CardTitle className="text-lg flex items-center gap-2">
               <Ship className="w-5 h-5" />
               بيانات الشحنة
             </CardTitle>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
               <Badge variant="secondary" className="text-sm">
                 عدد البنود: {items.length}
               </Badge>
@@ -750,6 +750,7 @@ function Step1Import({
               <Badge variant="secondary" className="text-sm">
                 إجمالي القطع: {totalPieces}
               </Badge>
+              <div className="flex-1 lg:flex-none" />
               <Button
                 variant="outline"
                 size="sm"
