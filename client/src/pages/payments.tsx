@@ -79,6 +79,11 @@ import type {
 } from "@shared/schema";
 import { deriveAmountEgp, validateRemainingAllowance } from "./paymentValidation";
 import { cn } from "@/lib/utils";
+import {
+  buildPaymentFormData,
+  canAutoAllocatePayment,
+  shouldShowAutoAllocationSection,
+} from "./payments-utils";
 
 const PAYMENT_METHODS = [
   { value: "نقدي", label: "نقدي" },
@@ -244,9 +249,17 @@ export default function Payments() {
   const autoSupplierId = supplierIds.size === 1 ? Array.from(supplierIds)[0] : null;
   const isShippingComponent = SHIPPING_COST_COMPONENTS.has(costComponent);
   const autoShippingCompanyId = typeof shippingCompanyId === "number" ? shippingCompanyId : null;
-  const showAutoAllocationSection =
-    costComponent === "تكلفة البضاعة" && partyType === "shipping_company" && !!selectedShipmentId;
-  const canAutoAllocate = showAutoAllocationSection && paymentCurrency === "RMB";
+  const showAutoAllocationSection = shouldShowAutoAllocationSection({
+    costComponent,
+    partyType,
+    selectedShipmentId,
+  });
+  const canAutoAllocate = canAutoAllocatePayment({
+    costComponent,
+    partyType,
+    selectedShipmentId,
+    paymentCurrency,
+  });
   const amountOriginalNumber = parseFloat(amountOriginalValue);
   const hasPreviewAmount = Number.isFinite(amountOriginalNumber) && amountOriginalNumber > 0;
 
@@ -504,39 +517,23 @@ export default function Payments() {
       return;
     }
 
-    const payload = new FormData();
-    payload.append("shipmentId", String(selectedShipmentId));
-    if (partyType && partyId) {
-      payload.append("partyType", partyType);
-      payload.append("partyId", String(partyId));
-    }
-    payload.append("paymentDate", formData.get("paymentDate") as string);
-    payload.append("paymentCurrency", paymentCurrency);
-    payload.append("amountOriginal", amountOriginal);
-    if (paymentCurrency === "RMB") {
-      payload.append("exchangeRateToEgp", exchangeRate);
-    }
-    payload.append(
-      "amountEgp",
-      paymentCurrency === "EGP" ? amountOriginal : safeAmountEgp.toFixed(2),
-    );
-    payload.append("costComponent", costComponent);
-    payload.append("paymentMethod", paymentMethod);
-    payload.append(
-      "cashReceiverName",
-      (formData.get("cashReceiverName") as string) || "",
-    );
-    payload.append(
-      "referenceNumber",
-      (formData.get("referenceNumber") as string) || "",
-    );
-    payload.append("note", (formData.get("note") as string) || "");
-    if (autoAllocate) {
-      payload.append("autoAllocate", "true");
-    }
-    if (attachmentFile) {
-      payload.append("attachment", attachmentFile);
-    }
+    const payload = buildPaymentFormData({
+      selectedShipmentId,
+      partyType,
+      partyId,
+      paymentDate: formData.get("paymentDate") as string,
+      paymentCurrency,
+      amountOriginal,
+      exchangeRateToEgp: exchangeRate,
+      amountEgp: paymentCurrency === "EGP" ? amountOriginal : safeAmountEgp.toFixed(2),
+      costComponent,
+      paymentMethod,
+      cashReceiverName: (formData.get("cashReceiverName") as string) || "",
+      referenceNumber: (formData.get("referenceNumber") as string) || "",
+      note: (formData.get("note") as string) || "",
+      autoAllocate,
+      attachment: attachmentFile,
+    });
 
     createMutation.mutate({ payload, shipmentId: selectedShipmentId });
   };

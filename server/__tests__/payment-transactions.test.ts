@@ -6,7 +6,13 @@ process.env.DATABASE_URL ||= process.env.TEST_DATABASE_URL || "postgres://localh
 
 const { db, pool } = await import("../db");
 const { storage } = await import("../storage");
-const { shipments, shipmentPayments } = await import("@shared/schema");
+const {
+  paymentAllocations,
+  shipmentItems,
+  shipmentPayments,
+  shipments,
+  suppliers,
+} = await import("@shared/schema");
 
 const parseAmount = (value: unknown): number => {
   if (value === null || value === undefined) return 0;
@@ -35,7 +41,43 @@ async function createTestShipment(overrides: Partial<typeof shipments.$inferInse
   return shipment;
 }
 
+async function createSupplier(name: string) {
+  const [supplier] = await db
+    .insert(suppliers)
+    .values({
+      name,
+      country: "الصين",
+    })
+    .returning();
+
+  return supplier;
+}
+
+async function createShipmentItem({
+  shipmentId,
+  supplierId,
+  totalPurchaseCostRmb,
+}: {
+  shipmentId: number;
+  supplierId: number;
+  totalPurchaseCostRmb: string;
+}) {
+  const [item] = await db
+    .insert(shipmentItems)
+    .values({
+      shipmentId,
+      supplierId,
+      productName: `Item-${supplierId}`,
+      totalPurchaseCostRmb,
+    })
+    .returning();
+
+  return item;
+}
+
 async function cleanupShipment(shipmentId: number) {
+  await db.delete(paymentAllocations).where(eq(paymentAllocations.shipmentId, shipmentId));
+  await db.delete(shipmentItems).where(eq(shipmentItems.shipmentId, shipmentId));
   await db.delete(shipmentPayments).where(eq(shipmentPayments.shipmentId, shipmentId));
   await db.delete(shipments).where(eq(shipments.id, shipmentId));
 }
@@ -109,6 +151,96 @@ describe("payment transaction atomicity", () => {
       assert.equal(parseAmount(reloadedShipment.finalTotalCostEgp), 0);
     } finally {
       await cleanupShipment(shipment.id);
+    }
+  });
+
+  it("skips auto allocations when autoAllocate is false", async () => {
+    const shipment = await createTestShipment();
+    const supplier = await createSupplier("Supplier Skip");
+    await createShipmentItem({
+      shipmentId: shipment.id,
+      supplierId: supplier.id,
+      totalPurchaseCostRmb: "100.00",
+    });
+
+    try {
+      await storage.createPayment(
+        {
+          shipmentId: shipment.id,
+          paymentDate: new Date(),
+          paymentCurrency: "RMB",
+          amountOriginal: "50.00",
+          exchangeRateToEgp: "10.00",
+          amountEgp: "500.00",
+          costComponent: "تكلفة البضاعة",
+          paymentMethod: "نقدي",
+          createdByUserId: "tester",
+          partyType: "shipping_company",
+          partyId: 10,
+        },
+        { autoAllocate: false },
+      );
+
+      const allocations = await db
+        .select()
+        .from(paymentAllocations)
+        .where(eq(paymentAllocations.shipmentId, shipment.id));
+
+      assert.equal(allocations.length, 0);
+    } finally {
+      await cleanupShipment(shipment.id);
+      await db.delete(suppliers).where(eq(suppliers.id, supplier.id));
+    }
+  });
+
+  it("allocates proportionally so allocations sum to the payment amount", async () => {
+    const shipment = await createTestShipment({ purchaseCostRmb: "300.00" });
+    const supplierA = await createSupplier("Supplier A");
+    const supplierB = await createSupplier("Supplier B");
+
+    await createShipmentItem({
+      shipmentId: shipment.id,
+      supplierId: supplierA.id,
+      totalPurchaseCostRmb: "100.00",
+    });
+    await createShipmentItem({
+      shipmentId: shipment.id,
+      supplierId: supplierB.id,
+      totalPurchaseCostRmb: "200.00",
+    });
+
+    try {
+      const payment = await storage.createPayment(
+        {
+          shipmentId: shipment.id,
+          paymentDate: new Date(),
+          paymentCurrency: "RMB",
+          amountOriginal: "150.00",
+          exchangeRateToEgp: "10.00",
+          amountEgp: "1500.00",
+          costComponent: "تكلفة البضاعة",
+          paymentMethod: "نقدي",
+          createdByUserId: "tester",
+          partyType: "shipping_company",
+          partyId: 10,
+        },
+        { autoAllocate: true },
+      );
+
+      const allocations = await db
+        .select()
+        .from(paymentAllocations)
+        .where(eq(paymentAllocations.paymentId, payment.id));
+
+      const totalAllocated = allocations.reduce(
+        (sum, allocation) => sum + parseAmount(allocation.allocatedAmount),
+        0,
+      );
+      assert.equal(parseAmount(totalAllocated.toFixed(2)), 150);
+    } finally {
+      await cleanupShipment(shipment.id);
+      await db.delete(suppliers).where(eq(suppliers.id, supplierA.id));
+      await db.delete(suppliers).where(eq(suppliers.id, supplierB.id));
     }
   });
 });
