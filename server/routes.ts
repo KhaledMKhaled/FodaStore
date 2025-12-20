@@ -1117,7 +1117,10 @@ export async function registerRoutes(
   // Payments
   app.get("/api/payments", isAuthenticated, async (req, res) => {
     try {
-      const paymentsWithShipments = await getPaymentsWithShipments(routeStorage);
+      const includeAllocations = req.query.includeAllocations === "true";
+      const paymentsWithShipments = await getPaymentsWithShipments(routeStorage, {
+        includeAllocations,
+      });
       res.json(paymentsWithShipments);
     } catch (error) {
       const { status, body } = formatError(error, {

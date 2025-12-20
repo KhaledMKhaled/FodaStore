@@ -619,6 +619,9 @@ export interface IStorage {
   getPaymentById(paymentId: number): Promise<ShipmentPayment | undefined>;
   getShipmentPayments(shipmentId: number): Promise<ShipmentPayment[]>;
   getAllPaymentAllocations(): Promise<PaymentAllocation[]>;
+  getPaymentAllocationsByPaymentId(paymentId: number): Promise<PaymentAllocation[]>;
+  getPaymentAllocationsByShipmentId(shipmentId: number): Promise<PaymentAllocation[]>;
+  getPaymentAllocationsBySupplierId(supplierId: number): Promise<PaymentAllocation[]>;
   getPaymentAllocationPreview(
     shipmentId: number,
     paymentAmountRmb: number,
@@ -1180,6 +1183,30 @@ export class DatabaseStorage implements IStorage {
 
   async getAllPaymentAllocations(): Promise<PaymentAllocation[]> {
     return db.select().from(paymentAllocations).orderBy(desc(paymentAllocations.createdAt));
+  }
+
+  async getPaymentAllocationsByPaymentId(paymentId: number): Promise<PaymentAllocation[]> {
+    return db
+      .select()
+      .from(paymentAllocations)
+      .where(eq(paymentAllocations.paymentId, paymentId))
+      .orderBy(desc(paymentAllocations.createdAt));
+  }
+
+  async getPaymentAllocationsByShipmentId(shipmentId: number): Promise<PaymentAllocation[]> {
+    return db
+      .select()
+      .from(paymentAllocations)
+      .where(eq(paymentAllocations.shipmentId, shipmentId))
+      .orderBy(desc(paymentAllocations.createdAt));
+  }
+
+  async getPaymentAllocationsBySupplierId(supplierId: number): Promise<PaymentAllocation[]> {
+    return db
+      .select()
+      .from(paymentAllocations)
+      .where(eq(paymentAllocations.supplierId, supplierId))
+      .orderBy(desc(paymentAllocations.createdAt));
   }
 
   async getPaymentAllocationPreview(
