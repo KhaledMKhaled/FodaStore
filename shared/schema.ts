@@ -211,6 +211,19 @@ export const shipmentPayments = pgTable("shipment_payments", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Payment Allocations table (تخصيصات المدفوعات)
+export const paymentAllocations = pgTable("payment_allocations", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  paymentId: integer("payment_id").references(() => shipmentPayments.id).notNull(),
+  shipmentId: integer("shipment_id").references(() => shipments.id).notNull(),
+  supplierId: integer("supplier_id").references(() => suppliers.id).notNull(),
+  component: varchar("component", { length: 50 }).notNull(),
+  currency: varchar("currency", { length: 10 }).notNull(),
+  allocatedAmount: decimal("allocated_amount", { precision: 15, scale: 2 }).notNull(),
+  createdByUserId: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Inventory Movements table (حركات المخزون)
 export const inventoryMovements = pgTable("inventory_movements", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -240,12 +253,14 @@ export const auditLogs = pgTable("audit_logs", {
 export const usersRelations = relations(users, ({ many }) => ({
   shipments: many(shipments),
   payments: many(shipmentPayments),
+  paymentAllocations: many(paymentAllocations),
   auditLogs: many(auditLogs),
 }));
 
 export const suppliersRelations = relations(suppliers, ({ many }) => ({
   products: many(products),
   shipmentItems: many(shipmentItems),
+  paymentAllocations: many(paymentAllocations),
 }));
 
 export const shippingCompaniesRelations = relations(shippingCompanies, ({ many }) => ({
@@ -278,6 +293,7 @@ export const shipmentsRelations = relations(shipments, ({ one, many }) => ({
   shippingDetails: one(shipmentShippingDetails),
   customsDetails: one(shipmentCustomsDetails),
   payments: many(shipmentPayments),
+  paymentAllocations: many(paymentAllocations),
   inventoryMovements: many(inventoryMovements),
 }));
 
@@ -325,6 +341,25 @@ export const shipmentPaymentsRelations = relations(shipmentPayments, ({ one }) =
   }),
 }));
 
+export const paymentAllocationsRelations = relations(paymentAllocations, ({ one }) => ({
+  payment: one(shipmentPayments, {
+    fields: [paymentAllocations.paymentId],
+    references: [shipmentPayments.id],
+  }),
+  shipment: one(shipments, {
+    fields: [paymentAllocations.shipmentId],
+    references: [shipments.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [paymentAllocations.supplierId],
+    references: [suppliers.id],
+  }),
+  createdBy: one(users, {
+    fields: [paymentAllocations.createdByUserId],
+    references: [users.id],
+  }),
+}));
+
 export const inventoryMovementsRelations = relations(inventoryMovements, ({ one }) => ({
   shipment: one(shipments, {
     fields: [inventoryMovements.shipmentId],
@@ -362,6 +397,7 @@ export const insertShipmentShippingDetailsSchema = createInsertSchema(shipmentSh
 export const insertShipmentCustomsDetailsSchema = createInsertSchema(shipmentCustomsDetails).omit({ createdAt: true, updatedAt: true });
 export const insertExchangeRateSchema = createInsertSchema(exchangeRates).omit({ createdAt: true });
 export const insertShipmentPaymentSchema = createInsertSchema(shipmentPayments).omit({ createdAt: true, updatedAt: true });
+export const insertPaymentAllocationSchema = createInsertSchema(paymentAllocations).omit({ createdAt: true });
 export const insertInventoryMovementSchema = createInsertSchema(inventoryMovements).omit({ createdAt: true });
 export const insertAuditLogSchema = createInsertSchema(auditLogs);
 
@@ -388,6 +424,8 @@ export type InsertExchangeRate = z.infer<typeof insertExchangeRateSchema>;
 export type ExchangeRate = typeof exchangeRates.$inferSelect;
 export type InsertShipmentPayment = z.infer<typeof insertShipmentPaymentSchema>;
 export type ShipmentPayment = typeof shipmentPayments.$inferSelect;
+export type InsertPaymentAllocation = z.infer<typeof insertPaymentAllocationSchema>;
+export type PaymentAllocation = typeof paymentAllocations.$inferSelect;
 export type InsertInventoryMovement = z.infer<typeof insertInventoryMovementSchema>;
 export type InventoryMovement = typeof inventoryMovements.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
