@@ -16,7 +16,7 @@ export type PaymentWithShipment = ShipmentPayment & {
 
 type PaymentsStorage = Pick<
   IStorage,
-  "getAllPayments" | "getShipmentsByIds" | "getPaymentAllocationsByPaymentId"
+  "getAllPayments" | "getShipmentsByIds" | "getPaymentAllocationsByPaymentIds"
 >;
 
 export async function getPaymentsWithShipments(
@@ -32,15 +32,14 @@ export async function getPaymentsWithShipments(
   const shipmentMap = new Map(shipments.map((shipment) => [shipment.id, shipment]));
 
   const allocationsByPayment = new Map<number, PaymentAllocation[]>();
-  const allocationEntries = await Promise.all(
-    payments.map(async (payment) => ({
-      paymentId: payment.id,
-      allocations: await paymentsStorage.getPaymentAllocationsByPaymentId(payment.id),
-    })),
+  const allocationRows = await paymentsStorage.getPaymentAllocationsByPaymentIds(
+    payments.map((payment) => payment.id),
   );
 
-  allocationEntries.forEach(({ paymentId, allocations }) => {
-    allocationsByPayment.set(paymentId, allocations);
+  allocationRows.forEach((allocation) => {
+    const allocations = allocationsByPayment.get(allocation.paymentId) ?? [];
+    allocations.push(allocation);
+    allocationsByPayment.set(allocation.paymentId, allocations);
   });
 
   return payments.map((payment) => ({
