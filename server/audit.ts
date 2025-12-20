@@ -2,7 +2,12 @@ import { storage, type IStorage } from "./storage";
 import type { InsertAuditLog } from "@shared/schema";
 
 export type AuditActionType = "CREATE" | "UPDATE" | "DELETE" | "STATUS_CHANGE";
-export type AuditEntityType = "SHIPMENT" | "PAYMENT" | "EXCHANGE_RATE" | "USER";
+export type AuditEntityType =
+  | "SHIPMENT"
+  | "PAYMENT"
+  | "EXCHANGE_RATE"
+  | "USER"
+  | "SHIPPING_COMPANY";
 
 interface AuditEvent {
   userId?: string | null;

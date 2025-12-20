@@ -523,6 +523,7 @@ export async function registerRoutes(
         res.json(company);
       } catch (error) {
         if (error instanceof ZodError) {
+          console.error("Validation error creating shipping company:", error.flatten());
           const details = {
             fields: error.errors.map((issue) => ({
               field: issue.path.join(".") || "name",
@@ -539,7 +540,18 @@ export async function registerRoutes(
           return res.status(status).json(body);
         }
         console.error("Error creating shipping company:", error);
-        res.status(500).json({ message: "تعذر إنشاء شركة الشحن حالياً. حاول مرة أخرى." });
+        const pgError = error as { code?: string; detail?: string; message?: string };
+        const { status, body } = formatError(error, {
+          code: "UNKNOWN_ERROR",
+          status: 500,
+          message: "Unexpected server error.",
+          details: {
+            code: pgError?.code,
+            detail: pgError?.detail,
+            message: pgError?.message,
+          },
+        });
+        res.status(status).json(body);
       }
     },
   );

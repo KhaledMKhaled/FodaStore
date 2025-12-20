@@ -157,3 +157,19 @@ test("POST /api/shipping-companies returns 409 for duplicate name", async () => 
   assert.equal(response.status, 409);
   assert.equal(body.error.message, "Shipping company name already exists");
 });
+
+test("POST /api/shipping-companies returns 400 for invalid payload", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/shipping-companies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: null }),
+  });
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.ok(Array.isArray(body.error.details?.fields));
+});
