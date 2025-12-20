@@ -568,6 +568,23 @@ export async function registerRoutes(
       const egpSubtotal = customsTotalEgp + takhreegTotalEgp;
       const egpRemaining = Math.max(0, egpSubtotal - paidEgp);
 
+      // Calculate per-component remaining amounts
+      const paidByComponent: { [key: string]: number } = {};
+      payments?.forEach(payment => {
+        if (!paidByComponent[payment.costComponent]) {
+          paidByComponent[payment.costComponent] = 0;
+        }
+        paidByComponent[payment.costComponent] += parseAmountOrZero(payment.amountEgp);
+      });
+
+      const remainingByComponent = {
+        "تكلفة البضاعة": goodsTotalRmb, // Will be converted in frontend
+        "الشحن": shippingTotalRmb, // Will be converted in frontend
+        "العمولة": commissionTotalRmb, // Will be converted in frontend
+        "الجمرك": Math.max(0, customsTotalEgp - (paidByComponent["الجمرك"] ?? 0)),
+        "التخريج": Math.max(0, takhreegTotalEgp - (paidByComponent["التخريج"] ?? 0)),
+      };
+
       const paidByCurrency = Object.fromEntries(
         Object.entries(paymentSnapshot.paidByCurrency).map(([currency, values]) => [
           currency,
@@ -600,6 +617,13 @@ export async function registerRoutes(
           subtotal: egpSubtotal.toFixed(2),
           paid: paidEgp.toFixed(2),
           remaining: egpRemaining.toFixed(2),
+        },
+        remainingByComponent: {
+          "تكلفة البضاعة": remainingByComponent["تكلفة البضاعة"].toFixed(2),
+          "الشحن": remainingByComponent["الشحن"].toFixed(2),
+          "العمولة": remainingByComponent["العمولة"].toFixed(2),
+          "الجمرك": remainingByComponent["الجمرك"].toFixed(2),
+          "التخريج": remainingByComponent["التخريج"].toFixed(2),
         },
         paymentAllowance: {
           knownTotalEgp: paymentAllowance.knownTotal.toFixed(2),

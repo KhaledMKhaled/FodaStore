@@ -746,16 +746,16 @@ export default function Payments() {
                     data-testid="input-amount"
                   />
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>المتبقي المسموح (ج.م)</span>
+                    <span>المتبقي في البند</span>
                     {loadingInvoiceSummary ? (
                       <Skeleton className="h-4 w-24" />
-                    ) : invoiceSummary?.paymentAllowance ? (
+                    ) : invoiceSummary && (invoiceSummary as any).remainingByComponent ? (
                       <span
                         className="font-semibold text-foreground"
                         data-testid="remaining-allowed-value"
-                        data-allowed-value={invoiceSummary.paymentAllowance.remainingAllowedEgp}
+                        data-allowed-value={(invoiceSummary as any).remainingByComponent?.[costComponent] || "0"}
                       >
-                        {formatCurrency(invoiceSummary.paymentAllowance.remainingAllowedEgp)} ج.م
+                        {formatCurrency((invoiceSummary as any).remainingByComponent?.[costComponent] || "0")} {costComponent === "الجمرك" || costComponent === "التخريج" ? "ج.م" : "¥"}
                       </span>
                     ) : (
                       <span data-testid="remaining-allowed-value">-</span>
