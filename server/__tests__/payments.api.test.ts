@@ -228,6 +228,55 @@ test("requires supplierId when shipment has supplier attribution", async () => {
   assert.equal(createPayment.mock.calls.length, 0);
 });
 
+test("defaults supplier allocation for shipping and purchase payments", async () => {
+  const createPayment = mock.fn(async (data) => ({
+    id: createPayment.mock.calls.length + 1,
+    ...data,
+  }));
+  const getShipmentSupplierContext = mock.fn(async () => ({
+    itemSuppliers: [11],
+    shippingCompanySupplierId: 22,
+    shipmentSuppliers: [11, 22],
+  }));
+  const getSupplier = mock.fn(async (id: number) => ({ id }));
+
+  const { handler } = createHandler({
+    createPayment,
+    getShipmentSupplierContext,
+    getSupplier,
+  });
+
+  const shippingReq = {
+    body: {
+      ...baseBody,
+      costComponent: "الشحن",
+      supplierId: null,
+    },
+    user: { id: "user-1" },
+  } as any;
+  const shippingRes = createResponse();
+
+  await handler(shippingReq, shippingRes);
+
+  assert.equal(shippingRes.statusCode, 200);
+  assert.equal(createPayment.mock.calls[0].arguments[0].supplierId, 22);
+
+  const purchaseReq = {
+    body: {
+      ...baseBody,
+      costComponent: "تكلفة البضاعة",
+      supplierId: null,
+    },
+    user: { id: "user-1" },
+  } as any;
+  const purchaseRes = createResponse();
+
+  await handler(purchaseReq, purchaseRes);
+
+  assert.equal(purchaseRes.statusCode, 200);
+  assert.equal(createPayment.mock.calls[1].arguments[0].supplierId, 11);
+});
+
 test("returns PAYMENT_DATE_INVALID for malformed paymentDate", async () => {
   const { handler } = createHandler();
   const req = {
