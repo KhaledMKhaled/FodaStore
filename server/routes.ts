@@ -570,6 +570,7 @@ export async function registerRoutes(
 
       // Calculate per-component paid and remaining amounts
       const paidByComponent: { [key: string]: number } = {};
+      const paidByComponentRmb: { [key: string]: number } = {};
       const componentTotals: { [key: string]: number } = {
         "تكلفة البضاعة": goodsTotalRmb,
         "الشحن": shippingTotalRmb,
@@ -578,17 +579,35 @@ export async function registerRoutes(
         "التخريج": takhreegTotalEgp,
       };
 
+      // Calculate paid amounts per component
+      // For RMB components: sum by amountOriginal (in RMB) when payment is RMB
+      // For EGP components: sum by amountEgp when payment is in EGP
       payments?.forEach(payment => {
-        if (!paidByComponent[payment.costComponent]) {
-          paidByComponent[payment.costComponent] = 0;
+        const costComp = payment.costComponent;
+        if (!paidByComponent[costComp]) {
+          paidByComponent[costComp] = 0;
+          paidByComponentRmb[costComp] = 0;
         }
-        paidByComponent[payment.costComponent] += parseAmountOrZero(payment.amountEgp);
+        
+        // Add to EGP tracking
+        paidByComponent[costComp] += parseAmountOrZero(payment.amountEgp);
+        
+        // For RMB components, track RMB payments
+        if (costComp === "تكلفة البضاعة" || costComp === "الشحن" || costComp === "العمولة") {
+          if (payment.paymentCurrency === "RMB") {
+            paidByComponentRmb[costComp] += parseAmountOrZero(payment.amountOriginal);
+          } else if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
+            // Convert EGP back to RMB
+            const rmbAmount = parseAmountOrZero(payment.amountEgp) / parseAmountOrZero(payment.exchangeRateToEgp);
+            paidByComponentRmb[costComp] += rmbAmount;
+          }
+        }
       });
 
       const remainingByComponent = {
-        "تكلفة البضاعة": Math.max(0, goodsTotalRmb - (paidByComponent["تكلفة البضاعة"] ?? 0)),
-        "الشحن": Math.max(0, shippingTotalRmb - (paidByComponent["الشحن"] ?? 0)),
-        "العمولة": Math.max(0, commissionTotalRmb - (paidByComponent["العمولة"] ?? 0)),
+        "تكلفة البضاعة": Math.max(0, goodsTotalRmb - (paidByComponentRmb["تكلفة البضاعة"] ?? 0)),
+        "الشحن": Math.max(0, shippingTotalRmb - (paidByComponentRmb["الشحن"] ?? 0)),
+        "العمولة": Math.max(0, commissionTotalRmb - (paidByComponentRmb["العمولة"] ?? 0)),
         "الجمرك": Math.max(0, customsTotalEgp - (paidByComponent["الجمرك"] ?? 0)),
         "التخريج": Math.max(0, takhreegTotalEgp - (paidByComponent["التخريج"] ?? 0)),
       };
@@ -627,9 +646,9 @@ export async function registerRoutes(
           remaining: egpRemaining.toFixed(2),
         },
         paidByComponent: {
-          "تكلفة البضاعة": (paidByComponent["تكلفة البضاعة"] ?? 0).toFixed(2),
-          "الشحن": (paidByComponent["الشحن"] ?? 0).toFixed(2),
-          "العمولة": (paidByComponent["العمولة"] ?? 0).toFixed(2),
+          "تكلفة البضاعة": (paidByComponentRmb["تكلفة البضاعة"] ?? 0).toFixed(2),
+          "الشحن": (paidByComponentRmb["الشحن"] ?? 0).toFixed(2),
+          "العمولة": (paidByComponentRmb["العمولة"] ?? 0).toFixed(2),
           "الجمرك": (paidByComponent["الجمرك"] ?? 0).toFixed(2),
           "التخريج": (paidByComponent["التخريج"] ?? 0).toFixed(2),
         },

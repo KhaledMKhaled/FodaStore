@@ -66,3 +66,15 @@ FIX REMAINING AMOUNT PER COST COMPONENT - December 20, 2025
 [x] 41. API returns paidByComponent and remainingByComponent with per-component breakdown
 [x] 42. Frontend uses correct data sources instead of total shipment values
 [x] 43. Workflow restarted - Payment system now shows correct remaining per component
+
+════════════════════════════════════════════════════════════════════
+FIX PAID AMOUNT CALCULATION - December 20, 2025
+════════════════════════════════════════════════════════════════════
+
+[x] 44. Fix paid amount calculation bug:
+    ✓ paidByComponentRmb: Tracks RMB payments for RMB components
+    ✓ paidByComponent: Tracks EGP payments for EGP components
+    ✓ Handles currency conversion when EGP paid toward RMB component
+    ✓ Correctly calculates remaining for each component
+[x] 45. Update API response to use paidByComponentRmb for RMB components
+[x] 46. Workflow restarted - Payment system now shows correct amounts per component
