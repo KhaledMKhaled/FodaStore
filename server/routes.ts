@@ -54,6 +54,10 @@ const uploadItemImage = multer({
 type RouteDependencies = {
   storage?: IStorage;
   auditLogger?: typeof logAuditEvent;
+  shipments?: {
+    createShipmentWithItems: typeof createShipmentWithItems;
+    updateShipmentWithItems: typeof updateShipmentWithItems;
+  };
   auth?: {
     setupAuth: (app: Express) => Promise<void>;
     isAuthenticated: RequestHandler;
@@ -240,6 +244,7 @@ export async function registerRoutes(
   const routeStorage: IStorage = deps.storage ?? storage;
   const auth = deps.auth ?? { setupAuth, isAuthenticated, requireRole };
   const auditLogger = deps.auditLogger ?? ((event: Parameters<typeof logAuditEvent>[0]) => logAuditEvent(event, routeStorage));
+  const shipmentService = deps.shipments ?? { createShipmentWithItems, updateShipmentWithItems };
   // Setup authentication
   await auth.setupAuth(app);
 
@@ -402,9 +407,9 @@ export async function registerRoutes(
   app.post("/api/shipments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
       const userId = (req.user as any)?.id;
-      const shipment = await createShipmentWithItems(req.body, userId);
+      const shipment = await shipmentService.createShipmentWithItems(req.body, userId);
       
-      logAuditEvent({
+      auditLogger({
         userId,
         entityType: "SHIPMENT",
         entityId: shipment.id,
@@ -432,11 +437,11 @@ export async function registerRoutes(
       const previousShippingCompanySupplierId =
         existingShipment?.shippingCompanySupplierId ?? null;
       
-      const updatedShipment = await updateShipmentWithItems(shipmentId, req.body);
+      const updatedShipment = await shipmentService.updateShipmentWithItems(shipmentId, req.body);
       const nextShippingCompanySupplierId =
         updatedShipment?.shippingCompanySupplierId ?? null;
       
-      logAuditEvent({
+      auditLogger({
         userId,
         entityType: "SHIPMENT",
         entityId: shipmentId,
@@ -456,7 +461,7 @@ export async function registerRoutes(
       });
       
       if (updatedShipment && updatedShipment.status !== previousStatus) {
-        logAuditEvent({
+        auditLogger({
           userId,
           entityType: "SHIPMENT",
           entityId: shipmentId,
@@ -481,7 +486,7 @@ export async function registerRoutes(
       
       await routeStorage.deleteShipment(shipmentId);
       
-      logAuditEvent({
+      auditLogger({
         userId,
         entityType: "SHIPMENT",
         entityId: shipmentId,
@@ -626,7 +631,7 @@ export async function registerRoutes(
       const userId = (req.user as any)?.id;
       const rate = await routeStorage.createExchangeRate(data);
       
-      logAuditEvent({
+      auditLogger({
         userId,
         entityType: "EXCHANGE_RATE",
         entityId: rate.id,
@@ -667,7 +672,7 @@ export async function registerRoutes(
       ]);
 
       refreshed.forEach((rate) => {
-        logAuditEvent({
+        auditLogger({
           userId,
           entityType: "EXCHANGE_RATE",
           entityId: rate.id,
@@ -796,7 +801,7 @@ export async function registerRoutes(
 
       const { password: _, ...userWithoutPassword } = user;
       
-      logAuditEvent({
+      auditLogger({
         userId: actorId,
         entityType: "USER",
         entityId: user.id,
@@ -844,7 +849,7 @@ export async function registerRoutes(
 
       const { password: _, ...userWithoutPassword } = user;
       
-      logAuditEvent({
+      auditLogger({
         userId: actorId,
         entityType: "USER",
         entityId: user.id,
@@ -867,7 +872,7 @@ export async function registerRoutes(
       }
       const { password: _, ...userWithoutPassword } = user;
       
-      logAuditEvent({
+      auditLogger({
         userId: (req.user as any)?.id,
         entityType: "USER",
         entityId: user.id,
@@ -901,7 +906,7 @@ export async function registerRoutes(
 
       await routeStorage.deleteUser(id);
       
-      logAuditEvent({
+      auditLogger({
         userId: actorId,
         entityType: "USER",
         entityId: id,
@@ -1024,7 +1029,7 @@ export async function registerRoutes(
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       await routeStorage.updateUser(userId, { password: hashedPassword });
 
-      logAuditEvent({
+      auditLogger({
         userId,
         entityType: "USER",
         entityId: userId,
