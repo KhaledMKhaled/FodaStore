@@ -1210,7 +1210,7 @@ export function Step2Shipping({
           <CardTitle className="text-lg">العمولة</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label>نسبة العمولة %</Label>
               <Input
@@ -1253,7 +1253,7 @@ export function Step2Shipping({
           <CardTitle className="text-lg">تكلفة الشحن</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>اسم شركة الشحن</Label>
               <Select
@@ -1345,16 +1345,16 @@ export function Step2Shipping({
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t">
-            <div className="bg-muted/50 p-3 rounded-md">
-              <p className="text-sm text-muted-foreground">إجمالي الشحن (USD)</p>
+            <div className="bg-muted/50 p-4 rounded-md">
+              <p className="text-sm text-muted-foreground mb-2">إجمالي الشحن (USD)</p>
               <p className="text-lg font-bold">$ {formatCurrency(shippingCostUsd)}</p>
             </div>
-            <div className="bg-muted/50 p-3 rounded-md">
-              <p className="text-sm text-muted-foreground">إجمالي الشحن (RMB)</p>
+            <div className="bg-muted/50 p-4 rounded-md">
+              <p className="text-sm text-muted-foreground mb-2">إجمالي الشحن (RMB)</p>
               <p className="text-lg font-bold">¥ {formatCurrency(shippingCostRmb)}</p>
             </div>
-            <div className="bg-primary/10 p-3 rounded-md">
-              <p className="text-sm text-muted-foreground">إجمالي الشحن (ج.م)</p>
+            <div className="bg-primary/10 p-4 rounded-md">
+              <p className="text-sm text-muted-foreground mb-2">إجمالي الشحن (ج.م)</p>
               <p className="text-lg font-bold text-primary">
                 {formatCurrency(shippingCostEgp)} ج.م
               </p>
