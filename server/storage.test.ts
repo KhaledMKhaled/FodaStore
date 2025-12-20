@@ -371,6 +371,7 @@ describe("supplier reporting with payment allocations", () => {
     );
     assert.equal(allocationMovement?.paidRmb, "20.00");
     assert.equal(allocationMovement?.runningBalanceRmb, "55.00");
+    assert.equal(allocationMovement?.paymentId, payment.id);
 
     const statementB = await storage.getSupplierStatement(2);
     assert.equal(statementB.movements.length, 0);
@@ -429,6 +430,7 @@ describe("supplier reporting with payment allocations", () => {
     assert.equal(paymentMovement?.partyName, "Supplier A");
     assert.equal(paymentMovement?.partyType, "supplier");
     assert.equal(paymentMovement?.amountRmb, "30.00");
+    assert.equal(paymentMovement?.paymentId, payment.id);
     assert.equal(costMovement?.partyId, supplierA.id);
   });
 
