@@ -898,7 +898,7 @@ function Step1Import({
                     </Button>
                   )}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>المورد</Label>
                     <Select
@@ -941,14 +941,14 @@ function Step1Import({
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>اسم المنتج *</Label>
-                    <Input
-                      value={item.productName || ""}
-                      onChange={(e) => updateItem(actualIndex, "productName", e.target.value)}
-                      placeholder="قميص رجالي قطن"
-                    />
-                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>اسم المنتج *</Label>
+                  <Input
+                    value={item.productName || ""}
+                    onChange={(e) => updateItem(actualIndex, "productName", e.target.value)}
+                    placeholder="قميص رجالي قطن"
+                  />
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                   <div className="space-y-2">
@@ -1001,8 +1001,8 @@ function Step1Import({
                     />
                   </div>
                 </div>
-                {/* Image Upload Section */}
-                <div className="flex items-center gap-4 pt-2 border-t">
+                {/* Image Upload & Total Section */}
+                <div className="flex flex-col md:flex-row items-start md:items-center gap-4 pt-4 border-t">
                   <div className="flex items-center gap-3">
                     <Label className="whitespace-nowrap">صورة البند:</Label>
                     {item.imageUrl ? (
@@ -1049,7 +1049,7 @@ function Step1Import({
                     )}
                   </div>
                   <div className="flex-1" />
-                  <div className="bg-primary/10 px-4 py-2 rounded-md">
+                  <div className="bg-primary/10 px-4 py-3 rounded-md w-full md:w-auto">
                     <span className="text-sm text-muted-foreground ml-2">
                       إجمالي البند:
                     </span>

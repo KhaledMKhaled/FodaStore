@@ -36,7 +36,17 @@ ENVIRONMENT MIGRATION - December 20, 2025
 [x] 30. npm install - installed all dependencies
 [x] 31. Workflow restart - application running on port 5000
 [x] 32. Import complete
-[x] 33. Improve spacing and layout for shipment commission and shipping fields
+
+════════════════════════════════════════════════════════════════════
+UI/UX LAYOUT & SPACING IMPROVEMENTS - December 20, 2025
+════════════════════════════════════════════════════════════════════
+
+[x] 33. Improve spacing and layout for shipping commission and shipping fields
 [x] 34. Improve shipment wizard header layout with responsive design
-[x] 35. Format shipment info fields (rقم الشحنة، اسم، تاريخ، سعر صرف) - 4 عمود منتاسق
-[x] 36. Workflow restarted after shipment wizard layout updates
+[x] 35. Format shipment info fields - 4 عمود منتاسق (رقم، اسم، تاريخ، سعر صرف)
+[x] 36. Format shipment items fields with better organization:
+    ✓ صف الأول: المورد + نوع الصنف (2 عمود متساوي)
+    ✓ الصف الثاني: اسم المنتج (سطر كامل)
+    ✓ الصف الثالث: البيانات المتقدمة (5 أعمدة: بلد + كراتين + قطع + إجمالي + سعر)
+    ✓ تحسين قسم الصورة والإجمالي (responsive flex layout)
+[x] 37. Workflow restarted - All changes applied successfully
