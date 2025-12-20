@@ -8,7 +8,7 @@ const app = express();
 const httpServer = createServer(app);
 
 // Serve uploaded files
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.use("/uploads/items", express.static(path.join(process.cwd(), "uploads/items")));
 
 declare module "http" {
   interface IncomingMessage {

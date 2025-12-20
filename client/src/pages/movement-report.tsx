@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import {
   FileSpreadsheet,
   Filter,
@@ -43,6 +44,9 @@ interface MovementReportData {
     amountEgp: string;
     direction: 'cost' | 'payment';
     userName?: string;
+    paymentId?: number;
+    attachmentUrl?: string | null;
+    attachmentOriginalName?: string | null;
   }>;
   totalCostEgp: string;
   totalPaidEgp: string;
@@ -415,6 +419,7 @@ export default function MovementReportPage() {
                   <TableHead className="text-right sticky top-0 bg-background">نوع الحركة</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">تحت حساب</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">طريقة الدفع</TableHead>
+                  <TableHead className="text-right sticky top-0 bg-background">مرفق</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">المبلغ بالجنيه</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">الاتجاه</TableHead>
                 </TableRow>
@@ -422,7 +427,7 @@ export default function MovementReportPage() {
               <TableBody>
                 {report?.movements?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground">
                       لا توجد حركات
                     </TableCell>
                   </TableRow>
@@ -448,6 +453,17 @@ export default function MovementReportPage() {
                         )}
                       </TableCell>
                       <TableCell>{m.paymentMethod || "-"}</TableCell>
+                      <TableCell>
+                        {m.direction === "payment" ? (
+                          <PaymentAttachmentIcon
+                            paymentId={m.paymentId}
+                            attachmentUrl={m.attachmentUrl}
+                            attachmentOriginalName={m.attachmentOriginalName}
+                          />
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
                       <TableCell className={m.direction === 'cost' ? 'text-red-600' : 'text-green-600'}>
                         {formatCurrency(m.amountEgp)} جنيه
                       </TableCell>

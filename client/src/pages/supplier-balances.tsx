@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { 
   Users, 
   TrendingUp, 
@@ -46,6 +47,9 @@ interface SupplierStatement {
     costEgp?: string;
     paidEgp?: string;
     runningBalance: string;
+    paymentId?: number;
+    attachmentUrl?: string | null;
+    attachmentOriginalName?: string | null;
   }>;
 }
 
@@ -306,13 +310,14 @@ export default function SupplierBalancesPage() {
                     <TableHead className="text-right">رقم الشحنة</TableHead>
                     <TableHead className="text-right">تكلفة</TableHead>
                     <TableHead className="text-right">مدفوع</TableHead>
+                    <TableHead className="text-right">مرفق</TableHead>
                     <TableHead className="text-right">الرصيد</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {statement?.movements?.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      <TableCell colSpan={7} className="text-center text-muted-foreground">
                         لا توجد حركات
                       </TableCell>
                     </TableRow>
@@ -331,6 +336,17 @@ export default function SupplierBalancesPage() {
                         </TableCell>
                         <TableCell className="text-green-600">
                           {m.paidEgp ? `${formatCurrency(m.paidEgp)} جنيه` : "-"}
+                        </TableCell>
+                        <TableCell>
+                          {m.type === "payment" ? (
+                            <PaymentAttachmentIcon
+                              paymentId={m.paymentId}
+                              attachmentUrl={m.attachmentUrl}
+                              attachmentOriginalName={m.attachmentOriginalName}
+                            />
+                          ) : (
+                            "-"
+                          )}
                         </TableCell>
                         <TableCell className="font-medium">
                           {formatCurrency(m.runningBalance)} جنيه

@@ -422,6 +422,7 @@ export interface IStorage {
 
   // Payments
   getAllPayments(): Promise<ShipmentPayment[]>;
+  getPaymentById(paymentId: number): Promise<ShipmentPayment | undefined>;
   getShipmentPayments(shipmentId: number): Promise<ShipmentPayment[]>;
   createPayment(
     data: InsertShipmentPayment,
@@ -873,6 +874,14 @@ export class DatabaseStorage implements IStorage {
   // Payments
   async getAllPayments(): Promise<ShipmentPayment[]> {
     return db.select().from(shipmentPayments).orderBy(desc(shipmentPayments.paymentDate));
+  }
+
+  async getPaymentById(paymentId: number): Promise<ShipmentPayment | undefined> {
+    const [payment] = await db
+      .select()
+      .from(shipmentPayments)
+      .where(eq(shipmentPayments.id, paymentId));
+    return payment;
   }
 
   async getShipmentPayments(shipmentId: number): Promise<ShipmentPayment[]> {
@@ -1785,6 +1794,9 @@ export class DatabaseStorage implements IStorage {
       costEgp?: string;
       paidEgp?: string;
       runningBalance: string;
+      paymentId?: number;
+      attachmentUrl?: string | null;
+      attachmentOriginalName?: string | null;
     }> = [];
 
     supplierShipments.forEach(s => {
@@ -1814,6 +1826,9 @@ export class DatabaseStorage implements IStorage {
         shipmentCode: shipment?.shipmentCode,
         paidEgp: p.amountEgp || "0",
         runningBalance: "0",
+        paymentId: p.id,
+        attachmentUrl: p.attachmentUrl ?? null,
+        attachmentOriginalName: p.attachmentOriginalName ?? null,
       });
     });
 
@@ -1931,6 +1946,9 @@ export class DatabaseStorage implements IStorage {
       amountEgp: string;
       direction: 'cost' | 'payment';
       userName?: string;
+      paymentId?: number;
+      attachmentUrl?: string | null;
+      attachmentOriginalName?: string | null;
     }> = [];
 
     const shipmentSupplierMap = new Map<number, number | undefined>();
@@ -2040,6 +2058,9 @@ export class DatabaseStorage implements IStorage {
         amountEgp: p.amountEgp || "0",
         direction: 'payment',
         userName,
+        paymentId: p.id,
+        attachmentUrl: p.attachmentUrl ?? null,
+        attachmentOriginalName: p.attachmentOriginalName ?? null,
       });
     }
 

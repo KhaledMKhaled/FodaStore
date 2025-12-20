@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createServer } from "http";
 import type { AddressInfo } from "net";
+import fs from "node:fs";
+import path from "node:path";
 import express from "express";
 import test, { beforeEach, mock } from "node:test";
 
@@ -69,7 +71,11 @@ const createPaymentMock = mock.fn(async (data: InsertShipmentPayment) => {
     cashReceiverName: data.cashReceiverName ?? null,
     referenceNumber: data.referenceNumber ?? null,
     note: data.note ?? null,
-    attachmentUrl: null,
+    attachmentUrl: data.attachmentUrl ?? null,
+    attachmentMimeType: data.attachmentMimeType ?? null,
+    attachmentSize: data.attachmentSize ?? null,
+    attachmentOriginalName: data.attachmentOriginalName ?? null,
+    attachmentUploadedAt: data.attachmentUploadedAt ?? null,
     createdByUserId: data.createdByUserId ?? null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -93,6 +99,11 @@ const mockedGetShipmentsByIds = mock.method(
       id,
       status: storageState.shipments.get(id)?.status,
     })),
+);
+const mockedGetPaymentById = mock.method(
+  storage,
+  "getPaymentById",
+  async (id: number) => storageState.payments.find((payment) => payment.id === id),
 );
 const mockedGetShipmentSupplierContext = mock.method(
   storage,
@@ -127,6 +138,7 @@ function resetStorageState() {
   mockedCreateAuditLog.mock.resetCalls();
   mockedGetAllPayments.mock.resetCalls();
   mockedGetShipmentsByIds.mock.resetCalls();
+  mockedGetPaymentById.mock.resetCalls();
   mockedGetShipmentSupplierContext.mock.resetCalls();
   mockedGetSupplier.mock.resetCalls();
 }
@@ -143,6 +155,26 @@ function createPaymentPayload(shipmentId: number, amount = "150.00") {
     paymentMethod: "نقدي",
     cashReceiverName: "Tester",
   } satisfies Record<string, unknown>;
+}
+
+const samplePng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+9gAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+const MAX_ATTACHMENT_SIZE = 2 * 1024 * 1024;
+
+function createPaymentFormData(shipmentId: number, amount = "150.00") {
+  const form = new FormData();
+  form.append("shipmentId", shipmentId.toString());
+  form.append("paymentDate", new Date().toISOString());
+  form.append("paymentCurrency", "EGP");
+  form.append("amountOriginal", amount);
+  form.append("amountEgp", amount);
+  form.append("costComponent", "شراء");
+  form.append("paymentMethod", "نقدي");
+  form.append("cashReceiverName", "Tester");
+  return form;
 }
 
 async function createTestServer(user?: { id: string; role: string }) {
@@ -271,7 +303,7 @@ test("rejects invalid supplierId", async () => {
 
 test("requires supplierId when shipment has supplier attribution", async () => {
   const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
-  shipmentSuppliers = [70];
+  shipmentSuppliers = [70, 71];
 
   const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
     method: "POST",
@@ -306,3 +338,116 @@ for (const { id, status } of shipmentSeeds) {
     assert.equal(body.data.amountEgp, "200.00");
   });
 }
+
+test("creates payment without attachment using multipart form data", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+  const form = createPaymentFormData(101);
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
+    method: "POST",
+    body: form,
+  });
+
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.data.shipmentId, 101);
+});
+
+test("creates payment with valid attachment and stores metadata", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+  const form = createPaymentFormData(101);
+  form.append("attachment", new Blob([samplePng], { type: "image/png" }), "receipt.png");
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
+    method: "POST",
+    body: form,
+  });
+
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.ok(body.data.attachmentUrl);
+  assert.equal(body.data.attachmentMimeType, "image/png");
+  assert.equal(body.data.attachmentOriginalName, "receipt.png");
+});
+
+test("rejects oversized payment attachment", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+  const form = createPaymentFormData(101);
+  const bigBuffer = new Uint8Array(MAX_ATTACHMENT_SIZE + 1);
+  form.append("attachment", new Blob([bigBuffer], { type: "image/png" }), "big.png");
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
+    method: "POST",
+    body: form,
+  });
+
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 400);
+  assert.equal(body?.error?.message, "Image must be 2MB or less.");
+});
+
+test("rejects non-image payment attachment", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+  const form = createPaymentFormData(101);
+  form.append("attachment", new Blob(["not an image"], { type: "text/plain" }), "note.txt");
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
+    method: "POST",
+    body: form,
+  });
+
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 400);
+  assert.equal(body?.error?.message, "Only image files are allowed.");
+});
+
+test("blocks attachment access when unauthenticated", async () => {
+  const uploadDir = path.join(process.cwd(), "uploads", "payments");
+  fs.mkdirSync(uploadDir, { recursive: true });
+  const filePath = path.join(uploadDir, "test-attachment.png");
+  fs.writeFileSync(filePath, samplePng);
+
+  storageState.payments.push({
+    id: 999,
+    shipmentId: 101,
+    paymentDate: new Date(),
+    paymentCurrency: "EGP",
+    amountOriginal: "10.00",
+    exchangeRateToEgp: null,
+    amountEgp: "10.00",
+    costComponent: "شراء",
+    paymentMethod: "نقدي",
+    cashReceiverName: null,
+    referenceNumber: null,
+    note: null,
+    attachmentUrl: "/uploads/payments/test-attachment.png",
+    attachmentMimeType: "image/png",
+    attachmentSize: samplePng.length,
+    attachmentOriginalName: "test-attachment.png",
+    attachmentUploadedAt: new Date(),
+    createdByUserId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const { port, close } = await createTestServer();
+
+  const response = await fetch(
+    `http://127.0.0.1:${port}/api/payments/999/attachment/preview`,
+  );
+
+  await close();
+  fs.unlinkSync(filePath);
+
+  assert.equal(response.status, 401);
+});
