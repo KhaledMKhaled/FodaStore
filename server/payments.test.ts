@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
 
-import type { Shipment, ShipmentPayment } from "@shared/schema";
+import type { PaymentAllocation, Shipment, ShipmentPayment } from "@shared/schema";
 import { getPaymentsWithShipments } from "./payments";
 
 const baseShipment: Shipment = {
@@ -61,6 +61,7 @@ describe("getPaymentsWithShipments", () => {
     const storage = {
       getAllPayments: mock.fn(async () => payments),
       getShipmentsByIds: mock.fn(async (_ids: number[]) => [baseShipment]),
+      getPaymentAllocationsByPaymentId: mock.fn(async () => [] as PaymentAllocation[]),
     };
 
     const result = await getPaymentsWithShipments(storage);
@@ -68,17 +69,70 @@ describe("getPaymentsWithShipments", () => {
     assert.equal(storage.getShipmentsByIds.mock.calls.length, 1);
     assert.equal(result.length, payments.length);
     assert.ok(result.every((payment) => payment.shipment?.id === baseShipment.id));
+    assert.ok(
+      result.every(
+        (payment) =>
+          payment.allocationSummary.exists === false &&
+          payment.allocationSummary.count === 0 &&
+          payment.allocationSummary.totalAllocated === "0.00",
+      ),
+    );
   });
 
   it("skips shipment lookup when there are no payments", async () => {
     const storage = {
       getAllPayments: mock.fn(async () => [] as ShipmentPayment[]),
       getShipmentsByIds: mock.fn(async () => [] as Shipment[]),
+      getPaymentAllocationsByPaymentId: mock.fn(async () => [] as PaymentAllocation[]),
     };
 
     const result = await getPaymentsWithShipments(storage);
 
     assert.equal(storage.getShipmentsByIds.mock.calls.length, 0);
     assert.deepEqual(result, []);
+  });
+
+  it("includes allocations when requested", async () => {
+    const payments = [createPayment({ id: 3 })];
+    const allocations: PaymentAllocation[] = [
+      {
+        id: 1,
+        paymentId: 3,
+        shipmentId: baseShipment.id,
+        supplierId: 77,
+        component: "تكلفة البضاعة",
+        currency: "RMB",
+        allocatedAmount: "125.50",
+        createdByUserId: null,
+        createdAt: new Date("2024-02-03"),
+      },
+      {
+        id: 2,
+        paymentId: 3,
+        shipmentId: baseShipment.id,
+        supplierId: 88,
+        component: "تكلفة البضاعة",
+        currency: "RMB",
+        allocatedAmount: "74.50",
+        createdByUserId: null,
+        createdAt: new Date("2024-02-03"),
+      },
+    ];
+
+    const storage = {
+      getAllPayments: mock.fn(async () => payments),
+      getShipmentsByIds: mock.fn(async (_ids: number[]) => [baseShipment]),
+      getPaymentAllocationsByPaymentId: mock.fn(async () => allocations),
+    };
+
+    const result = await getPaymentsWithShipments(storage, { includeAllocations: true });
+
+    assert.equal(result.length, 1);
+    assert.deepEqual(result[0].allocations, allocations);
+    assert.deepEqual(result[0].allocationSummary, {
+      exists: true,
+      count: 2,
+      totalAllocated: "200.00",
+    });
   });
 });

@@ -1,12 +1,27 @@
-import type { Shipment, ShipmentPayment } from "@shared/schema";
+import type { PaymentAllocation, Shipment, ShipmentPayment } from "@shared/schema";
 import type { IStorage } from "./storage";
+import { parseAmountOrZero } from "./services/paymentCalculations";
 
-export type PaymentWithShipment = ShipmentPayment & { shipment?: Shipment };
+export type PaymentAllocationSummary = {
+  exists: boolean;
+  count: number;
+  totalAllocated: string;
+};
 
-type PaymentsStorage = Pick<IStorage, "getAllPayments" | "getShipmentsByIds">;
+export type PaymentWithShipment = ShipmentPayment & {
+  shipment?: Shipment;
+  allocationSummary: PaymentAllocationSummary;
+  allocations?: PaymentAllocation[];
+};
+
+type PaymentsStorage = Pick<
+  IStorage,
+  "getAllPayments" | "getShipmentsByIds" | "getPaymentAllocationsByPaymentId"
+>;
 
 export async function getPaymentsWithShipments(
   paymentsStorage: PaymentsStorage,
+  options?: { includeAllocations?: boolean },
 ): Promise<PaymentWithShipment[]> {
   const payments = await paymentsStorage.getAllPayments();
 
@@ -16,8 +31,35 @@ export async function getPaymentsWithShipments(
   const shipments = await paymentsStorage.getShipmentsByIds(shipmentIds);
   const shipmentMap = new Map(shipments.map((shipment) => [shipment.id, shipment]));
 
+  const allocationsByPayment = new Map<number, PaymentAllocation[]>();
+  const allocationEntries = await Promise.all(
+    payments.map(async (payment) => ({
+      paymentId: payment.id,
+      allocations: await paymentsStorage.getPaymentAllocationsByPaymentId(payment.id),
+    })),
+  );
+
+  allocationEntries.forEach(({ paymentId, allocations }) => {
+    allocationsByPayment.set(paymentId, allocations);
+  });
+
   return payments.map((payment) => ({
     ...payment,
     shipment: shipmentMap.get(payment.shipmentId),
+    ...(options?.includeAllocations
+      ? { allocations: allocationsByPayment.get(payment.id) ?? [] }
+      : {}),
+    allocationSummary: (() => {
+      const allocations = allocationsByPayment.get(payment.id) ?? [];
+      const totalAllocated = allocations.reduce(
+        (sum, allocation) => sum + parseAmountOrZero(allocation.allocatedAmount),
+        0,
+      );
+      return {
+        exists: allocations.length > 0,
+        count: allocations.length,
+        totalAllocated: totalAllocated.toFixed(2),
+      };
+    })(),
   }));
 }
