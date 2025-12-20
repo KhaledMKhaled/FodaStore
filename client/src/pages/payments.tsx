@@ -62,10 +62,11 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
 import { shipmentStatusColors } from "@/lib/colorMaps";
-import type { Shipment, ShipmentItem, ShipmentPayment, InsertShipmentPayment, Supplier } from "@shared/schema";
+import type { Shipment, ShipmentItem, ShipmentPayment, Supplier } from "@shared/schema";
 import { deriveAmountEgp, validateRemainingAllowance } from "./paymentValidation";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +77,8 @@ const PAYMENT_METHODS = [
   { value: "تحويل بنكي", label: "تحويل بنكي" },
   { value: "أخرى", label: "أخرى" },
 ];
+
+const MAX_ATTACHMENT_SIZE = 2 * 1024 * 1024;
 
 const COST_COMPONENTS = [
   { value: "تكلفة البضاعة", label: "تكلفة البضاعة" },
@@ -163,6 +166,9 @@ export default function Payments() {
   const [expandedShipments, setExpandedShipments] = useState<Set<number>>(new Set());
   const [showInvoiceSummary, setShowInvoiceSummary] = useState(false);
   const [clientValidationError, setClientValidationError] = useState<string | null>(null);
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentInputKey, setAttachmentInputKey] = useState(0);
   const [currentPageShipments, setCurrentPageShipments] = useState(1);
   const [currentPagePayments, setCurrentPagePayments] = useState(1);
   const { toast } = useToast();
@@ -252,8 +258,8 @@ export default function Payments() {
   ]);
 
   const createMutation = useMutation({
-    mutationFn: async (data: InsertShipmentPayment) => {
-      return apiRequest("POST", "/api/payments", data);
+    mutationFn: async (data: { payload: FormData; shipmentId: number }) => {
+      return apiRequest("POST", "/api/payments", data.payload);
     },
     onSuccess: (_response, variables) => {
       toast({ title: "تم تسجيل الدفعة بنجاح" });
@@ -281,6 +287,35 @@ export default function Payments() {
     setCostComponent("");
     setShowInvoiceSummary(false);
     setClientValidationError(null);
+    setAttachmentFile(null);
+    setAttachmentError(null);
+    setAttachmentInputKey((prev) => prev + 1);
+  };
+
+  const handleAttachmentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setAttachmentFile(null);
+      setAttachmentError(null);
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setAttachmentFile(null);
+      setAttachmentError("يرجى اختيار ملف صورة فقط.");
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      setAttachmentFile(null);
+      setAttachmentError("يجب ألا يزيد حجم الصورة عن 2MB.");
+      event.target.value = "";
+      return;
+    }
+
+    setAttachmentFile(file);
+    setAttachmentError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -393,25 +428,42 @@ export default function Payments() {
 
     const safeAmountEgp = Number.isFinite(amountEgpNumber) ? amountEgpNumber : 0;
 
-    const data: InsertShipmentPayment & { supplierId?: number | null } = {
-      shipmentId: selectedShipmentId,
-      supplierId: supplierId || null,
-      paymentDate: new Date(formData.get("paymentDate") as string),
-      paymentCurrency,
-      amountOriginal,
-      exchangeRateToEgp: paymentCurrency === "RMB" ? exchangeRate : null,
-      amountEgp:
-        paymentCurrency === "EGP"
-          ? amountOriginal
-          : safeAmountEgp.toFixed(2),
-      costComponent,
-      paymentMethod,
-      cashReceiverName: (formData.get("cashReceiverName") as string) || null,
-      referenceNumber: (formData.get("referenceNumber") as string) || null,
-      note: (formData.get("note") as string) || null,
-    };
+    if (attachmentError) {
+      toast({ title: attachmentError, variant: "destructive" });
+      return;
+    }
 
-    createMutation.mutate(data);
+    const payload = new FormData();
+    payload.append("shipmentId", String(selectedShipmentId));
+    if (supplierId) {
+      payload.append("supplierId", String(supplierId));
+    }
+    payload.append("paymentDate", formData.get("paymentDate") as string);
+    payload.append("paymentCurrency", paymentCurrency);
+    payload.append("amountOriginal", amountOriginal);
+    if (paymentCurrency === "RMB") {
+      payload.append("exchangeRateToEgp", exchangeRate);
+    }
+    payload.append(
+      "amountEgp",
+      paymentCurrency === "EGP" ? amountOriginal : safeAmountEgp.toFixed(2),
+    );
+    payload.append("costComponent", costComponent);
+    payload.append("paymentMethod", paymentMethod);
+    payload.append(
+      "cashReceiverName",
+      (formData.get("cashReceiverName") as string) || "",
+    );
+    payload.append(
+      "referenceNumber",
+      (formData.get("referenceNumber") as string) || "",
+    );
+    payload.append("note", (formData.get("note") as string) || "");
+    if (attachmentFile) {
+      payload.append("attachment", attachmentFile);
+    }
+
+    createMutation.mutate({ payload, shipmentId: selectedShipmentId });
   };
 
   const formatCurrency = (value: string | number | null) => {
@@ -811,6 +863,25 @@ export default function Payments() {
                 />
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="attachment">إرفاق صورة (اختياري)</Label>
+                <Input
+                  key={attachmentInputKey}
+                  id="attachment"
+                  name="attachment"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAttachmentChange}
+                  data-testid="input-attachment"
+                />
+                <p className="text-xs text-muted-foreground">
+                  يُسمح بالصور فقط بحد أقصى 2MB.
+                </p>
+                {attachmentError && (
+                  <p className="text-xs text-destructive">{attachmentError}</p>
+                )}
+              </div>
+
               {clientValidationError && (
                 <div className="text-sm text-destructive" data-testid="validation-error">
                   {clientValidationError}
@@ -1071,6 +1142,13 @@ export default function Payments() {
                                               )}
                                               {payment.note && <div>ملاحظة: {payment.note}</div>}
                                             </div>
+                                            <div className="flex items-start">
+                                              <PaymentAttachmentIcon
+                                                paymentId={payment.id}
+                                                attachmentUrl={payment.attachmentUrl}
+                                                attachmentOriginalName={payment.attachmentOriginalName}
+                                              />
+                                            </div>
                                           </div>
                                         ))}
                                       </div>
@@ -1233,6 +1311,7 @@ export default function Payments() {
                           <TableHead className="text-right">طريقة الدفع</TableHead>
                           <TableHead className="text-right">المستلم/المرجع</TableHead>
                           <TableHead className="text-right">ملاحظات</TableHead>
+                          <TableHead className="text-right">مرفق</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1277,6 +1356,13 @@ export default function Payments() {
                             <div className="line-clamp-2 break-words">
                               {payment.note || "-"}
                             </div>
+                          </TableCell>
+                          <TableCell>
+                            <PaymentAttachmentIcon
+                              paymentId={payment.id}
+                              attachmentUrl={payment.attachmentUrl}
+                              attachmentOriginalName={payment.attachmentOriginalName}
+                            />
                           </TableCell>
                         </TableRow>
                       ))}

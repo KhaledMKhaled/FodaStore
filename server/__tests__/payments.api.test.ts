@@ -147,6 +147,7 @@ test("POST /api/payments writes an audit log entry", async () => {
     amount: payload.amountEgp,
     currency: payload.paymentCurrency,
     method: payload.paymentMethod,
+    hasAttachment: false,
   });
 
   mock.restoreAll();

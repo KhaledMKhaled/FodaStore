@@ -51,6 +51,68 @@ const uploadItemImage = multer({
   },
 });
 
+const MAX_PAYMENT_ATTACHMENT_SIZE = 2 * 1024 * 1024;
+
+const paymentAttachmentStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const uploadDir = "uploads/payments";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, `payment-${uniqueSuffix}${ext}`);
+  },
+});
+
+const uploadPaymentAttachment = multer({
+  storage: paymentAttachmentStorage,
+  limits: { fileSize: MAX_PAYMENT_ATTACHMENT_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"));
+    }
+  },
+});
+
+const handlePaymentAttachmentUpload: RequestHandler = (req, res, next) => {
+  uploadPaymentAttachment.single("attachment")(req, res, (err) => {
+    if (!err) {
+      return next();
+    }
+
+    if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({
+        error: {
+          code: "PAYMENT_ATTACHMENT_TOO_LARGE",
+          message: "Image must be 2MB or less.",
+        },
+      });
+    }
+
+    if (err.message === "Only image files are allowed") {
+      return res.status(400).json({
+        error: {
+          code: "PAYMENT_ATTACHMENT_INVALID_TYPE",
+          message: "Only image files are allowed.",
+        },
+      });
+    }
+
+    return res.status(400).json({
+      error: {
+        code: "PAYMENT_ATTACHMENT_UPLOAD_FAILED",
+        message: "تعذر رفع صورة الدفعة. حاول مرة أخرى.",
+      },
+    });
+  });
+};
+
 type RouteDependencies = {
   storage?: IStorage;
   auditLogger?: typeof logAuditEvent;
@@ -79,10 +141,26 @@ const SHIPPING_COST_COMPONENTS = new Set(["الشحن", "العمولة", "ال�
 export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHandler {
   return async (req, res) => {
     try {
-      const { shipmentId, supplierId, paymentDate, paymentCurrency, amountOriginal, exchangeRateToEgp, costComponent, paymentMethod, cashReceiverName, referenceNumber, notes } = req.body;
+      const { shipmentId, supplierId, paymentDate, paymentCurrency, amountOriginal, exchangeRateToEgp, costComponent, paymentMethod, cashReceiverName, referenceNumber, note, notes } = req.body;
       const actorId = (req.user as any)?.id;
+      const attachment = req.file;
+      const parsedShipmentId = Number(shipmentId);
+      const parsedSupplierId =
+        supplierId !== undefined && supplierId !== null && supplierId !== ""
+          ? Number(supplierId)
+          : null;
+
+      if (Number.isNaN(parsedShipmentId)) {
+        return res.status(400).json({
+          error: {
+            code: "PAYMENT_PAYLOAD_INVALID",
+            message: "بيانات الدفعة غير مكتملة أو غير صحيحة. راجع الحقول المطلوبة.",
+            details: { field: "shipmentId" },
+          },
+        });
+      }
       const { itemSuppliers, shippingCompanySupplierId, shipmentSuppliers } =
-        await deps.storage.getShipmentSupplierContext(shipmentId);
+        await deps.storage.getShipmentSupplierContext(parsedShipmentId);
       const isShippingComponent = SHIPPING_COST_COMPONENTS.has(costComponent);
       const isPurchaseComponent = costComponent === PURCHASE_COST_COMPONENT;
       const relevantSuppliers = isShippingComponent
@@ -92,7 +170,7 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
           : shipmentSuppliers;
       const shouldRequireSupplier = relevantSuppliers.length > 0;
       const shouldDefaultSupplier = !supplierId && relevantSuppliers.length === 1;
-      const resolvedSupplierId = shouldDefaultSupplier ? relevantSuppliers[0] : supplierId;
+      const resolvedSupplierId = shouldDefaultSupplier ? relevantSuppliers[0] : parsedSupplierId;
 
       if (shouldRequireSupplier && !resolvedSupplierId) {
         return res.status(400).json({
@@ -191,18 +269,23 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
       });
 
       const payment = await deps.storage.createPayment({
-        shipmentId,
+        shipmentId: parsedShipmentId,
         supplierId: resolvedSupplierId || null,
         paymentDate: parsedDate,
         paymentCurrency,
         amountOriginal: amountOriginal.toString(),
         exchangeRateToEgp: normalizedAmounts.exchangeRateToEgp?.toString() || null,
-        amountEgp: normalizedAmounts.amountEgp.toString(),
+        amountEgp: normalizedAmounts.amountEgp.toFixed(2),
         costComponent,
         paymentMethod,
         cashReceiverName: cashReceiverName || null,
         referenceNumber: referenceNumber || null,
-        note: notes || null,
+        note: note || notes || null,
+        attachmentUrl: attachment ? `/uploads/payments/${attachment.filename}` : null,
+        attachmentMimeType: attachment?.mimetype ?? null,
+        attachmentSize: attachment?.size ?? null,
+        attachmentOriginalName: attachment?.originalname ?? null,
+        attachmentUploadedAt: attachment ? new Date() : null,
         createdByUserId: actorId,
       });
 
@@ -222,10 +305,11 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
           amount: normalizedAmounts.amountEgp.toString(),
           currency: paymentCurrency,
           method: paymentMethod,
+          hasAttachment: Boolean(attachment),
         },
       });
 
-      res.json({ ok: true, payment });
+      res.json(success(payment));
     } catch (error) {
       const { status, body } = formatError(error, {
         code: "PAYMENT_FETCH_FAILED",
@@ -780,7 +864,77 @@ export async function registerRoutes(
   app.post(
     "/api/payments",
     requireRole(["مدير", "محاسب"]),
+    handlePaymentAttachmentUpload,
     createPaymentHandler({ storage: routeStorage, logAuditEvent: auditLogger }),
+  );
+
+  const sendPaymentAttachment = async (
+    req: Parameters<RequestHandler>[0],
+    res: Parameters<RequestHandler>[1],
+    options: { inline: boolean },
+  ) => {
+    const paymentId = Number(req.params.paymentId);
+    if (Number.isNaN(paymentId)) {
+      return res.status(400).json({
+        error: {
+          code: "PAYMENT_ATTACHMENT_INVALID_ID",
+          message: "معرّف الدفعة غير صالح.",
+        },
+      });
+    }
+
+    const payment = await routeStorage.getPaymentById(paymentId);
+    if (!payment || !payment.attachmentUrl) {
+      return res.status(404).json({
+        error: {
+          code: "PAYMENT_ATTACHMENT_NOT_FOUND",
+          message: "لا يوجد مرفق لهذه الدفعة.",
+        },
+      });
+    }
+
+    const relativePath = payment.attachmentUrl.replace(/^\/+/, "");
+    const absolutePath = path.resolve(process.cwd(), relativePath);
+    const uploadsRoot = path.resolve(process.cwd(), "uploads");
+    if (!absolutePath.startsWith(uploadsRoot)) {
+      return res.status(400).json({
+        error: {
+          code: "PAYMENT_ATTACHMENT_INVALID_PATH",
+          message: "مسار المرفق غير صالح.",
+        },
+      });
+    }
+
+    if (!fs.existsSync(absolutePath)) {
+      return res.status(404).json({
+        error: {
+          code: "PAYMENT_ATTACHMENT_MISSING",
+          message: "الملف غير موجود على الخادم.",
+        },
+      });
+    }
+
+    const disposition = options.inline ? "inline" : "attachment";
+    const filename = payment.attachmentOriginalName || path.basename(absolutePath);
+    res.setHeader("Content-Type", payment.attachmentMimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `${disposition}; filename="${filename}"`);
+    return res.sendFile(absolutePath);
+  };
+
+  app.get(
+    "/api/payments/:paymentId/attachment/preview",
+    requireRole(["مدير", "محاسب"]),
+    async (req, res) => {
+      await sendPaymentAttachment(req, res, { inline: true });
+    },
+  );
+
+  app.get(
+    "/api/payments/:paymentId/attachment",
+    requireRole(["مدير", "محاسب"]),
+    async (req, res) => {
+      await sendPaymentAttachment(req, res, { inline: false });
+    },
   );
 
   // Inventory
