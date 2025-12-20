@@ -366,4 +366,50 @@ describe("supplier reporting with payment supplier overrides", () => {
     assert.equal(paymentMovement?.supplierName, "Supplier B");
     assert.equal(costMovement?.supplierId, supplierA.id);
   });
+
+  it("maps shipping company costs to shipping supplier while purchase stays with item supplier", async () => {
+    const purchaseSupplier = buildSupplier({ id: 5, name: "Purchase Supplier" });
+    const shippingSupplier = buildSupplier({
+      id: 6,
+      name: "Shipping Supplier",
+      isHidden: true,
+    });
+    const shipment = buildShipment({
+      id: 20,
+      shipmentCode: "S-20",
+      shipmentName: "Shipment 20",
+      purchaseDate: new Date("2024-02-01"),
+      purchaseCostRmb: "200.00",
+      purchaseCostEgp: "1400.00",
+      shippingCostRmb: "50.00",
+      shippingCostEgp: "350.00",
+      commissionCostRmb: "10.00",
+      commissionCostEgp: "70.00",
+      customsCostEgp: "40.00",
+      takhreegCostEgp: "30.00",
+      shippingCompanySupplierId: shippingSupplier.id,
+      finalTotalCostEgp: "1890.00",
+    });
+    const itemsByShipment = new Map<number, ShipmentItem[]>([
+      [shipment.id, [buildItem({ shipmentId: shipment.id, supplierId: purchaseSupplier.id })]],
+    ]);
+
+    const storage = buildReportingStorage({
+      suppliers: [purchaseSupplier, shippingSupplier],
+      shipments: [shipment],
+      payments: [],
+      itemsByShipment,
+    });
+
+    const report = await storage.getMovementReport();
+    const movementByType = new Map(
+      report.movements.map((movement) => [movement.movementType, movement]),
+    );
+
+    assert.equal(movementByType.get("تكلفة بضاعة")?.supplierId, purchaseSupplier.id);
+    assert.equal(movementByType.get("تكلفة شحن")?.supplierId, shippingSupplier.id);
+    assert.equal(movementByType.get("عمولة")?.supplierId, shippingSupplier.id);
+    assert.equal(movementByType.get("جمرك")?.supplierId, shippingSupplier.id);
+    assert.equal(movementByType.get("تخريج")?.supplierId, shippingSupplier.id);
+  });
 });
