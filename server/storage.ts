@@ -619,6 +619,20 @@ export interface IStorage {
   getPaymentById(paymentId: number): Promise<ShipmentPayment | undefined>;
   getShipmentPayments(shipmentId: number): Promise<ShipmentPayment[]>;
   getAllPaymentAllocations(): Promise<PaymentAllocation[]>;
+  getPaymentAllocationPreview(
+    shipmentId: number,
+    paymentAmountRmb: number,
+  ): Promise<{
+    shipmentId: number;
+    amountRmb: number;
+    totalOutstandingRmb: number;
+    suppliers: Array<{
+      supplierId: number;
+      goodsTotalRmb: number;
+      outstandingRmb: number;
+      allocatedRmb: number;
+    }>;
+  }>;
   createPayment(
     data: InsertShipmentPayment,
     options?: { simulatePostInsertError?: boolean; autoAllocate?: boolean }
@@ -1166,6 +1180,107 @@ export class DatabaseStorage implements IStorage {
 
   async getAllPaymentAllocations(): Promise<PaymentAllocation[]> {
     return db.select().from(paymentAllocations).orderBy(desc(paymentAllocations.createdAt));
+  }
+
+  async getPaymentAllocationPreview(
+    shipmentId: number,
+    paymentAmountRmb: number,
+  ): Promise<{
+    shipmentId: number;
+    amountRmb: number;
+    totalOutstandingRmb: number;
+    suppliers: Array<{
+      supplierId: number;
+      goodsTotalRmb: number;
+      outstandingRmb: number;
+      allocatedRmb: number;
+    }>;
+  }> {
+    const items = await db
+      .select({
+        supplierId: shipmentItems.supplierId,
+        totalPurchaseCostRmb: shipmentItems.totalPurchaseCostRmb,
+      })
+      .from(shipmentItems)
+      .where(eq(shipmentItems.shipmentId, shipmentId));
+
+    const supplierTotals = new Map<number, number>();
+    for (const item of items) {
+      if (!item.supplierId) continue;
+      const current = supplierTotals.get(item.supplierId) ?? 0;
+      supplierTotals.set(
+        item.supplierId,
+        current + parseAmountOrZero(item.totalPurchaseCostRmb),
+      );
+    }
+
+    const existingAllocations = await db
+      .select({
+        supplierId: paymentAllocations.supplierId,
+        totalAllocated: sql<string>`COALESCE(SUM(${paymentAllocations.allocatedAmount}), 0)`,
+      })
+      .from(paymentAllocations)
+      .where(
+        and(
+          eq(paymentAllocations.shipmentId, shipmentId),
+          eq(paymentAllocations.component, PURCHASE_COST_COMPONENT),
+          eq(paymentAllocations.currency, "RMB"),
+        ),
+      )
+      .groupBy(paymentAllocations.supplierId);
+
+    const allocatedMap = new Map<number, number>();
+    existingAllocations.forEach((allocation) => {
+      allocatedMap.set(
+        allocation.supplierId,
+        parseAmountOrZero(allocation.totalAllocated),
+      );
+    });
+
+    const supplierRows = Array.from(supplierTotals.entries()).map(
+      ([supplierId, goodsTotal]) => {
+        const allocated = allocatedMap.get(supplierId) ?? 0;
+        const outstanding = Math.max(0, goodsTotal - allocated);
+        return {
+          supplierId,
+          goodsTotalRmb: roundAmount(goodsTotal, 2),
+          outstandingRmb: roundAmount(outstanding, 2),
+        };
+      },
+    );
+
+    const allocationInputs: AllocationBasis[] = supplierRows.map((row) => ({
+      supplierId: row.supplierId,
+      totalAmount: row.goodsTotalRmb,
+      remainingAmount: row.outstandingRmb,
+    }));
+
+    const allocations = computeProportionalAllocations(
+      Math.max(0, paymentAmountRmb),
+      allocationInputs,
+    );
+
+    const allocationMap = new Map<number, number>();
+    allocations.forEach((allocation) => {
+      allocationMap.set(allocation.supplierId, allocation.allocatedAmount);
+    });
+
+    const totalOutstanding = roundAmount(
+      supplierRows.reduce((sum, row) => sum + row.outstandingRmb, 0),
+      2,
+    );
+
+    return {
+      shipmentId,
+      amountRmb: roundAmount(Math.max(0, paymentAmountRmb), 2),
+      totalOutstandingRmb: totalOutstanding,
+      suppliers: supplierRows.map((row) => ({
+        supplierId: row.supplierId,
+        goodsTotalRmb: row.goodsTotalRmb,
+        outstandingRmb: row.outstandingRmb,
+        allocatedRmb: roundAmount(allocationMap.get(row.supplierId) ?? 0, 2),
+      })),
+    };
   }
 
   async createPayment(
