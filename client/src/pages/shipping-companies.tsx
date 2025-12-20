@@ -52,7 +52,13 @@ export default function ShippingCompanies() {
       setEditingCompany(null);
     },
     onError: (error) => {
-      toast({ title: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: getErrorMessage(error, {
+          403: "No permission to add shipping companies.",
+          409: "Shipping company already exists.",
+        }),
+        variant: "destructive",
+      });
     },
   });
 
@@ -67,7 +73,13 @@ export default function ShippingCompanies() {
       setEditingCompany(null);
     },
     onError: (error) => {
-      toast({ title: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: getErrorMessage(error, {
+          403: "No permission to update shipping companies.",
+          409: "Shipping company already exists.",
+        }),
+        variant: "destructive",
+      });
     },
   });
 
@@ -80,7 +92,12 @@ export default function ShippingCompanies() {
       queryClient.invalidateQueries({ queryKey: ["/api/shipping-companies"] });
     },
     onError: (error) => {
-      toast({ title: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: getErrorMessage(error, {
+          403: "No permission to delete shipping companies.",
+        }),
+        variant: "destructive",
+      });
     },
   });
 

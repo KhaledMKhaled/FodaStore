@@ -6,6 +6,10 @@ type ApiErrorResponse = {
   message?: string;
 };
 
+type ErrorMessageOverrides = Partial<Record<number, string>> & {
+  defaultMessage?: string;
+};
+
 function buildError(message: string, status: number, code?: string, details?: unknown) {
   const error = new Error(message);
   (error as any).status = status;
@@ -42,27 +46,42 @@ async function throwIfResNotOk(res: Response) {
       res.statusText ||
       `Request failed with status ${res.status}`;
 
-    throw buildError(message, res.status, code, details);
+    const error = buildError(message, res.status, code, details);
+    console.error("API request failed", {
+      status: res.status,
+      url: res.url,
+      bodyText,
+      parsed,
+      stack: error.stack,
+    });
+    throw error;
   }
 }
 
-export function getErrorMessage(error: unknown): string {
+export function getErrorMessage(error: unknown, overrides?: ErrorMessageOverrides): string {
   const err = error as any;
   const status = err?.status;
 
+  if (status && overrides?.[status]) {
+    return overrides[status] as string;
+  }
+
   if (status === 401) {
-    return "Session expired, please login again";
+    return "Session expired. Please log in again.";
   }
   if (status === 403) {
-    return "You don’t have permission";
+    return "You don’t have permission.";
   }
   if (status === 409) {
-    return err?.message || "Shipping company name already exists";
+    return err?.message || "Shipping company already exists.";
   }
   if (status === 400 && Array.isArray(err?.details?.fields)) {
     const details = err.details.fields
       .map((field: { field?: string; message?: string }) => {
         if (!field?.field && !field?.message) return null;
+        if (field?.field === "name" && field?.message?.toLowerCase().includes("required")) {
+          return "Name is required.";
+        }
         if (!field?.field) return field.message;
         if (!field?.message) return field.field;
         return `${field.field}: ${field.message}`;
@@ -74,10 +93,10 @@ export function getErrorMessage(error: unknown): string {
     }
   }
   if (status === 500) {
-    return "تعذر إكمال العملية حالياً. حاول مرة أخرى.";
+    return "Unexpected server error.";
   }
 
-  return err?.message || "حدث خطأ";
+  return err?.message || overrides?.defaultMessage || "حدث خطأ";
 }
 
 export async function apiRequest(
