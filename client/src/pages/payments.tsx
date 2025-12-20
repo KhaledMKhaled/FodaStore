@@ -745,22 +745,6 @@ export default function Payments() {
                     placeholder="0.00"
                     data-testid="input-amount"
                   />
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>المتبقي في البند</span>
-                    {loadingInvoiceSummary ? (
-                      <Skeleton className="h-4 w-24" />
-                    ) : invoiceSummary && (invoiceSummary as any).remainingByComponent ? (
-                      <span
-                        className="font-semibold text-foreground"
-                        data-testid="remaining-allowed-value"
-                        data-allowed-value={(invoiceSummary as any).remainingByComponent?.[costComponent] || "0"}
-                      >
-                        {formatCurrency((invoiceSummary as any).remainingByComponent?.[costComponent] || "0")} {costComponent === "الجمرك" || costComponent === "التخريج" ? "ج.م" : "¥"}
-                      </span>
-                    ) : (
-                      <span data-testid="remaining-allowed-value">-</span>
-                    )}
-                  </div>
                 </div>
                 {paymentCurrency === "RMB" && (
                   <div className="space-y-2">
