@@ -620,8 +620,11 @@ export interface IStorage {
   getShipmentPayments(shipmentId: number): Promise<ShipmentPayment[]>;
   getAllPaymentAllocations(): Promise<PaymentAllocation[]>;
   getPaymentAllocationsByPaymentId(paymentId: number): Promise<PaymentAllocation[]>;
+  getPaymentAllocationsByPaymentIds(paymentIds: number[]): Promise<PaymentAllocation[]>;
   getPaymentAllocationsByShipmentId(shipmentId: number): Promise<PaymentAllocation[]>;
+  getPaymentAllocationsByShipmentIds(shipmentIds: number[]): Promise<PaymentAllocation[]>;
   getPaymentAllocationsBySupplierId(supplierId: number): Promise<PaymentAllocation[]>;
+  getPaymentAllocationsBySupplierIds(supplierIds: number[]): Promise<PaymentAllocation[]>;
   getPaymentAllocationPreview(
     shipmentId: number,
     paymentAmountRmb: number,
@@ -1193,6 +1196,17 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(paymentAllocations.createdAt));
   }
 
+  async getPaymentAllocationsByPaymentIds(
+    paymentIds: number[],
+  ): Promise<PaymentAllocation[]> {
+    if (paymentIds.length === 0) return [];
+    return db
+      .select()
+      .from(paymentAllocations)
+      .where(inArray(paymentAllocations.paymentId, paymentIds))
+      .orderBy(desc(paymentAllocations.createdAt));
+  }
+
   async getPaymentAllocationsByShipmentId(shipmentId: number): Promise<PaymentAllocation[]> {
     return db
       .select()
@@ -1201,11 +1215,33 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(paymentAllocations.createdAt));
   }
 
+  async getPaymentAllocationsByShipmentIds(
+    shipmentIds: number[],
+  ): Promise<PaymentAllocation[]> {
+    if (shipmentIds.length === 0) return [];
+    return db
+      .select()
+      .from(paymentAllocations)
+      .where(inArray(paymentAllocations.shipmentId, shipmentIds))
+      .orderBy(desc(paymentAllocations.createdAt));
+  }
+
   async getPaymentAllocationsBySupplierId(supplierId: number): Promise<PaymentAllocation[]> {
     return db
       .select()
       .from(paymentAllocations)
       .where(eq(paymentAllocations.supplierId, supplierId))
+      .orderBy(desc(paymentAllocations.createdAt));
+  }
+
+  async getPaymentAllocationsBySupplierIds(
+    supplierIds: number[],
+  ): Promise<PaymentAllocation[]> {
+    if (supplierIds.length === 0) return [];
+    return db
+      .select()
+      .from(paymentAllocations)
+      .where(inArray(paymentAllocations.supplierId, supplierIds))
       .orderBy(desc(paymentAllocations.createdAt));
   }
 

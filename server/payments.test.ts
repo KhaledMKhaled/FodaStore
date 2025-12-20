@@ -61,7 +61,7 @@ describe("getPaymentsWithShipments", () => {
     const storage = {
       getAllPayments: mock.fn(async () => payments),
       getShipmentsByIds: mock.fn(async (_ids: number[]) => [baseShipment]),
-      getPaymentAllocationsByPaymentId: mock.fn(async () => [] as PaymentAllocation[]),
+      getPaymentAllocationsByPaymentIds: mock.fn(async () => [] as PaymentAllocation[]),
     };
 
     const result = await getPaymentsWithShipments(storage);
@@ -83,7 +83,7 @@ describe("getPaymentsWithShipments", () => {
     const storage = {
       getAllPayments: mock.fn(async () => [] as ShipmentPayment[]),
       getShipmentsByIds: mock.fn(async () => [] as Shipment[]),
-      getPaymentAllocationsByPaymentId: mock.fn(async () => [] as PaymentAllocation[]),
+      getPaymentAllocationsByPaymentIds: mock.fn(async () => [] as PaymentAllocation[]),
     };
 
     const result = await getPaymentsWithShipments(storage);
@@ -122,7 +122,7 @@ describe("getPaymentsWithShipments", () => {
     const storage = {
       getAllPayments: mock.fn(async () => payments),
       getShipmentsByIds: mock.fn(async (_ids: number[]) => [baseShipment]),
-      getPaymentAllocationsByPaymentId: mock.fn(async () => allocations),
+      getPaymentAllocationsByPaymentIds: mock.fn(async () => allocations),
     };
 
     const result = await getPaymentsWithShipments(storage, { includeAllocations: true });
