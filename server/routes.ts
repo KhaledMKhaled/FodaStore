@@ -62,20 +62,33 @@ type RouteDependencies = {
 };
 
 type CreatePaymentHandlerDeps = {
-  storage: Pick<IStorage, "createPayment" | "getSupplier" | "getShipmentSuppliers">;
+  storage: Pick<
+    IStorage,
+    "createPayment" | "getSupplier" | "getShipmentSupplierContext"
+  >;
   logAuditEvent: (event: Parameters<typeof logAuditEvent>[0]) => void;
 };
+
+const PURCHASE_COST_COMPONENT = "تكلفة البضاعة";
+const SHIPPING_COST_COMPONENTS = new Set(["الشحن", "العمولة", "الجمرك", "التخريج"]);
 
 export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHandler {
   return async (req, res) => {
     try {
       const { shipmentId, supplierId, paymentDate, paymentCurrency, amountOriginal, exchangeRateToEgp, costComponent, paymentMethod, cashReceiverName, referenceNumber, notes } = req.body;
       const actorId = (req.user as any)?.id;
-      const shipmentSuppliers = await deps.storage.getShipmentSuppliers(shipmentId);
-      const shipmentSuppliersCount = shipmentSuppliers.length;
-      const shouldRequireSupplier = shipmentSuppliersCount > 0;
-      const shouldDefaultSupplier = !supplierId && shipmentSuppliersCount === 1;
-      const resolvedSupplierId = shouldDefaultSupplier ? shipmentSuppliers[0] : supplierId;
+      const { itemSuppliers, shippingCompanySupplierId, shipmentSuppliers } =
+        await deps.storage.getShipmentSupplierContext(shipmentId);
+      const isShippingComponent = SHIPPING_COST_COMPONENTS.has(costComponent);
+      const isPurchaseComponent = costComponent === PURCHASE_COST_COMPONENT;
+      const relevantSuppliers = isShippingComponent
+        ? (shippingCompanySupplierId !== null ? [shippingCompanySupplierId] : itemSuppliers)
+        : isPurchaseComponent
+          ? itemSuppliers
+          : shipmentSuppliers;
+      const shouldRequireSupplier = relevantSuppliers.length > 0;
+      const shouldDefaultSupplier = !supplierId && relevantSuppliers.length === 1;
+      const resolvedSupplierId = shouldDefaultSupplier ? relevantSuppliers[0] : supplierId;
 
       if (shouldRequireSupplier && !resolvedSupplierId) {
         return res.status(400).json({
@@ -90,7 +103,7 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
       if (
         resolvedSupplierId &&
         shouldRequireSupplier &&
-        !shipmentSuppliers.includes(resolvedSupplierId)
+        !relevantSuppliers.includes(resolvedSupplierId)
       ) {
         return res.status(400).json({
           error: {
@@ -99,7 +112,7 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
             details: {
               field: "supplierId",
               supplierId: resolvedSupplierId,
-              shipmentSuppliers,
+              shipmentSuppliers: relevantSuppliers,
             },
           },
         });

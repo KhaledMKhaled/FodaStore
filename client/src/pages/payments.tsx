@@ -85,6 +85,8 @@ const COST_COMPONENTS = [
   { value: "التخريج", label: "التخريج" },
 ];
 
+const SHIPPING_COST_COMPONENTS = new Set(["الشحن", "العمولة", "الجمرك", "التخريج"]);
+
 const ITEMS_PER_PAGE = 25;
 
 interface PaymentsStats {
@@ -198,13 +200,31 @@ export default function Payments() {
   const supplierIds = new Set(
     shipmentItems?.map((item) => item.supplierId).filter((id): id is number => !!id) ?? [],
   );
+  const shippingCompanySupplierId =
+    shipments?.find((shipment) => shipment.id === selectedShipmentId)?.shippingCompanySupplierId ??
+    null;
+  const shipmentSupplierIds = new Set(supplierIds);
+  if (typeof shippingCompanySupplierId === "number") {
+    shipmentSupplierIds.add(shippingCompanySupplierId);
+  }
 
-  const hasSupplierAttribution = supplierIds.size > 0;
+  const hasSupplierAttribution = shipmentSupplierIds.size > 0;
   const autoSupplierId = supplierIds.size === 1 ? Array.from(supplierIds)[0] : null;
+  const isShippingComponent = SHIPPING_COST_COMPONENTS.has(costComponent);
+  const autoShippingSupplierId = typeof shippingCompanySupplierId === "number"
+    ? shippingCompanySupplierId
+    : null;
 
   useEffect(() => {
     if (!isDialogOpen) return;
-    if (autoSupplierId) {
+    if (isShippingComponent) {
+      if (autoShippingSupplierId) {
+        if (supplierId !== autoShippingSupplierId) {
+          setSupplierId(autoShippingSupplierId);
+        }
+        return;
+      }
+    } else if (autoSupplierId) {
       setSupplierId(autoSupplierId);
       return;
     }
@@ -212,7 +232,15 @@ export default function Payments() {
       return;
     }
     setSupplierId(null);
-  }, [autoSupplierId, hasSupplierAttribution, isDialogOpen, selectedShipmentId, supplierId]);
+  }, [
+    autoSupplierId,
+    autoShippingSupplierId,
+    hasSupplierAttribution,
+    isDialogOpen,
+    isShippingComponent,
+    selectedShipmentId,
+    supplierId,
+  ]);
 
   useEffect(() => {
     setClientValidationError(null);
@@ -282,13 +310,28 @@ export default function Payments() {
       }
     }
 
-    const shipmentSupplierIds = new Set(
+    const latestItemSupplierIds = new Set(
       latestShipmentItems
         ?.map((item) => item.supplierId)
         .filter((id): id is number => !!id) ?? [],
     );
+    const selectedShipment = shipments?.find((shipment) => shipment.id === selectedShipmentId);
+    const latestShippingCompanySupplierId =
+      selectedShipment?.shippingCompanySupplierId ?? null;
+    const effectiveSupplierIds = new Set<number>(latestItemSupplierIds);
+    if (typeof latestShippingCompanySupplierId === "number") {
+      effectiveSupplierIds.add(latestShippingCompanySupplierId);
+    }
+    const isShippingPayment = SHIPPING_COST_COMPONENTS.has(costComponent);
+    const requiredSupplierIds = isShippingPayment
+      ? (latestShippingCompanySupplierId !== null
+          ? new Set([latestShippingCompanySupplierId])
+          : latestItemSupplierIds)
+      : costComponent === "تكلفة البضاعة"
+        ? latestItemSupplierIds
+        : effectiveSupplierIds;
 
-    if (shipmentSupplierIds.size > 0 && !supplierId) {
+    if (requiredSupplierIds.size > 0 && !supplierId) {
       const message = "يرجى اختيار المورد لهذه الشحنة";
       setClientValidationError(message);
       toast({ title: message, variant: "destructive" });
