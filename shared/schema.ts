@@ -48,7 +48,20 @@ export const suppliers = pgTable("suppliers", {
   email: varchar("email", { length: 255 }),
   address: text("address"),
   isActive: boolean("is_active").default(true).notNull(),
-  isHidden: boolean("is_hidden").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Shipping Companies table (شركات الشحن)
+export const shippingCompanies = pgTable("shipping_companies", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: varchar("name", { length: 255 }).notNull(),
+  contactName: varchar("contact_name", { length: 255 }),
+  phone: varchar("phone", { length: 50 }),
+  email: varchar("email", { length: 255 }),
+  address: text("address"),
+  notes: text("notes"),
+  isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -82,7 +95,7 @@ export const shipments = pgTable("shipments", {
   purchaseDate: date("purchase_date").notNull(),
   status: varchar("status", { length: 50 }).default("جديدة").notNull(), // جديدة, في انتظار الشحن, جاهزة للاستلام, مستلمة بنجاح, مؤرشفة
   invoiceCustomsDate: date("invoice_customs_date"),
-  shippingCompanySupplierId: integer("shipping_company_supplier_id").references(() => suppliers.id),
+  shippingCompanyId: integer("shipping_company_id").references(() => shippingCompanies.id),
   createdByUserId: varchar("created_by_user_id").references(() => users.id),
   // Cost breakdown fields
   purchaseCostRmb: decimal("purchase_cost_rmb", { precision: 15, scale: 2 }).default("0"),
@@ -176,7 +189,8 @@ export const exchangeRates = pgTable("exchange_rates", {
 export const shipmentPayments = pgTable("shipment_payments", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   shipmentId: integer("shipment_id").references(() => shipments.id).notNull(),
-  supplierId: integer("supplier_id").references(() => suppliers.id),
+  partyType: varchar("party_type", { length: 50 }),
+  partyId: integer("party_id"),
   paymentDate: timestamp("payment_date").notNull(),
   paymentCurrency: varchar("payment_currency", { length: 10 }).notNull(), // RMB or EGP
   amountOriginal: decimal("amount_original", { precision: 15, scale: 2 }).notNull(),
@@ -232,7 +246,10 @@ export const usersRelations = relations(users, ({ many }) => ({
 export const suppliersRelations = relations(suppliers, ({ many }) => ({
   products: many(products),
   shipmentItems: many(shipmentItems),
-  shippingCompanyShipments: many(shipments),
+}));
+
+export const shippingCompaniesRelations = relations(shippingCompanies, ({ many }) => ({
+  shipments: many(shipments),
 }));
 
 export const productTypesRelations = relations(productTypes, ({ many }) => ({
@@ -253,9 +270,9 @@ export const shipmentsRelations = relations(shipments, ({ one, many }) => ({
     fields: [shipments.createdByUserId],
     references: [users.id],
   }),
-  shippingCompanySupplier: one(suppliers, {
-    fields: [shipments.shippingCompanySupplierId],
-    references: [suppliers.id],
+  shippingCompany: one(shippingCompanies, {
+    fields: [shipments.shippingCompanyId],
+    references: [shippingCompanies.id],
   }),
   items: many(shipmentItems),
   shippingDetails: one(shipmentShippingDetails),
@@ -333,6 +350,10 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users).omit({ createdAt: true, updatedAt: true });
 export const insertSupplierSchema = createInsertSchema(suppliers).omit({ createdAt: true, updatedAt: true });
+export const insertShippingCompanySchema = createInsertSchema(shippingCompanies).omit({
+  createdAt: true,
+  updatedAt: true,
+});
 export const insertProductTypeSchema = createInsertSchema(productTypes).omit({ createdAt: true, updatedAt: true });
 export const insertProductSchema = createInsertSchema(products).omit({ createdAt: true, updatedAt: true });
 export const insertShipmentSchema = createInsertSchema(shipments).omit({ createdAt: true, updatedAt: true });
@@ -349,6 +370,8 @@ export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
 export type Supplier = typeof suppliers.$inferSelect;
+export type InsertShippingCompany = z.infer<typeof insertShippingCompanySchema>;
+export type ShippingCompany = typeof shippingCompanies.$inferSelect;
 export type InsertProductType = z.infer<typeof insertProductTypeSchema>;
 export type ProductType = typeof productTypes.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;

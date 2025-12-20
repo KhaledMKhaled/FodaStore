@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,7 @@ import {
   Boxes,
   Receipt,
 } from "lucide-react";
-import type { Supplier, ExchangeRate } from "@shared/schema";
+import type { ExchangeRate, ShippingCompany, Supplier } from "@shared/schema";
 
 interface AccountingDashboard {
   totalPurchaseRmb: string;
@@ -84,7 +84,8 @@ export default function AccountingPage() {
   const { toast } = useToast();
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
-  const [supplierId, setSupplierId] = useState<string>("");
+  const [partyType, setPartyType] = useState<"supplier" | "shipping_company">("supplier");
+  const [partyId, setPartyId] = useState<string>("");
   const [shipmentCode, setShipmentCode] = useState<string>("");
   const [shipmentStatus, setShipmentStatus] = useState<string>("all");
   const [paymentStatus, setPaymentStatus] = useState<string>("all");
@@ -93,14 +94,27 @@ export default function AccountingPage() {
   const queryParams = new URLSearchParams();
   if (dateFrom) queryParams.append("dateFrom", dateFrom);
   if (dateTo) queryParams.append("dateTo", dateTo);
-  if (supplierId) queryParams.append("supplierId", supplierId);
+  if (partyId && partyId !== "all") {
+    queryParams.append("partyType", partyType);
+    queryParams.append("partyId", partyId);
+  }
   if (shipmentCode) queryParams.append("shipmentCode", shipmentCode);
   if (shipmentStatus && shipmentStatus !== "all") queryParams.append("shipmentStatus", shipmentStatus);
   if (paymentStatus && paymentStatus !== "all") queryParams.append("paymentStatus", paymentStatus);
   if (includeArchived) queryParams.append("includeArchived", "true");
 
   const { data: stats, isLoading } = useQuery<AccountingDashboard>({
-    queryKey: ["/api/accounting/dashboard", dateFrom, dateTo, supplierId, shipmentCode, shipmentStatus, paymentStatus, includeArchived],
+    queryKey: [
+      "/api/accounting/dashboard",
+      dateFrom,
+      dateTo,
+      partyType,
+      partyId,
+      shipmentCode,
+      shipmentStatus,
+      paymentStatus,
+      includeArchived,
+    ],
     queryFn: async () => {
       const response = await fetch(`/api/accounting/dashboard?${queryParams.toString()}`, {
         credentials: "include",
@@ -111,7 +125,11 @@ export default function AccountingPage() {
   });
 
   const { data: suppliers } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers?includeHidden=true"],
+    queryKey: ["/api/suppliers"],
+  });
+
+  const { data: shippingCompanies } = useQuery<ShippingCompany[]>({
+    queryKey: ["/api/shipping-companies"],
   });
 
   const { data: exchangeRates } = useQuery<ExchangeRate[]>({
@@ -121,6 +139,10 @@ export default function AccountingPage() {
   const latestRmbRate = exchangeRates?.find(
     (rate) => rate.fromCurrency === "RMB" && rate.toCurrency === "EGP",
   );
+
+  useEffect(() => {
+    setPartyId("");
+  }, [partyType]);
 
   const refreshRatesMutation = useMutation({
     mutationFn: async () => {
@@ -138,7 +160,8 @@ export default function AccountingPage() {
   const clearFilters = () => {
     setDateFrom("");
     setDateTo("");
-    setSupplierId("");
+    setPartyType("supplier");
+    setPartyId("");
     setShipmentCode("");
     setShipmentStatus("all");
     setPaymentStatus("all");
@@ -188,7 +211,7 @@ export default function AccountingPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
             <div className="space-y-2">
               <Label>رقم الشحنة</Label>
               <Input
@@ -218,16 +241,31 @@ export default function AccountingPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>المورد</Label>
-              <Select value={supplierId} onValueChange={setSupplierId}>
-                <SelectTrigger data-testid="select-supplier">
-                  <SelectValue placeholder="جميع الموردين" />
+              <Label>نوع الطرف</Label>
+              <Select
+                value={partyType}
+                onValueChange={(value) => setPartyType(value as "supplier" | "shipping_company")}
+              >
+                <SelectTrigger data-testid="select-party-type">
+                  <SelectValue placeholder="اختر نوع الطرف" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">جميع الموردين</SelectItem>
-                  {suppliers?.map((s) => (
-                    <SelectItem key={s.id} value={s.id.toString()}>
-                      {s.name}
+                  <SelectItem value="supplier">مورد</SelectItem>
+                  <SelectItem value="shipping_company">شركة شحن</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>الطرف</Label>
+              <Select value={partyId} onValueChange={setPartyId}>
+                <SelectTrigger data-testid="select-party">
+                  <SelectValue placeholder="جميع الأطراف" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">جميع الأطراف</SelectItem>
+                  {(partyType === "supplier" ? suppliers : shippingCompanies)?.map((p) => (
+                    <SelectItem key={p.id} value={p.id.toString()}>
+                      {p.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

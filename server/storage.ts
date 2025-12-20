@@ -3,6 +3,7 @@ import { db } from "./db";
 import {
   users,
   suppliers,
+  shippingCompanies,
   productTypes,
   products,
   shipments,
@@ -17,6 +18,8 @@ import {
   type UpsertUser,
   type Supplier,
   type InsertSupplier,
+  type ShippingCompany,
+  type InsertShippingCompany,
   type ProductType,
   type InsertProductType,
   type Product,
@@ -104,11 +107,8 @@ const buildShipmentSupplierMaps = (
     }
 
     const itemSuppliers = new Set<number>(supplierTotalsRmb.keys());
-    const shippingCompanySupplierId = shipment.shippingCompanySupplierId ?? undefined;
+    const shippingCompanyId = shipment.shippingCompanyId ?? undefined;
     const anySuppliers = new Set<number>(itemSuppliers);
-    if (shippingCompanySupplierId) {
-      anySuppliers.add(shippingCompanySupplierId);
-    }
 
     const purchaseCostEgp = getShipmentPurchaseCostEgp(shipment, items);
     const totalRmb = Array.from(supplierTotalsRmb.values()).reduce((sum, val) => sum + val, 0);
@@ -128,7 +128,7 @@ const buildShipmentSupplierMaps = (
 
     shipmentItemSuppliersMap.set(shipment.id, itemSuppliers);
     shipmentAnySuppliersMap.set(shipment.id, anySuppliers);
-    shipmentShippingCompanyMap.set(shipment.id, shippingCompanySupplierId);
+    shipmentShippingCompanyMap.set(shipment.id, shippingCompanyId);
     purchaseCostByShipmentSupplierMap.set(shipment.id, purchaseCostMap);
   });
 
@@ -146,22 +146,12 @@ const paymentMatchesSupplier = (
   shipmentItemSuppliersMap: Map<number, Set<number>>,
   shipmentShippingCompanyMap: Map<number, number | undefined>
 ) => {
-  if (payment.supplierId !== null && payment.supplierId !== undefined) {
-    return payment.supplierId === supplierId;
+  if (payment.partyType && payment.partyId !== null && payment.partyId !== undefined) {
+    return payment.partyType === "supplier" && payment.partyId === supplierId;
   }
 
   const itemSuppliers = shipmentItemSuppliersMap.get(payment.shipmentId) ?? new Set<number>();
-  const shippingCompanySupplierId = shipmentShippingCompanyMap.get(payment.shipmentId);
-
-  if (payment.costComponent && SHIPPING_COST_COMPONENTS.has(payment.costComponent)) {
-    return shippingCompanySupplierId === supplierId;
-  }
-
-  if (payment.costComponent === PURCHASE_COST_COMPONENT) {
-    return itemSuppliers.has(supplierId);
-  }
-
-  return itemSuppliers.has(supplierId) || shippingCompanySupplierId === supplierId;
+  return itemSuppliers.has(supplierId);
 };
 
 const getSupplierShipmentCost = (
@@ -172,11 +162,23 @@ const getSupplierShipmentCost = (
 ) => {
   const purchaseCost =
     purchaseCostByShipmentSupplierMap.get(shipment.id)?.get(supplierId) ?? 0;
-  const shippingCompanySupplierId = shipmentShippingCompanyMap.get(shipment.id);
-  const shippingCost =
-    shippingCompanySupplierId === supplierId ? getShipmentShippingCompanyCostEgp(shipment) : 0;
+  return roundAmount(purchaseCost);
+};
 
-  return roundAmount(purchaseCost + shippingCost);
+const paymentMatchesShippingCompany = (
+  payment: ShipmentPayment,
+  shippingCompanyId: number
+) => {
+  if (payment.partyType && payment.partyId !== null && payment.partyId !== undefined) {
+    return payment.partyType === "shipping_company" && payment.partyId === shippingCompanyId;
+  }
+  return false;
+};
+
+const getShippingCompanyShipmentCost = (shipment: Shipment, shippingCompanyId: number) => {
+  return shipment.shippingCompanyId === shippingCompanyId
+    ? roundAmount(getShipmentShippingCompanyCostEgp(shipment))
+    : 0;
 };
 
 const computeKnownTotal = (shipment: Shipment): number => {
@@ -373,6 +375,16 @@ export interface IStorage {
   updateSupplier(id: number, data: Partial<InsertSupplier>): Promise<Supplier | undefined>;
   deleteSupplier(id: number): Promise<boolean>;
 
+  // Shipping Companies
+  getAllShippingCompanies(): Promise<ShippingCompany[]>;
+  getShippingCompany(id: number): Promise<ShippingCompany | undefined>;
+  createShippingCompany(data: InsertShippingCompany): Promise<ShippingCompany>;
+  updateShippingCompany(
+    id: number,
+    data: Partial<InsertShippingCompany>
+  ): Promise<ShippingCompany | undefined>;
+  deleteShippingCompany(id: number): Promise<boolean>;
+
   // Product Types
   getAllProductTypes(): Promise<ProductType[]>;
   getProductType(id: number): Promise<ProductType | undefined>;
@@ -399,7 +411,7 @@ export interface IStorage {
   getShipmentSuppliers(shipmentId: number): Promise<number[]>;
   getShipmentSupplierContext(shipmentId: number): Promise<{
     itemSuppliers: number[];
-    shippingCompanySupplierId: number | null;
+    shippingCompanyId: number | null;
     shipmentSuppliers: number[];
   }>;
   createShipmentItem(data: InsertShipmentItem): Promise<ShipmentItem>;
@@ -477,7 +489,8 @@ export interface IStorage {
   getAccountingDashboard(filters?: {
     dateFrom?: string;
     dateTo?: string;
-    supplierId?: number;
+    partyType?: "supplier" | "shipping_company";
+    partyId?: number;
     shipmentCode?: string;
     shipmentStatus?: string;
     paymentStatus?: string;
@@ -527,22 +540,59 @@ export interface IStorage {
     }>;
   }>;
 
+  getShippingCompanyBalances(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    shippingCompanyId?: number;
+    balanceType?: 'owing' | 'credit' | 'all';
+  }): Promise<Array<{
+    shippingCompanyId: number;
+    shippingCompanyName: string;
+    totalCostEgp: string;
+    totalPaidEgp: string;
+    balanceEgp: string;
+    balanceStatus: 'owing' | 'settled' | 'credit';
+  }>>;
+
+  getShippingCompanyStatement(shippingCompanyId: number, filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<{
+    shippingCompany: ShippingCompany;
+    movements: Array<{
+      date: Date | string;
+      type: 'shipment' | 'payment';
+      description: string;
+      shipmentCode?: string;
+      costEgp?: string;
+      paidEgp?: string;
+      runningBalance: string;
+      paymentId?: number;
+      attachmentUrl?: string | null;
+      attachmentOriginalName?: string | null;
+    }>;
+  }>;
+
   getMovementReport(filters?: {
     dateFrom?: string;
     dateTo?: string;
     shipmentId?: number;
-    supplierId?: number;
+    partyType?: "supplier" | "shipping_company";
+    partyId?: number;
     movementType?: string;
     costComponent?: string;
     paymentMethod?: string;
+    shipmentStatus?: string;
+    paymentStatus?: string;
     includeArchived?: boolean;
   }): Promise<{
     movements: Array<{
       date: Date | string;
       shipmentCode: string;
       shipmentName: string;
-      supplierName?: string;
-      supplierId?: number;
+      partyName?: string;
+      partyId?: number;
+      partyType?: "supplier" | "shipping_company";
       movementType: string;
       costComponent?: string;
       paymentMethod?: string;
@@ -640,6 +690,41 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  // Shipping Companies
+  async getAllShippingCompanies(): Promise<ShippingCompany[]> {
+    return db.select().from(shippingCompanies).orderBy(desc(shippingCompanies.createdAt));
+  }
+
+  async getShippingCompany(id: number): Promise<ShippingCompany | undefined> {
+    const [company] = await db
+      .select()
+      .from(shippingCompanies)
+      .where(eq(shippingCompanies.id, id));
+    return company;
+  }
+
+  async createShippingCompany(data: InsertShippingCompany): Promise<ShippingCompany> {
+    const [company] = await db.insert(shippingCompanies).values(data).returning();
+    return company;
+  }
+
+  async updateShippingCompany(
+    id: number,
+    data: Partial<InsertShippingCompany>
+  ): Promise<ShippingCompany | undefined> {
+    const [company] = await db
+      .update(shippingCompanies)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(shippingCompanies.id, id))
+      .returning();
+    return company;
+  }
+
+  async deleteShippingCompany(id: number): Promise<boolean> {
+    const result = await db.delete(shippingCompanies).where(eq(shippingCompanies.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
   // Product Types
   async getAllProductTypes(): Promise<ProductType[]> {
     return db.select().from(productTypes).orderBy(desc(productTypes.createdAt));
@@ -734,11 +819,11 @@ export class DatabaseStorage implements IStorage {
 
   async getShipmentSupplierContext(shipmentId: number): Promise<{
     itemSuppliers: number[];
-    shippingCompanySupplierId: number | null;
+    shippingCompanyId: number | null;
     shipmentSuppliers: number[];
   }> {
     const [shipment] = await db
-      .select({ shippingCompanySupplierId: shipments.shippingCompanySupplierId })
+      .select({ shippingCompanyId: shipments.shippingCompanyId })
       .from(shipments)
       .where(eq(shipments.id, shipmentId));
 
@@ -755,15 +840,12 @@ export class DatabaseStorage implements IStorage {
       ),
     );
 
-    const shippingCompanySupplierId = shipment?.shippingCompanySupplierId ?? null;
+    const shippingCompanyId = shipment?.shippingCompanyId ?? null;
     const shipmentSuppliers = new Set(itemSuppliers);
-    if (typeof shippingCompanySupplierId === "number") {
-      shipmentSuppliers.add(shippingCompanySupplierId);
-    }
 
     return {
       itemSuppliers,
-      shippingCompanySupplierId,
+      shippingCompanyId,
       shipmentSuppliers: Array.from(shipmentSuppliers),
     };
   }
@@ -912,6 +994,7 @@ export class DatabaseStorage implements IStorage {
         purchaseDate: rawRow.purchase_date as string,
         status: rawRow.status as string,
         invoiceCustomsDate: rawRow.invoice_customs_date as string | null,
+        shippingCompanyId: rawRow.shipping_company_id as number | null,
         createdByUserId: rawRow.created_by_user_id as string | null,
         purchaseCostRmb: rawRow.purchase_cost_rmb as string | null,
         purchaseCostEgp: rawRow.purchase_cost_egp as string | null,
@@ -1408,7 +1491,8 @@ export class DatabaseStorage implements IStorage {
   async getAccountingDashboard(filters?: {
     dateFrom?: string;
     dateTo?: string;
-    supplierId?: number;
+    partyType?: "supplier" | "shipping_company";
+    partyId?: number;
     shipmentCode?: string;
     shipmentStatus?: string;
     paymentStatus?: string;
@@ -1460,14 +1544,20 @@ export class DatabaseStorage implements IStorage {
 
     const baseFilteredShipmentIds = new Set(filteredShipments.map(s => s.id));
 
-    if (filters?.supplierId) {
-      const shipmentIdsWithSupplier = new Set<number>();
-      shipmentAnySuppliersMap.forEach((suppliers, shipmentId) => {
-        if (suppliers.has(filters.supplierId!)) {
-          shipmentIdsWithSupplier.add(shipmentId);
-        }
-      });
-      filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
+    if (filters?.partyType && filters.partyId) {
+      if (filters.partyType === "supplier") {
+        const shipmentIdsWithSupplier = new Set<number>();
+        shipmentAnySuppliersMap.forEach((suppliers, shipmentId) => {
+          if (suppliers.has(filters.partyId!)) {
+            shipmentIdsWithSupplier.add(shipmentId);
+          }
+        });
+        filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
+      } else if (filters.partyType === "shipping_company") {
+        filteredShipments = filteredShipments.filter(
+          s => s.shippingCompanyId === filters.partyId,
+        );
+      }
     }
 
     if (filters?.paymentStatus && filters.paymentStatus !== "all") {
@@ -1485,13 +1575,16 @@ export class DatabaseStorage implements IStorage {
     const filteredShipmentIds = new Set(filteredShipments.map(s => s.id));
     const filteredPayments = allPayments.filter(p => {
       if (!baseFilteredShipmentIds.has(p.shipmentId)) return false;
-      if (filters?.supplierId) {
-        return paymentMatchesSupplier(
-          p,
-          filters.supplierId,
-          shipmentItemSuppliersMap,
-          shipmentShippingCompanyMap
-        );
+      if (filters?.partyType && filters.partyId) {
+        if (filters.partyType === "supplier") {
+          return paymentMatchesSupplier(
+            p,
+            filters.partyId,
+            shipmentItemSuppliersMap,
+            shipmentShippingCompanyMap
+          );
+        }
+        return paymentMatchesShippingCompany(p, filters.partyId);
       }
       return filteredShipmentIds.has(p.shipmentId);
     });
@@ -1847,12 +1940,182 @@ export class DatabaseStorage implements IStorage {
     return { supplier, movements };
   }
 
+  // Shipping Company Balances
+  async getShippingCompanyBalances(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    shippingCompanyId?: number;
+    balanceType?: 'owing' | 'credit' | 'all';
+  }) {
+    const allShippingCompanies = await this.getAllShippingCompanies();
+    const allShipments = await this.getAllShipments();
+    const allPayments = await this.getAllPayments();
+
+    const result: Array<{
+      shippingCompanyId: number;
+      shippingCompanyName: string;
+      totalCostEgp: string;
+      totalPaidEgp: string;
+      balanceEgp: string;
+      balanceStatus: 'owing' | 'settled' | 'credit';
+    }> = [];
+
+    for (const company of allShippingCompanies) {
+      if (filters?.shippingCompanyId && company.id !== filters.shippingCompanyId) continue;
+
+      let companyShipments = allShipments.filter(s => s.shippingCompanyId === company.id);
+
+      if (filters?.dateFrom) {
+        const fromDate = new Date(filters.dateFrom);
+        companyShipments = companyShipments.filter(s => {
+          const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+          return purchaseDate && purchaseDate >= fromDate;
+        });
+      }
+
+      if (filters?.dateTo) {
+        const toDate = new Date(filters.dateTo);
+        companyShipments = companyShipments.filter(s => {
+          const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+          return purchaseDate && purchaseDate <= toDate;
+        });
+      }
+
+      const companyShipmentIds = new Set(companyShipments.map(s => s.id));
+      const companyPayments = allPayments.filter(p => {
+        if (!companyShipmentIds.has(p.shipmentId)) return false;
+        return paymentMatchesShippingCompany(p, company.id);
+      });
+
+      const totalCost = companyShipments.reduce(
+        (sum, s) => sum + getShippingCompanyShipmentCost(s, company.id),
+        0,
+      );
+      const totalPaid = companyPayments.reduce(
+        (sum, p) => sum + parseFloat(p.amountEgp || "0"),
+        0,
+      );
+      const balance = totalCost - totalPaid;
+
+      let balanceStatus: 'owing' | 'settled' | 'credit' = 'settled';
+      if (balance > 0.0001) balanceStatus = 'owing';
+      else if (balance < -0.0001) balanceStatus = 'credit';
+
+      if (filters?.balanceType && filters.balanceType !== 'all') {
+        if (filters.balanceType === 'owing' && balanceStatus !== 'owing') continue;
+        if (filters.balanceType === 'credit' && balanceStatus !== 'credit') continue;
+      }
+
+      result.push({
+        shippingCompanyId: company.id,
+        shippingCompanyName: company.name,
+        totalCostEgp: totalCost.toFixed(2),
+        totalPaidEgp: totalPaid.toFixed(2),
+        balanceEgp: balance.toFixed(2),
+        balanceStatus,
+      });
+    }
+
+    return result;
+  }
+
+  // Shipping Company Statement
+  async getShippingCompanyStatement(shippingCompanyId: number, filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+  }) {
+    const shippingCompany = await this.getShippingCompany(shippingCompanyId);
+    if (!shippingCompany) {
+      throw new Error("Shipping company not found");
+    }
+
+    const allShipments = await this.getAllShipments();
+    const allPayments = await this.getAllPayments();
+
+    let companyShipments = allShipments.filter(s => s.shippingCompanyId === shippingCompanyId);
+    let companyPayments = allPayments.filter(p => paymentMatchesShippingCompany(p, shippingCompanyId));
+
+    if (filters?.dateFrom) {
+      const fromDate = new Date(filters.dateFrom);
+      companyShipments = companyShipments.filter(s => {
+        const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+        return purchaseDate && purchaseDate >= fromDate;
+      });
+      companyPayments = companyPayments.filter(p => new Date(p.paymentDate) >= fromDate);
+    }
+
+    if (filters?.dateTo) {
+      const toDate = new Date(filters.dateTo);
+      companyShipments = companyShipments.filter(s => {
+        const purchaseDate = s.purchaseDate ? new Date(s.purchaseDate) : null;
+        return purchaseDate && purchaseDate <= toDate;
+      });
+      companyPayments = companyPayments.filter(p => new Date(p.paymentDate) <= toDate);
+    }
+
+    const movements: Array<{
+      date: Date | string;
+      type: 'shipment' | 'payment';
+      description: string;
+      shipmentCode?: string;
+      costEgp?: string;
+      paidEgp?: string;
+      runningBalance: string;
+      paymentId?: number;
+      attachmentUrl?: string | null;
+      attachmentOriginalName?: string | null;
+    }> = [];
+
+    companyShipments.forEach(s => {
+      const cost = getShippingCompanyShipmentCost(s, shippingCompanyId);
+      if (cost <= 0) return;
+      movements.push({
+        date: s.purchaseDate || s.createdAt || new Date(),
+        type: 'shipment',
+        description: `شحنة: ${s.shipmentName}`,
+        shipmentCode: s.shipmentCode,
+        costEgp: cost.toFixed(2),
+        runningBalance: "0",
+      });
+    });
+
+    companyPayments.forEach(p => {
+      const shipment = allShipments.find(s => s.id === p.shipmentId);
+      movements.push({
+        date: p.paymentDate,
+        type: 'payment',
+        description: `دفعة - ${p.costComponent}`,
+        shipmentCode: shipment?.shipmentCode,
+        paidEgp: p.amountEgp || "0",
+        runningBalance: "0",
+        paymentId: p.id,
+        attachmentUrl: p.attachmentUrl ?? null,
+        attachmentOriginalName: p.attachmentOriginalName ?? null,
+      });
+    });
+
+    movements.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    let runningBalance = 0;
+    movements.forEach(m => {
+      if (m.type === 'shipment') {
+        runningBalance += parseFloat(m.costEgp || "0");
+      } else {
+        runningBalance -= parseFloat(m.paidEgp || "0");
+      }
+      m.runningBalance = runningBalance.toFixed(2);
+    });
+
+    return { shippingCompany, movements };
+  }
+
   // Movement Report
   async getMovementReport(filters?: {
     dateFrom?: string;
     dateTo?: string;
     shipmentId?: number;
-    supplierId?: number;
+    partyType?: "supplier" | "shipping_company";
+    partyId?: number;
     movementType?: string;
     costComponent?: string;
     paymentMethod?: string;
@@ -1863,12 +2126,14 @@ export class DatabaseStorage implements IStorage {
     const allShipments = await this.getAllShipments();
     const allPayments = await this.getAllPayments();
     const allSuppliers = await this.getAllSuppliers();
+    const allShippingCompanies = await this.getAllShippingCompanies();
     const allUsers = await this.getAllUsers();
     const allItems = await Promise.all(
       allShipments.map(s => this.getShipmentItems(s.id))
     );
 
     const supplierMap = new Map(allSuppliers.map(s => [s.id, s.name]));
+    const shippingCompanyMap = new Map(allShippingCompanies.map(c => [c.id, c.name]));
     const userMap = new Map(allUsers.map(u => [u.id, u.firstName || u.username]));
     const {
       shipmentItemSuppliersMap,
@@ -1908,14 +2173,20 @@ export class DatabaseStorage implements IStorage {
 
     const baseFilteredShipmentIds = new Set(filteredShipments.map(s => s.id));
 
-    if (filters?.supplierId) {
-      const shipmentIdsWithSupplier = new Set<number>();
-      shipmentAnySuppliersMap.forEach((suppliers, shipmentId) => {
-        if (suppliers.has(filters.supplierId!)) {
-          shipmentIdsWithSupplier.add(shipmentId);
-        }
-      });
-      filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
+    if (filters?.partyType && filters.partyId) {
+      if (filters.partyType === "supplier") {
+        const shipmentIdsWithSupplier = new Set<number>();
+        shipmentAnySuppliersMap.forEach((suppliers, shipmentId) => {
+          if (suppliers.has(filters.partyId!)) {
+            shipmentIdsWithSupplier.add(shipmentId);
+          }
+        });
+        filteredShipments = filteredShipments.filter(s => shipmentIdsWithSupplier.has(s.id));
+      } else {
+        filteredShipments = filteredShipments.filter(
+          s => s.shippingCompanyId === filters.partyId,
+        );
+      }
     }
 
     if (filters?.paymentStatus && filters.paymentStatus !== "all") {
@@ -1936,8 +2207,9 @@ export class DatabaseStorage implements IStorage {
       date: Date | string;
       shipmentCode: string;
       shipmentName: string;
-      supplierName?: string;
-      supplierId?: number;
+      partyName?: string;
+      partyId?: number;
+      partyType?: "supplier" | "shipping_company";
       movementType: string;
       costComponent?: string;
       paymentMethod?: string;
@@ -1960,22 +2232,61 @@ export class DatabaseStorage implements IStorage {
     for (const s of filteredShipments) {
       const purchaseSupplierId = shipmentSupplierMap.get(s.id);
       const purchaseSupplierName = purchaseSupplierId ? supplierMap.get(purchaseSupplierId) : undefined;
-      const shippingCompanySupplierId = shipmentShippingCompanyMap.get(s.id) ?? purchaseSupplierId;
-      const shippingCompanySupplierName = shippingCompanySupplierId
-        ? supplierMap.get(shippingCompanySupplierId)
+      const shippingCompanyId = shipmentShippingCompanyMap.get(s.id);
+      const shippingCompanyName = shippingCompanyId
+        ? shippingCompanyMap.get(shippingCompanyId)
         : undefined;
 
       const costTypes = [
-        { type: "تكلفة بضاعة", rmb: s.purchaseCostRmb, egp: s.purchaseCostEgp, supplierId: purchaseSupplierId, supplierName: purchaseSupplierName },
-        { type: "تكلفة شحن", rmb: s.shippingCostRmb, egp: s.shippingCostEgp, supplierId: shippingCompanySupplierId, supplierName: shippingCompanySupplierName },
-        { type: "عمولة", rmb: s.commissionCostRmb, egp: s.commissionCostEgp, supplierId: shippingCompanySupplierId, supplierName: shippingCompanySupplierName },
-        { type: "جمرك", rmb: null, egp: s.customsCostEgp, supplierId: shippingCompanySupplierId, supplierName: shippingCompanySupplierName },
-        { type: "تخريج", rmb: null, egp: s.takhreegCostEgp, supplierId: shippingCompanySupplierId, supplierName: shippingCompanySupplierName },
+        {
+          type: "تكلفة بضاعة",
+          rmb: s.purchaseCostRmb,
+          egp: s.purchaseCostEgp,
+          partyId: purchaseSupplierId,
+          partyName: purchaseSupplierName,
+          partyType: "supplier" as const,
+        },
+        {
+          type: "تكلفة شحن",
+          rmb: s.shippingCostRmb,
+          egp: s.shippingCostEgp,
+          partyId: shippingCompanyId,
+          partyName: shippingCompanyName,
+          partyType: "shipping_company" as const,
+        },
+        {
+          type: "عمولة",
+          rmb: s.commissionCostRmb,
+          egp: s.commissionCostEgp,
+          partyId: shippingCompanyId,
+          partyName: shippingCompanyName,
+          partyType: "shipping_company" as const,
+        },
+        {
+          type: "جمرك",
+          rmb: null,
+          egp: s.customsCostEgp,
+          partyId: shippingCompanyId,
+          partyName: shippingCompanyName,
+          partyType: "shipping_company" as const,
+        },
+        {
+          type: "تخريج",
+          rmb: null,
+          egp: s.takhreegCostEgp,
+          partyId: shippingCompanyId,
+          partyName: shippingCompanyName,
+          partyType: "shipping_company" as const,
+        },
       ];
 
       for (const ct of costTypes) {
         const egpAmount = parseFloat(ct.egp || "0");
         if (egpAmount <= 0) continue;
+
+        if (filters?.partyType && ct.partyType !== filters.partyType) {
+          continue;
+        }
 
         if (filters?.movementType && filters.movementType !== ct.type && filters.movementType !== 'all') {
           continue;
@@ -1985,8 +2296,9 @@ export class DatabaseStorage implements IStorage {
           date: s.purchaseDate || s.createdAt || new Date(),
           shipmentCode: s.shipmentCode,
           shipmentName: s.shipmentName,
-          supplierName: ct.supplierName,
-          supplierId: ct.supplierId,
+          partyName: ct.partyName,
+          partyId: ct.partyId,
+          partyType: ct.partyType,
           movementType: ct.type,
           originalCurrency: ct.rmb ? "RMB" : "EGP",
           amountOriginal: ct.rmb || ct.egp || "0",
@@ -1998,13 +2310,16 @@ export class DatabaseStorage implements IStorage {
 
     let filteredPayments = allPayments.filter(p => {
       if (!baseFilteredShipmentIds.has(p.shipmentId)) return false;
-      if (filters?.supplierId) {
-        return paymentMatchesSupplier(
-          p,
-          filters.supplierId,
-          shipmentItemSuppliersMap,
-          shipmentShippingCompanyMap
-        );
+      if (filters?.partyType && filters.partyId) {
+        if (filters.partyType === "supplier") {
+          return paymentMatchesSupplier(
+            p,
+            filters.partyId,
+            shipmentItemSuppliersMap,
+            shipmentShippingCompanyMap
+          );
+        }
+        return paymentMatchesShippingCompany(p, filters.partyId);
       }
       return filteredShipmentIds.has(p.shipmentId);
     });
@@ -2035,21 +2350,21 @@ export class DatabaseStorage implements IStorage {
         continue;
       }
 
-      const supplierId =
-        p.supplierId !== null && p.supplierId !== undefined
-          ? p.supplierId
-          : SHIPPING_COST_COMPONENTS.has(p.costComponent ?? "")
-            ? shipmentShippingCompanyMap.get(p.shipmentId)
-            : shipmentSupplierMap.get(p.shipmentId);
-      const supplierName = supplierId ? supplierMap.get(supplierId) : undefined;
+      const partyType = p.partyType ?? "supplier";
+      const partyId = p.partyId ?? null;
+      const partyName =
+        partyType === "shipping_company"
+          ? (partyId ? shippingCompanyMap.get(partyId) : undefined)
+          : (partyId ? supplierMap.get(partyId) : undefined);
       const userName = p.createdByUserId ? userMap.get(p.createdByUserId) : undefined;
 
       movements.push({
         date: p.paymentDate,
         shipmentCode: shipment.shipmentCode,
         shipmentName: shipment.shipmentName,
-        supplierName,
-        supplierId,
+        partyName,
+        partyId: partyId ?? undefined,
+        partyType,
         movementType: "دفعة",
         costComponent: p.costComponent,
         paymentMethod: p.paymentMethod,

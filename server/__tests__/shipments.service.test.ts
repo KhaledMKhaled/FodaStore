@@ -5,19 +5,20 @@ import { eq } from "drizzle-orm";
 process.env.DATABASE_URL ||= process.env.TEST_DATABASE_URL || "postgres://localhost:5432/test";
 
 const { db, pool } = await import("../db");
-const { suppliers, shipments, shipmentItems } = await import("@shared/schema");
+const { shippingCompanies, shipments, shipmentItems } = await import("@shared/schema");
 const { createShipmentWithItems, updateShipmentWithItems } = await import("../shipmentService");
 
-async function createSupplier(overrides: Partial<typeof suppliers.$inferInsert> = {}) {
-  const [supplier] = await db
-    .insert(suppliers)
+async function createShippingCompany(
+  overrides: Partial<typeof shippingCompanies.$inferInsert> = {},
+) {
+  const [company] = await db
+    .insert(shippingCompanies)
     .values({
-      name: `Supplier ${Math.random().toString(16).slice(2, 6)}`,
-      isHidden: false,
+      name: `Shipping ${Math.random().toString(16).slice(2, 6)}`,
       ...overrides,
     })
     .returning();
-  return supplier;
+  return company;
 }
 
 async function cleanupShipment(shipmentId: number) {
@@ -25,19 +26,18 @@ async function cleanupShipment(shipmentId: number) {
   await db.delete(shipments).where(eq(shipments.id, shipmentId));
 }
 
-async function cleanupSupplier(supplierId: number) {
-  await db.delete(suppliers).where(eq(suppliers.id, supplierId));
+async function cleanupShippingCompany(companyId: number) {
+  await db.delete(shippingCompanies).where(eq(shippingCompanies.id, companyId));
 }
 
-describe("shipmentService shipping company supplier", () => {
+describe("shipmentService shipping company", () => {
   after(async () => {
     await pool.end();
   });
 
-  it("creates shipments with a hidden shipping company supplier", async () => {
-    const hiddenSupplier = await createSupplier({
-      name: "Hidden Shipping Supplier",
-      isHidden: true,
+  it("creates shipments with a shipping company", async () => {
+    const company = await createShippingCompany({
+      name: "Shipping Company",
     });
 
     const payload = {
@@ -45,7 +45,7 @@ describe("shipmentService shipping company supplier", () => {
       shipmentName: "Hidden Shipping Supplier Shipment",
       purchaseDate: new Date("2024-02-01"),
       purchaseRmbToEgpRate: "7.10",
-      shippingCompanySupplierId: hiddenSupplier.id,
+      shippingCompanyId: company.id,
     };
 
     let shipmentId: number | null = null;
@@ -54,20 +54,19 @@ describe("shipmentService shipping company supplier", () => {
       const shipment = await createShipmentWithItems(payload);
       shipmentId = shipment.id;
 
-      assert.equal(shipment.shippingCompanySupplierId, hiddenSupplier.id);
+      assert.equal(shipment.shippingCompanyId, company.id);
     } finally {
       if (shipmentId) {
         await cleanupShipment(shipmentId);
       }
-      await cleanupSupplier(hiddenSupplier.id);
+      await cleanupShippingCompany(company.id);
     }
   });
 
-  it("updates shippingCompanySupplierId for existing shipments", async () => {
-    const initialSupplier = await createSupplier({ name: "Initial Shipping Supplier" });
-    const updatedSupplier = await createSupplier({
-      name: "Updated Shipping Supplier",
-      isHidden: true,
+  it("updates shippingCompanyId for existing shipments", async () => {
+    const initialCompany = await createShippingCompany({ name: "Initial Shipping Company" });
+    const updatedCompany = await createShippingCompany({
+      name: "Updated Shipping Company",
     });
 
     const payload = {
@@ -75,7 +74,7 @@ describe("shipmentService shipping company supplier", () => {
       shipmentName: "Shipping Supplier Update",
       purchaseDate: new Date("2024-02-05"),
       purchaseRmbToEgpRate: "7.20",
-      shippingCompanySupplierId: initialSupplier.id,
+      shippingCompanyId: initialCompany.id,
     };
 
     let shipmentId: number | null = null;
@@ -86,17 +85,17 @@ describe("shipmentService shipping company supplier", () => {
 
       const updatedShipment = await updateShipmentWithItems(shipment.id, {
         shipmentData: {
-          shippingCompanySupplierId: updatedSupplier.id,
+          shippingCompanyId: updatedCompany.id,
         },
       });
 
-      assert.equal(updatedShipment.shippingCompanySupplierId, updatedSupplier.id);
+      assert.equal(updatedShipment.shippingCompanyId, updatedCompany.id);
     } finally {
       if (shipmentId) {
         await cleanupShipment(shipmentId);
       }
-      await cleanupSupplier(initialSupplier.id);
-      await cleanupSupplier(updatedSupplier.id);
+      await cleanupShippingCompany(initialCompany.id);
+      await cleanupShippingCompany(updatedCompany.id);
     }
   });
 });

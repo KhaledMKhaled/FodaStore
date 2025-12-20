@@ -33,8 +33,9 @@ const storageState: {
 };
 
 let shipmentSuppliers: number[] = [];
-let shipmentShippingCompanySupplierId: number | null = null;
-const suppliersById = new Map<number, { id: number; name?: string; isHidden?: boolean }>();
+let shipmentShippingCompanyId: number | null = null;
+const suppliersById = new Map<number, { id: number; name?: string }>();
+const shippingCompaniesById = new Map<number, { id: number; name?: string }>();
 
 const createAuditLogMock = mock.fn(async () => ({}));
 
@@ -61,6 +62,8 @@ const createPaymentMock = mock.fn(async (data: InsertShipmentPayment) => {
   const payment: ShipmentPayment = {
     id: storageState.payments.length + 1,
     shipmentId: data.shipmentId,
+    partyType: data.partyType ?? null,
+    partyId: data.partyId ?? null,
     paymentDate: data.paymentDate,
     paymentCurrency: data.paymentCurrency,
     amountOriginal: data.amountOriginal.toString(),
@@ -110,16 +113,19 @@ const mockedGetShipmentSupplierContext = mock.method(
   "getShipmentSupplierContext",
   async () => ({
     itemSuppliers: shipmentSuppliers,
-    shippingCompanySupplierId: shipmentShippingCompanySupplierId,
-    shipmentSuppliers: shipmentShippingCompanySupplierId
-      ? Array.from(new Set([...shipmentSuppliers, shipmentShippingCompanySupplierId]))
-      : shipmentSuppliers,
+    shippingCompanyId: shipmentShippingCompanyId,
+    shipmentSuppliers,
   }),
 );
 const mockedGetSupplier = mock.method(
   storage,
   "getSupplier",
   async (id: number) => suppliersById.get(id),
+);
+const mockedGetShippingCompany = mock.method(
+  storage,
+  "getShippingCompany",
+  async (id: number) => shippingCompaniesById.get(id),
 );
 
 const { registerRoutes } = await import("../routes");
@@ -130,8 +136,9 @@ function resetStorageState() {
   );
   storageState.payments = [];
   shipmentSuppliers = [];
-  shipmentShippingCompanySupplierId = null;
+  shipmentShippingCompanyId = null;
   suppliersById.clear();
+  shippingCompaniesById.clear();
   createPaymentMock.mock.resetCalls();
   createAuditLogMock.mock.resetCalls();
   mockedCreatePayment.mock.resetCalls();
@@ -141,6 +148,7 @@ function resetStorageState() {
   mockedGetPaymentById.mock.resetCalls();
   mockedGetShipmentSupplierContext.mock.resetCalls();
   mockedGetSupplier.mock.resetCalls();
+  mockedGetShippingCompany.mock.resetCalls();
 }
 
 function createPaymentPayload(shipmentId: number, amount = "150.00") {
@@ -151,7 +159,7 @@ function createPaymentPayload(shipmentId: number, amount = "150.00") {
     amountOriginal: amount,
     exchangeRateToEgp: null,
     amountEgp: amount,
-    costComponent: "شراء",
+    costComponent: "تكلفة البضاعة",
     paymentMethod: "نقدي",
     cashReceiverName: "Tester",
   } satisfies Record<string, unknown>;
@@ -171,7 +179,7 @@ function createPaymentFormData(shipmentId: number, amount = "150.00") {
   form.append("paymentCurrency", "EGP");
   form.append("amountOriginal", amount);
   form.append("amountEgp", amount);
-  form.append("costComponent", "شراء");
+  form.append("costComponent", "تكلفة البضاعة");
   form.append("paymentMethod", "نقدي");
   form.append("cashReceiverName", "Tester");
   return form;
@@ -246,7 +254,7 @@ test("viewer and inventory roles are forbidden", async () => {
   assert.equal(createPaymentMock.mock.calls.length, 0);
 });
 
-test("creates payment with valid supplierId", async () => {
+test("creates payment with valid supplier party", async () => {
   const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
   shipmentSuppliers = [88];
   suppliersById.set(88, { id: 88, name: "Supplier 88" });
@@ -254,7 +262,7 @@ test("creates payment with valid supplierId", async () => {
   const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...createPaymentPayload(101), supplierId: 88 }),
+    body: JSON.stringify({ ...createPaymentPayload(101), partyType: "supplier", partyId: 88 }),
   });
 
   const body = await response.json();
@@ -262,18 +270,24 @@ test("creates payment with valid supplierId", async () => {
 
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
-  assert.equal(createPaymentMock.mock.calls[0].arguments[0].supplierId, 88);
+  assert.equal(createPaymentMock.mock.calls[0].arguments[0].partyId, 88);
+  assert.equal(createPaymentMock.mock.calls[0].arguments[0].partyType, "supplier");
 });
 
-test("creates payment with hidden supplierId", async () => {
+test("creates payment with shipping company party", async () => {
   const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
-  shipmentSuppliers = [42];
-  suppliersById.set(42, { id: 42, name: "Hidden Supplier", isHidden: true });
+  shipmentShippingCompanyId = 42;
+  shippingCompaniesById.set(42, { id: 42, name: "Shipping Co" });
 
   const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...createPaymentPayload(101), supplierId: 42 }),
+    body: JSON.stringify({
+      ...createPaymentPayload(101),
+      costComponent: "الشحن",
+      partyType: "shipping_company",
+      partyId: 42,
+    }),
   });
 
   const body = await response.json();
@@ -281,16 +295,17 @@ test("creates payment with hidden supplierId", async () => {
 
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
-  assert.equal(createPaymentMock.mock.calls[0].arguments[0].supplierId, 42);
+  assert.equal(createPaymentMock.mock.calls[0].arguments[0].partyId, 42);
+  assert.equal(createPaymentMock.mock.calls[0].arguments[0].partyType, "shipping_company");
 });
 
-test("rejects invalid supplierId", async () => {
+test("rejects invalid supplier party", async () => {
   const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
 
   const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...createPaymentPayload(101), supplierId: 999 }),
+    body: JSON.stringify({ ...createPaymentPayload(101), partyType: "supplier", partyId: 999 }),
   });
 
   const body = await response.json();
@@ -301,7 +316,7 @@ test("rejects invalid supplierId", async () => {
   assert.equal(createPaymentMock.mock.calls.length, 0);
 });
 
-test("requires supplierId when shipment has supplier attribution", async () => {
+test("requires partyId when shipment has supplier attribution", async () => {
   const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
   shipmentSuppliers = [70, 71];
 
@@ -315,7 +330,7 @@ test("requires supplierId when shipment has supplier attribution", async () => {
   await close();
 
   assert.equal(response.status, 400);
-  assert.equal(body?.error?.code, "SUPPLIER_REQUIRED");
+  assert.equal(body?.error?.code, "PARTY_REQUIRED");
   assert.equal(createPaymentMock.mock.calls.length, 0);
 });
 
@@ -425,7 +440,7 @@ test("blocks attachment access when unauthenticated", async () => {
     amountOriginal: "10.00",
     exchangeRateToEgp: null,
     amountEgp: "10.00",
-    costComponent: "شراء",
+    costComponent: "تكلفة البضاعة",
     paymentMethod: "نقدي",
     cashReceiverName: null,
     referenceNumber: null,

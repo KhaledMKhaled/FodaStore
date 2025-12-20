@@ -66,7 +66,13 @@ import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
 import { shipmentStatusColors } from "@/lib/colorMaps";
-import type { Shipment, ShipmentItem, ShipmentPayment, Supplier } from "@shared/schema";
+import type {
+  Shipment,
+  ShipmentItem,
+  ShipmentPayment,
+  ShippingCompany,
+  Supplier,
+} from "@shared/schema";
 import { deriveAmountEgp, validateRemainingAllowance } from "./paymentValidation";
 import { cn } from "@/lib/utils";
 
@@ -158,8 +164,9 @@ export default function Payments() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
-  const [supplierId, setSupplierId] = useState<number | null>(null);
-  const [supplierPopoverOpen, setSupplierPopoverOpen] = useState(false);
+  const [partyType, setPartyType] = useState<"supplier" | "shipping_company">("supplier");
+  const [partyId, setPartyId] = useState<number | null>(null);
+  const [partyPopoverOpen, setPartyPopoverOpen] = useState(false);
   const [paymentCurrency, setPaymentCurrency] = useState("EGP");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [costComponent, setCostComponent] = useState("");
@@ -178,7 +185,13 @@ export default function Payments() {
   });
 
   const { data: suppliers, isLoading: loadingSuppliers } = useQuery<Supplier[]>({
-    queryKey: ["/api/suppliers?includeHidden=true"],
+    queryKey: ["/api/suppliers"],
+  });
+
+  const { data: shippingCompanies, isLoading: loadingShippingCompanies } = useQuery<
+    ShippingCompany[]
+  >({
+    queryKey: ["/api/shipping-companies"],
   });
 
   const { data: shipments, isLoading: loadingShipments } = useQuery<Shipment[]>({
@@ -206,54 +219,62 @@ export default function Payments() {
   const supplierIds = new Set(
     shipmentItems?.map((item) => item.supplierId).filter((id): id is number => !!id) ?? [],
   );
-  const shippingCompanySupplierId =
-    shipments?.find((shipment) => shipment.id === selectedShipmentId)?.shippingCompanySupplierId ??
-    null;
-  const shipmentSupplierIds = new Set(supplierIds);
-  if (typeof shippingCompanySupplierId === "number") {
-    shipmentSupplierIds.add(shippingCompanySupplierId);
-  }
+  const shippingCompanyId =
+    shipments?.find((shipment) => shipment.id === selectedShipmentId)?.shippingCompanyId ?? null;
 
-  const hasSupplierAttribution = shipmentSupplierIds.size > 0;
+  const hasSupplierAttribution = supplierIds.size > 0;
   const autoSupplierId = supplierIds.size === 1 ? Array.from(supplierIds)[0] : null;
   const isShippingComponent = SHIPPING_COST_COMPONENTS.has(costComponent);
-  const autoShippingSupplierId = typeof shippingCompanySupplierId === "number"
-    ? shippingCompanySupplierId
-    : null;
+  const autoShippingCompanyId = typeof shippingCompanyId === "number" ? shippingCompanyId : null;
 
   useEffect(() => {
     if (!isDialogOpen) return;
     if (isShippingComponent) {
-      if (autoShippingSupplierId) {
-        if (supplierId !== autoShippingSupplierId) {
-          setSupplierId(autoShippingSupplierId);
+      if (autoShippingCompanyId) {
+        if (partyType !== "shipping_company") {
+          setPartyType("shipping_company");
+        }
+        if (partyId !== autoShippingCompanyId) {
+          setPartyId(autoShippingCompanyId);
         }
         return;
       }
     } else if (autoSupplierId) {
-      setSupplierId(autoSupplierId);
+      if (partyType !== "supplier") {
+        setPartyType("supplier");
+      }
+      setPartyId(autoSupplierId);
       return;
     }
-    if (hasSupplierAttribution && supplierId) {
+    if (hasSupplierAttribution && partyType === "supplier" && partyId) {
       return;
     }
-    setSupplierId(null);
+    if (partyType === "shipping_company" && partyId) {
+      return;
+    }
+    setPartyId(null);
   }, [
     autoSupplierId,
-    autoShippingSupplierId,
+    autoShippingCompanyId,
     hasSupplierAttribution,
     isDialogOpen,
     isShippingComponent,
+    partyId,
+    partyType,
     selectedShipmentId,
-    supplierId,
   ]);
+
+  useEffect(() => {
+    if (!isDialogOpen) return;
+    setPartyId(null);
+  }, [partyType, isDialogOpen]);
 
   useEffect(() => {
     setClientValidationError(null);
   }, [
     selectedShipmentId,
     paymentCurrency,
-    supplierId,
+    partyId,
     invoiceSummary?.paymentAllowance?.remainingAllowedEgp,
   ]);
 
@@ -281,7 +302,8 @@ export default function Payments() {
 
   const resetForm = () => {
     setSelectedShipmentId(null);
-    setSupplierId(null);
+    setPartyType("supplier");
+    setPartyId(null);
     setPaymentCurrency("EGP");
     setPaymentMethod("");
     setCostComponent("");
@@ -351,23 +373,41 @@ export default function Payments() {
         .filter((id): id is number => !!id) ?? [],
     );
     const selectedShipment = shipments?.find((shipment) => shipment.id === selectedShipmentId);
-    const latestShippingCompanySupplierId =
-      selectedShipment?.shippingCompanySupplierId ?? null;
-    const effectiveSupplierIds = new Set<number>(latestItemSupplierIds);
-    if (typeof latestShippingCompanySupplierId === "number") {
-      effectiveSupplierIds.add(latestShippingCompanySupplierId);
-    }
-    const isShippingPayment = SHIPPING_COST_COMPONENTS.has(costComponent);
-    const requiredSupplierIds = isShippingPayment
-      ? (latestShippingCompanySupplierId !== null
-          ? new Set([latestShippingCompanySupplierId])
-          : latestItemSupplierIds)
-      : costComponent === "تكلفة البضاعة"
-        ? latestItemSupplierIds
-        : effectiveSupplierIds;
+    const latestShippingCompanyId = selectedShipment?.shippingCompanyId ?? null;
 
-    if (requiredSupplierIds.size > 0 && !supplierId) {
-      const message = "يرجى اختيار المورد لهذه الشحنة";
+    const isShippingPayment = SHIPPING_COST_COMPONENTS.has(costComponent);
+    const allowedSuppliers =
+      costComponent === "تكلفة البضاعة" ? latestItemSupplierIds : new Set(latestItemSupplierIds);
+    const allowedShippingCompanies =
+      typeof latestShippingCompanyId === "number" ? new Set([latestShippingCompanyId]) : new Set();
+
+    const shouldRequireParty =
+      costComponent === "تكلفة البضاعة"
+        ? allowedSuppliers.size > 0
+        : isShippingPayment
+          ? allowedShippingCompanies.size > 0
+          : allowedSuppliers.size + allowedShippingCompanies.size > 0;
+
+    if (shouldRequireParty && (!partyType || !partyId)) {
+      const message = "يرجى اختيار الطرف لهذه الشحنة";
+      setClientValidationError(message);
+      toast({ title: message, variant: "destructive" });
+      return;
+    }
+
+    if (partyType === "supplier" && partyId && !allowedSuppliers.has(partyId)) {
+      const message = "المورد المحدد غير مرتبط بهذه الشحنة";
+      setClientValidationError(message);
+      toast({ title: message, variant: "destructive" });
+      return;
+    }
+
+    if (
+      partyType === "shipping_company" &&
+      partyId &&
+      !allowedShippingCompanies.has(partyId)
+    ) {
+      const message = "شركة الشحن المحددة غير مرتبطة بهذه الشحنة";
       setClientValidationError(message);
       toast({ title: message, variant: "destructive" });
       return;
@@ -435,8 +475,9 @@ export default function Payments() {
 
     const payload = new FormData();
     payload.append("shipmentId", String(selectedShipmentId));
-    if (supplierId) {
-      payload.append("supplierId", String(supplierId));
+    if (partyType && partyId) {
+      payload.append("partyType", partyType);
+      payload.append("partyId", String(partyId));
     }
     payload.append("paymentDate", formData.get("paymentDate") as string);
     payload.append("paymentCurrency", paymentCurrency);
@@ -648,54 +689,89 @@ export default function Payments() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>المورد</Label>
-                <Popover open={supplierPopoverOpen} onOpenChange={setSupplierPopoverOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={supplierPopoverOpen}
-                      className="w-full justify-between"
-                      data-testid="select-supplier"
-                    >
-                      {supplierId
-                        ? suppliers?.find((supplier) => supplier.id === supplierId)?.name
-                        : "اختر المورد…"}
-                      <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-full p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="ابحث عن المورد..." />
-                      <CommandList>
-                        <CommandEmpty>
-                          {loadingSuppliers ? "جاري التحميل..." : "لا يوجد مورد مطابق"}
-                        </CommandEmpty>
-                        <CommandGroup>
-                          {suppliers?.map((supplier) => (
-                            <CommandItem
-                              key={supplier.id}
-                              value={supplier.name}
-                              onSelect={() => {
-                                setSupplierId(supplier.id);
-                                setSupplierPopoverOpen(false);
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  "ml-2 h-4 w-4",
-                                  supplierId === supplier.id ? "opacity-100" : "opacity-0",
-                                )}
-                              />
-                              {supplier.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>نوع الطرف</Label>
+                  <Select
+                    value={partyType}
+                    onValueChange={(value) =>
+                      setPartyType(value as "supplier" | "shipping_company")
+                    }
+                  >
+                    <SelectTrigger data-testid="select-party-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="supplier">مورد</SelectItem>
+                      <SelectItem value="shipping_company">شركة شحن</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>الطرف</Label>
+                  <Popover open={partyPopoverOpen} onOpenChange={setPartyPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={partyPopoverOpen}
+                        className="w-full justify-between"
+                        data-testid="select-party"
+                      >
+                        {partyId
+                          ? partyType === "supplier"
+                            ? suppliers?.find((supplier) => supplier.id === partyId)?.name
+                            : shippingCompanies?.find((company) => company.id === partyId)?.name
+                          : partyType === "supplier"
+                            ? "اختر المورد…"
+                            : "اختر شركة الشحن…"}
+                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-full p-0" align="start">
+                      <Command>
+                        <CommandInput
+                          placeholder={
+                            partyType === "supplier" ? "ابحث عن المورد..." : "ابحث عن شركة الشحن..."
+                          }
+                        />
+                        <CommandList>
+                          <CommandEmpty>
+                            {partyType === "supplier"
+                              ? loadingSuppliers
+                                ? "جاري التحميل..."
+                                : "لا يوجد مورد مطابق"
+                              : loadingShippingCompanies
+                                ? "جاري التحميل..."
+                                : "لا توجد شركة شحن مطابقة"}
+                          </CommandEmpty>
+                          <CommandGroup>
+                            {(partyType === "supplier" ? suppliers : shippingCompanies)?.map(
+                              (party) => (
+                                <CommandItem
+                                  key={party.id}
+                                  value={party.name}
+                                  onSelect={() => {
+                                    setPartyId(party.id);
+                                    setPartyPopoverOpen(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "ml-2 h-4 w-4",
+                                      partyId === party.id ? "opacity-100" : "opacity-0",
+                                    )}
+                                  />
+                                  {party.name}
+                                </CommandItem>
+                              ),
+                            )}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
 
               <div className="space-y-2">

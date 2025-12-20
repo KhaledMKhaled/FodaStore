@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   Banknote,
   Tag,
+  Truck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -56,6 +57,12 @@ const menuItems = [
     tooltip: "إضافة وتعديل بيانات الموردين المرتبطين بكل صنف",
   },
   {
+    title: "شركات الشحن",
+    url: "/shipping-companies",
+    icon: Truck,
+    tooltip: "إدارة قائمة شركات الشحن المرتبطة بالشحنات",
+  },
+  {
     title: "أنواع الأصناف",
     url: "/product-types",
     icon: Tag,
@@ -93,6 +100,12 @@ const accountingItems = [
     url: "/supplier-balances",
     icon: Users,
     tooltip: "الفلوس اللي عليك وليك لكل مورد",
+  },
+  {
+    title: "كشف حساب شركات الشحن",
+    url: "/shipping-company-balances",
+    icon: Truck,
+    tooltip: "الفلوس اللي عليك وليك لكل شركة شحن",
   },
   {
     title: "كشف حركة الحساب",

@@ -13,6 +13,7 @@ import Dashboard from "@/pages/dashboard";
 import Shipments from "@/pages/shipments";
 import ShipmentWizard from "@/pages/shipment-wizard";
 import Suppliers from "@/pages/suppliers";
+import ShippingCompanies from "@/pages/shipping-companies";
 import ProductTypes from "@/pages/product-types";
 import ExchangeRates from "@/pages/exchange-rates";
 import Payments from "@/pages/payments";
@@ -20,6 +21,7 @@ import Inventory from "@/pages/inventory";
 import UsersPage from "@/pages/users";
 import AccountingPage from "@/pages/accounting";
 import SupplierBalancesPage from "@/pages/supplier-balances";
+import ShippingCompanyBalancesPage from "@/pages/shipping-company-balances";
 import MovementReportPage from "@/pages/movement-report";
 import PaymentMethodsReportPage from "@/pages/payment-methods-report";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +35,7 @@ function AuthenticatedRouter() {
       <Route path="/shipments/:id" component={ShipmentWizard} />
       <Route path="/shipments/:id/edit" component={ShipmentWizard} />
       <Route path="/suppliers" component={Suppliers} />
+      <Route path="/shipping-companies" component={ShippingCompanies} />
       <Route path="/product-types" component={ProductTypes} />
       <Route path="/exchange-rates" component={ExchangeRates} />
       <Route path="/payments" component={Payments} />
@@ -40,6 +43,7 @@ function AuthenticatedRouter() {
       <Route path="/users" component={UsersPage} />
       <Route path="/accounting" component={AccountingPage} />
       <Route path="/supplier-balances" component={SupplierBalancesPage} />
+      <Route path="/shipping-company-balances" component={ShippingCompanyBalancesPage} />
       <Route path="/movement-report" component={MovementReportPage} />
       <Route path="/payment-methods-report" component={PaymentMethodsReportPage} />
       <Route component={NotFound} />

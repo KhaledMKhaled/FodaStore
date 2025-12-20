@@ -3,27 +3,28 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { Supplier } from "@shared/schema";
+import type { ShippingCompany } from "@shared/schema";
 import { Step2Shipping } from "./shipment-wizard";
 
-function buildSupplier(overrides: Partial<Supplier> = {}): Supplier {
+function buildShippingCompany(
+  overrides: Partial<ShippingCompany> = {},
+): ShippingCompany {
   return {
     id: 1,
     name: "شركة شحن تجريبية",
-    description: null,
-    country: "الصين",
+    contactName: null,
     phone: null,
     email: null,
     address: null,
+    notes: null,
     isActive: true,
-    isHidden: false,
     createdAt: new Date("2024-01-01T00:00:00Z"),
     updatedAt: new Date("2024-01-01T00:00:00Z"),
     ...overrides,
   };
 }
 
-test("Step2Shipping renders the shipping company selector with suppliers", () => {
+test("Step2Shipping renders the shipping company selector with shipping companies", () => {
   const markup = renderToStaticMarkup(
     <Step2Shipping
       shipmentData={{
@@ -34,7 +35,7 @@ test("Step2Shipping renders the shipping company selector with suppliers", () =>
         purchaseRmbToEgpRate: "7.1",
         partialDiscountRmb: "0",
         discountNotes: "",
-        shippingCompanySupplierId: null,
+        shippingCompanyId: null,
       }}
       setShipmentData={() => {}}
       shippingData={{
@@ -47,7 +48,7 @@ test("Step2Shipping renders the shipping company selector with suppliers", () =>
         ratesUpdatedAt: "2024-02-02T00:00:00Z",
       }}
       setShippingData={() => {}}
-      shippingSuppliers={[buildSupplier()]}
+      shippingCompanies={[buildShippingCompany()]}
       totalPurchaseCostRmb={0}
       commissionRmb={0}
       commissionEgp={0}
