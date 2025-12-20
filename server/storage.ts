@@ -2359,7 +2359,7 @@ export class DatabaseStorage implements IStorage {
         continue;
       }
 
-      const partyType = p.partyType ?? "supplier";
+      const partyType = (p.partyType ?? "supplier") as "supplier" | "shipping_company";
       const partyId = p.partyId ?? null;
       const partyName =
         partyType === "shipping_company"

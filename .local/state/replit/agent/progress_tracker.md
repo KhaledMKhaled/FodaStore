@@ -80,10 +80,23 @@ FIX PAID AMOUNT CALCULATION - December 20, 2025
 [x] 46. Workflow restarted - Payment system now shows correct amounts per component
 
 ════════════════════════════════════════════════════════════════════
-FINAL ENVIRONMENT MIGRATION - December 20, 2025
+FIX SHIPPING COMPANY OPERATIONS - December 20, 2025
 ════════════════════════════════════════════════════════════════════
 
-[x] 47. npm install - all dependencies installed successfully
-[x] 48. Workflow configured with webview output on port 5000
-[x] 49. Application running - Express server serving on port 5000
-[x] 50. Import complete - ready for user
+[x] 47. Fixed PATCH route validation - Added duplicate name checking on UPDATE
+    ✓ Validates partial data using insertShippingCompanySchema.partial()
+    ✓ Checks for duplicate names excluding current company
+    ✓ Returns proper 409 Conflict error for duplicates
+    ✓ Improved error handling matching POST route pattern
+    ✓ Added comprehensive error messages
+[x] 48. Fixed TypeScript type error in storage.ts:
+    ✓ Added proper type casting for partyType variable
+    ✓ Ensures consistency with movement report return type
+[x] 49. Workflow restarted - Application compiling and running cleanly
+[x] 50. Final verification - All shipping company operations working:
+    ✓ POST /api/shipping-companies - Create with validation
+    ✓ PATCH /api/shipping-companies/:id - Update with validation
+    ✓ GET /api/shipping-companies - List all companies
+    ✓ DELETE /api/shipping-companies/:id - Delete company
+    ✓ Error handling and user feedback consistent across operations
+[x] 51. Task completed - Shipping company operations production-ready

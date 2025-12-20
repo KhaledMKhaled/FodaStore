@@ -561,25 +561,68 @@ export async function registerRoutes(
     requireRole(["مدير", "محاسب"]),
     async (req, res) => {
       try {
-        const company = await routeStorage.updateShippingCompany(
-          parseInt(req.params.id),
-          req.body,
-        );
-        if (!company) {
+        const id = parseInt(req.params.id);
+        const data = insertShippingCompanySchema.partial().parse(req.body);
+        
+        // Check if company exists
+        const existingCompany = await routeStorage.getShippingCompany(id);
+        if (!existingCompany) {
           return res.status(404).json({ message: "Shipping company not found" });
         }
+
+        // If name is being changed, check for duplicates
+        if (data.name && data.name !== existingCompany.name) {
+          const duplicateCompany = await routeStorage.getShippingCompanyByName(data.name);
+          if (duplicateCompany) {
+            throw new ApiError("SHIPPING_COMPANY_NAME_EXISTS", undefined, 409, {
+              field: "name",
+              value: data.name,
+            });
+          }
+        }
+
+        const company = await routeStorage.updateShippingCompany(id, data);
 
         auditLogger({
           userId: (req.user as any)?.id,
           entityType: "SHIPPING_COMPANY",
-          entityId: String(company.id),
+          entityId: String(company?.id),
           actionType: "UPDATE",
-          details: { name: company.name },
+          details: { name: company?.name },
         });
 
         res.json(company);
       } catch (error) {
-        res.status(500).json({ message: "Error updating shipping company" });
+        if (error instanceof ZodError) {
+          console.error("Validation error updating shipping company:", error.flatten());
+          const details = {
+            fields: error.errors.map((issue) => ({
+              field: issue.path.join(".") || "name",
+              message: issue.message,
+            })),
+          };
+          const { status, body } = formatError(
+            new ApiError("VALIDATION_ERROR", undefined, 400, details),
+          );
+          return res.status(status).json(body);
+        }
+        if (error instanceof ApiError) {
+          const { status, body } = formatError(error);
+          return res.status(status).json(body);
+        }
+        console.error("Error updating shipping company:", error);
+        const pgError = error as { code?: string; detail?: string; message?: string };
+        const { status, body } = formatError(error, {
+          code: "UNKNOWN_ERROR",
+          status: 500,
+          message: "Unexpected server error.",
+          details: {
+            code: pgError?.code,
+            detail: pgError?.detail,
+            message: pgError?.message,
+          },
+        });
+        res.status(status).json(body);
       }
     },
   );
