@@ -1108,7 +1108,7 @@ function Step1Import({
 }
 
 // Step 2: Shipping
-function Step2Shipping({
+export function Step2Shipping({
   shipmentData,
   setShipmentData,
   shippingData,
@@ -1265,8 +1265,8 @@ function Step2Shipping({
                   })
                 }
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="اختر شركة الشحن" />
+                <SelectTrigger data-testid="select-shipping-company">
+                  <SelectValue placeholder="اختر شركة الشحن…" />
                 </SelectTrigger>
                 <SelectContent>
                   {shippingSuppliers.map((supplier) => (
