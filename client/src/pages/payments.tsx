@@ -1195,84 +1195,84 @@ export default function Payments() {
                                         {shipmentPayments.map((payment) => (
                                           <div
                                             key={payment.id}
-                                            className="border rounded-md bg-background overflow-hidden"
+                                            className="border rounded-md bg-background overflow-hidden text-sm"
                                           >
-                                            {/* Header row: Date, Amount, Attachment */}
-                                            <div className="flex items-start justify-between gap-3 p-3 border-b bg-muted/20">
-                                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                                <Calendar className="w-4 h-4" />
-                                                {new Date(payment.paymentDate).toLocaleString("ar-EG")}
+                                            {/* Main info row aligned with table columns */}
+                                            <div className="flex items-center gap-0 p-3 border-b bg-muted/10 text-right">
+                                              {/* Expand indicator column (aligns with رقم الشحنة) */}
+                                              <div className="w-8 flex-shrink-0"></div>
+                                              
+                                              {/* Payment details in table-aligned columns */}
+                                              <div className="flex-1 px-2 text-muted-foreground text-xs">
+                                                <div className="font-mono">{new Date(payment.paymentDate).toLocaleString("ar-EG")}</div>
                                               </div>
-                                              <div className="font-bold text-base flex items-center gap-1 whitespace-nowrap">
-                                                {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}
-                                                {formatCurrency(payment.amountOriginal)}
-                                              </div>
-                                              {payment.attachmentUrl && (
-                                                <PaymentAttachmentIcon
-                                                  paymentId={payment.id}
-                                                  attachmentUrl={payment.attachmentUrl}
-                                                  attachmentOriginalName={payment.attachmentOriginalName}
-                                                  className="text-primary hover:text-primary/80 transition-colors"
-                                                />
-                                              )}
-                                            </div>
 
-                                            {/* Details row */}
-                                            <div className="grid grid-cols-2 gap-4 p-3 text-sm">
-                                              {/* Left column */}
-                                              <div className="space-y-2">
-                                                <div className="flex items-center gap-2">
-                                                  <Wallet className="w-4 h-4 text-muted-foreground" />
-                                                  <div>
-                                                    <div className="text-xs text-muted-foreground">طريقة الدفع</div>
-                                                    <div className="font-medium">{payment.paymentMethod}</div>
-                                                  </div>
+                                              {/* Cost component (aligns with الحالة) */}
+                                              <div className="w-24 px-2">
+                                                <Badge variant="outline" className="text-xs w-full justify-center">
+                                                  {payment.costComponent}
+                                                </Badge>
+                                              </div>
+
+                                              {/* Amount in original currency (aligns with التكلفة) */}
+                                              <div className="w-28 px-2 font-semibold text-right">
+                                                <div className="flex items-center justify-end gap-1">
+                                                  {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}
+                                                  <span className="font-mono">{formatCurrency(payment.amountOriginal)}</span>
                                                 </div>
+                                              </div>
+
+                                              {/* Amount in EGP (aligns with المدفوع) */}
+                                              <div className="w-28 px-2 font-bold text-right">
+                                                <div className="font-mono">{formatCurrency(payment.amountEgp)}</div>
+                                              </div>
+
+                                              {/* Payment method (aligns with الرصيد) */}
+                                              <div className="w-20 px-2 text-xs text-center">
+                                                <Badge variant="secondary" className="text-xs">
+                                                  {payment.paymentMethod === "نقدي" ? "نقدي" : payment.paymentMethod.substring(0, 4)}
+                                                </Badge>
+                                              </div>
+
+                                              {/* Last payment date column (aligns with آخر سداد) */}
+                                              <div className="w-20 px-2 text-center">
                                                 {payment.cashReceiverName && (
-                                                  <div className="flex items-center gap-2">
-                                                    <User className="w-4 h-4 text-muted-foreground" />
-                                                    <div>
-                                                      <div className="text-xs text-muted-foreground">المستلم</div>
-                                                      <div className="font-medium">{payment.cashReceiverName}</div>
-                                                    </div>
+                                                  <div className="flex items-center justify-center gap-1 text-xs">
+                                                    <User className="w-3 h-3" />
+                                                    <span>{payment.cashReceiverName.substring(0, 6)}</span>
                                                   </div>
+                                                )}
+                                                {payment.referenceNumber && (
+                                                  <div className="text-xs text-muted-foreground">{payment.referenceNumber.substring(0, 8)}</div>
                                                 )}
                                               </div>
 
-                                              {/* Right column */}
-                                              <div className="space-y-2 text-right">
-                                                <div className="flex items-center justify-end gap-2">
-                                                  <div className="text-left">
-                                                    <div className="text-xs text-muted-foreground">تحت حساب</div>
-                                                    <div className="font-medium text-primary">{payment.costComponent}</div>
-                                                  </div>
-                                                  <Building2 className="w-4 h-4 text-muted-foreground" />
-                                                </div>
-                                                {payment.referenceNumber && (
-                                                  <div className="flex items-center justify-end gap-2">
-                                                    <div className="text-left">
-                                                      <div className="text-xs text-muted-foreground">المرجع</div>
-                                                      <div className="font-medium">{payment.referenceNumber}</div>
-                                                    </div>
-                                                    <FileText className="w-4 h-4 text-muted-foreground" />
-                                                  </div>
+                                              {/* Actions column (aligns with إجراءات) */}
+                                              <div className="w-16 px-2 flex items-center justify-end gap-2">
+                                                {payment.attachmentUrl && (
+                                                  <PaymentAttachmentIcon
+                                                    paymentId={payment.id}
+                                                    attachmentUrl={payment.attachmentUrl}
+                                                    attachmentOriginalName={payment.attachmentOriginalName}
+                                                    className="text-primary hover:text-primary/80 transition-colors"
+                                                  />
                                                 )}
                                               </div>
                                             </div>
 
-                                            {/* EGP equivalent and notes */}
-                                            {(payment.amountEgp !== payment.amountOriginal || payment.note) && (
-                                              <div className="border-t px-3 py-2 bg-muted/10 space-y-2">
-                                                {payment.amountEgp !== payment.amountOriginal && (
-                                                  <div className="text-sm flex items-center justify-between">
-                                                    <span className="text-muted-foreground">المعادل بالجنيه</span>
-                                                    <span className="font-mono">{formatCurrency(payment.amountEgp)} ج.م</span>
+                                            {/* Details footer - only if there are additional notes */}
+                                            {(payment.note || payment.referenceNumber) && (
+                                              <div className="px-3 py-2 bg-muted/5 border-t space-y-1 text-xs">
+                                                {payment.note && (
+                                                  <div>
+                                                    <span className="text-muted-foreground">ملاحظة: </span>
+                                                    <span>{payment.note}</span>
                                                   </div>
                                                 )}
-                                                {payment.note && (
-                                                  <div className="text-sm">
-                                                    <span className="text-muted-foreground text-xs">ملاحظة: </span>
-                                                    <span className="text-sm">{payment.note}</span>
+                                                {payment.referenceNumber && !payment.cashReceiverName && (
+                                                  <div>
+                                                    <span className="text-muted-foreground">المرجع: </span>
+                                                    <span className="font-mono">{payment.referenceNumber}</span>
                                                   </div>
                                                 )}
                                               </div>
