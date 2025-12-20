@@ -37,6 +37,7 @@ import {
   type InsertExchangeRate,
   type ShipmentPayment,
   type InsertShipmentPayment,
+  type PaymentAllocation,
   type InventoryMovement,
   type InsertInventoryMovement,
   type AuditLog,
@@ -58,7 +59,7 @@ const parseAmount = (value: unknown): number => {
 };
 
 const PURCHASE_COST_COMPONENT = "تكلفة البضاعة";
-const SHIPPING_COST_COMPONENTS = new Set(["الشحن", "العمولة", "الجمرك", "التخريج"]);
+const CUSTOMS_COST_COMPONENTS = new Set(["الجمرك", "التخريج", "الجمرك والتخريج"]);
 
 type AllocationBasis = {
   supplierId: number;
@@ -324,6 +325,43 @@ const getShippingCompanyShipmentCost = (shipment: Shipment, shippingCompanyId: n
     : 0;
 };
 
+const getItemCustomsCostEgp = (item: ShipmentItem): number => {
+  const totalCustoms = parseAmount(item.totalCustomsCostEgp);
+  if (totalCustoms > 0) return totalCustoms;
+  const cartons = parseAmount(item.cartonsCtn);
+  const perCarton = parseAmount(item.customsCostPerCartonEgp);
+  return cartons * perCarton;
+};
+
+const getItemTakhreegCostEgp = (item: ShipmentItem): number => {
+  const totalTakhreeg = parseAmount(item.totalTakhreegCostEgp);
+  if (totalTakhreeg > 0) return totalTakhreeg;
+  const cartons = parseAmount(item.cartonsCtn);
+  const perCarton = parseAmount(item.takhreegCostPerCartonEgp);
+  return cartons * perCarton;
+};
+
+const getSupplierShipmentGoodsCostRmb = (items: ShipmentItem[], supplierId: number): number => {
+  return roundAmount(
+    items.reduce((sum, item) => {
+      if (item.supplierId !== supplierId) return sum;
+      return sum + parseAmount(item.totalPurchaseCostRmb);
+    }, 0),
+  );
+};
+
+const getSupplierShipmentCustomsCostEgp = (
+  items: ShipmentItem[],
+  supplierId: number,
+): number => {
+  return roundAmount(
+    items.reduce((sum, item) => {
+      if (item.supplierId !== supplierId) return sum;
+      return sum + getItemCustomsCostEgp(item) + getItemTakhreegCostEgp(item);
+    }, 0),
+  );
+};
+
 const computeKnownTotal = (shipment: Shipment): number => {
   const purchase = parseAmount(shipment.purchaseCostEgp);
   const commission = parseAmount(shipment.commissionCostEgp);
@@ -580,6 +618,7 @@ export interface IStorage {
   getAllPayments(): Promise<ShipmentPayment[]>;
   getPaymentById(paymentId: number): Promise<ShipmentPayment | undefined>;
   getShipmentPayments(shipmentId: number): Promise<ShipmentPayment[]>;
+  getAllPaymentAllocations(): Promise<PaymentAllocation[]>;
   createPayment(
     data: InsertShipmentPayment,
     options?: { simulatePostInsertError?: boolean; autoAllocate?: boolean }
@@ -1123,6 +1162,10 @@ export class DatabaseStorage implements IStorage {
       .from(shipmentPayments)
       .where(eq(shipmentPayments.shipmentId, shipmentId))
       .orderBy(desc(shipmentPayments.paymentDate));
+  }
+
+  async getAllPaymentAllocations(): Promise<PaymentAllocation[]> {
+    return db.select().from(paymentAllocations).orderBy(desc(paymentAllocations.createdAt));
   }
 
   async createPayment(
@@ -2013,6 +2056,7 @@ export class DatabaseStorage implements IStorage {
     const allSuppliers = await this.getAllSuppliers();
     const allShipments = await this.getAllShipments();
     const allPayments = await this.getAllPayments();
+    const allAllocations = await this.getAllPaymentAllocations();
     const allItems = await Promise.all(
       allShipments.map(s => this.getShipmentItems(s.id))
     );
@@ -2021,15 +2065,24 @@ export class DatabaseStorage implements IStorage {
       shipmentItemSuppliersMap,
       shipmentAnySuppliersMap,
       shipmentShippingCompanyMap,
-      purchaseCostByShipmentSupplierMap,
     } = buildShipmentSupplierMaps(allShipments, allItems);
+
+    const itemsByShipmentId = new Map<number, ShipmentItem[]>();
+    allShipments.forEach((shipment, index) => {
+      itemsByShipmentId.set(shipment.id, allItems[index] ?? []);
+    });
 
     const result: Array<{
       supplierId: number;
       supplierName: string;
+      totalCostRmb: string;
+      totalPaidRmb: string;
+      balanceRmb: string;
       totalCostEgp: string;
       totalPaidEgp: string;
       balanceEgp: string;
+      balanceStatusRmb: 'owing' | 'settled' | 'credit';
+      balanceStatusEgp: 'owing' | 'settled' | 'credit';
       balanceStatus: 'owing' | 'settled' | 'credit';
     }> = [];
 
@@ -2060,30 +2113,54 @@ export class DatabaseStorage implements IStorage {
       const supplierShipmentIdsFiltered = new Set(supplierShipments.map(s => s.id));
       const supplierPayments = allPayments.filter(p => {
         if (!supplierShipmentIdsFiltered.has(p.shipmentId)) return false;
-        return paymentMatchesSupplier(
+        if (!paymentMatchesSupplier(
           p,
           supplier.id,
           shipmentItemSuppliersMap,
           shipmentShippingCompanyMap
+        )) {
+          return false;
+        }
+        return CUSTOMS_COST_COMPONENTS.has(p.costComponent);
+      });
+
+      const supplierAllocations = allAllocations.filter((allocation) => {
+        if (!supplierShipmentIdsFiltered.has(allocation.shipmentId)) return false;
+        return (
+          allocation.supplierId === supplier.id &&
+          allocation.component === PURCHASE_COST_COMPONENT &&
+          allocation.currency === "RMB"
         );
       });
 
-      const totalCost = supplierShipments.reduce((sum, s) => {
-        return sum + getSupplierShipmentCost(
-          s,
-          supplier.id,
-          purchaseCostByShipmentSupplierMap,
-          shipmentShippingCompanyMap
-        );
+      const totalCostRmb = supplierShipments.reduce((sum, shipment) => {
+        const items = itemsByShipmentId.get(shipment.id) ?? [];
+        return sum + getSupplierShipmentGoodsCostRmb(items, supplier.id);
       }, 0);
-      const totalPaid = supplierPayments.reduce(
+      const totalPaidRmb = supplierAllocations.reduce(
+        (sum, allocation) => sum + parseAmount(allocation.allocatedAmount),
+        0,
+      );
+      const balanceRmb = totalCostRmb - totalPaidRmb;
+
+      const totalCostEgp = supplierShipments.reduce((sum, shipment) => {
+        const items = itemsByShipmentId.get(shipment.id) ?? [];
+        return sum + getSupplierShipmentCustomsCostEgp(items, supplier.id);
+      }, 0);
+      const totalPaidEgp = supplierPayments.reduce(
         (sum, p) => sum + parseFloat(p.amountEgp || "0"), 0
       );
-      const balance = totalCost - totalPaid;
+      const balanceEgp = totalCostEgp - totalPaidEgp;
 
-      let balanceStatus: 'owing' | 'settled' | 'credit' = 'settled';
-      if (balance > 0.0001) balanceStatus = 'owing';
-      else if (balance < -0.0001) balanceStatus = 'credit';
+      const getBalanceStatus = (value: number): 'owing' | 'settled' | 'credit' => {
+        if (value > 0.0001) return 'owing';
+        if (value < -0.0001) return 'credit';
+        return 'settled';
+      };
+
+      const balanceStatusRmb = getBalanceStatus(balanceRmb);
+      const balanceStatusEgp = getBalanceStatus(balanceEgp);
+      const balanceStatus = balanceStatusRmb;
 
       if (filters?.balanceType && filters.balanceType !== 'all') {
         if (filters.balanceType === 'owing' && balanceStatus !== 'owing') continue;
@@ -2093,9 +2170,14 @@ export class DatabaseStorage implements IStorage {
       result.push({
         supplierId: supplier.id,
         supplierName: supplier.name,
-        totalCostEgp: totalCost.toFixed(2),
-        totalPaidEgp: totalPaid.toFixed(2),
-        balanceEgp: balance.toFixed(2),
+        totalCostRmb: totalCostRmb.toFixed(2),
+        totalPaidRmb: totalPaidRmb.toFixed(2),
+        balanceRmb: balanceRmb.toFixed(2),
+        totalCostEgp: totalCostEgp.toFixed(2),
+        totalPaidEgp: totalPaidEgp.toFixed(2),
+        balanceEgp: balanceEgp.toFixed(2),
+        balanceStatusRmb,
+        balanceStatusEgp,
         balanceStatus,
       });
     }
@@ -2115,6 +2197,7 @@ export class DatabaseStorage implements IStorage {
 
     const allShipments = await this.getAllShipments();
     const allPayments = await this.getAllPayments();
+    const allAllocations = await this.getAllPaymentAllocations();
     const allItems = await Promise.all(
       allShipments.map(s => this.getShipmentItems(s.id))
     );
@@ -2122,20 +2205,35 @@ export class DatabaseStorage implements IStorage {
     const {
       shipmentItemSuppliersMap,
       shipmentAnySuppliersMap,
-      shipmentShippingCompanyMap,
-      purchaseCostByShipmentSupplierMap,
     } = buildShipmentSupplierMaps(allShipments, allItems);
+
+    const itemsByShipmentId = new Map<number, ShipmentItem[]>();
+    allShipments.forEach((shipment, index) => {
+      itemsByShipmentId.set(shipment.id, allItems[index] ?? []);
+    });
 
     let supplierShipments = allShipments.filter(s => {
       const suppliers = shipmentAnySuppliersMap.get(s.id);
       return suppliers?.has(supplierId);
     });
     let supplierPayments = allPayments.filter(p => {
-      return paymentMatchesSupplier(
+      if (!paymentMatchesSupplier(
         p,
         supplierId,
         shipmentItemSuppliersMap,
         shipmentShippingCompanyMap
+      )) {
+        return false;
+      }
+      return CUSTOMS_COST_COMPONENTS.has(p.costComponent);
+    });
+
+    const paymentById = new Map(allPayments.map((payment) => [payment.id, payment]));
+    let supplierAllocations = allAllocations.filter((allocation) => {
+      return (
+        allocation.supplierId === supplierId &&
+        allocation.component === PURCHASE_COST_COMPONENT &&
+        allocation.currency === "RMB"
       );
     });
 
@@ -2146,6 +2244,11 @@ export class DatabaseStorage implements IStorage {
         return purchaseDate && purchaseDate >= fromDate;
       });
       supplierPayments = supplierPayments.filter(p => new Date(p.paymentDate) >= fromDate);
+      supplierAllocations = supplierAllocations.filter((allocation) => {
+        const payment = paymentById.get(allocation.paymentId);
+        if (!payment?.paymentDate) return false;
+        return new Date(payment.paymentDate) >= fromDate;
+      });
     }
 
     if (filters?.dateTo) {
@@ -2155,6 +2258,11 @@ export class DatabaseStorage implements IStorage {
         return purchaseDate && purchaseDate <= toDate;
       });
       supplierPayments = supplierPayments.filter(p => new Date(p.paymentDate) <= toDate);
+      supplierAllocations = supplierAllocations.filter((allocation) => {
+        const payment = paymentById.get(allocation.paymentId);
+        if (!payment?.paymentDate) return false;
+        return new Date(payment.paymentDate) <= toDate;
+      });
     }
 
     const movements: Array<{
@@ -2163,27 +2271,29 @@ export class DatabaseStorage implements IStorage {
       description: string;
       shipmentCode?: string;
       costEgp?: string;
+      costRmb?: string;
       paidEgp?: string;
+      paidRmb?: string;
       runningBalance: string;
+      runningBalanceRmb?: string;
+      runningBalanceEgp?: string;
       paymentId?: number;
       attachmentUrl?: string | null;
       attachmentOriginalName?: string | null;
     }> = [];
 
     supplierShipments.forEach(s => {
-      const cost = getSupplierShipmentCost(
-        s,
-        supplierId,
-        purchaseCostByShipmentSupplierMap,
-        shipmentShippingCompanyMap
-      );
-      if (cost <= 0) return;
+      const items = itemsByShipmentId.get(s.id) ?? [];
+      const costRmb = getSupplierShipmentGoodsCostRmb(items, supplierId);
+      const costEgp = getSupplierShipmentCustomsCostEgp(items, supplierId);
+      if (costRmb <= 0 && costEgp <= 0) return;
       movements.push({
         date: s.purchaseDate || s.createdAt || new Date(),
         type: 'shipment',
         description: `شحنة: ${s.shipmentName}`,
         shipmentCode: s.shipmentCode,
-        costEgp: cost.toFixed(2),
+        costEgp: costEgp > 0 ? costEgp.toFixed(2) : undefined,
+        costRmb: costRmb > 0 ? costRmb.toFixed(2) : undefined,
         runningBalance: "0",
       });
     });
@@ -2203,16 +2313,38 @@ export class DatabaseStorage implements IStorage {
       });
     });
 
+    supplierAllocations.forEach((allocation) => {
+      const payment = paymentById.get(allocation.paymentId);
+      if (!payment) return;
+      const shipment = allShipments.find(s => s.id === allocation.shipmentId);
+      movements.push({
+        date: payment.paymentDate,
+        type: 'payment',
+        description: `سداد تكلفة بضاعة عبر شركة الشحن (توزيع تلقائي) - دفعة ${allocation.paymentId} / شحنة ${allocation.shipmentId}`,
+        shipmentCode: shipment?.shipmentCode,
+        paidRmb: parseAmount(allocation.allocatedAmount).toFixed(2),
+        runningBalance: "0",
+        paymentId: allocation.paymentId,
+        attachmentUrl: payment.attachmentUrl ?? null,
+        attachmentOriginalName: payment.attachmentOriginalName ?? null,
+      });
+    });
+
     movements.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    let runningBalance = 0;
+    let runningBalanceRmb = 0;
+    let runningBalanceEgp = 0;
     movements.forEach(m => {
       if (m.type === 'shipment') {
-        runningBalance += parseFloat(m.costEgp || "0");
+        runningBalanceRmb += parseFloat(m.costRmb || "0");
+        runningBalanceEgp += parseFloat(m.costEgp || "0");
       } else {
-        runningBalance -= parseFloat(m.paidEgp || "0");
+        runningBalanceRmb -= parseFloat(m.paidRmb || "0");
+        runningBalanceEgp -= parseFloat(m.paidEgp || "0");
       }
-      m.runningBalance = runningBalance.toFixed(2);
+      m.runningBalanceRmb = runningBalanceRmb.toFixed(2);
+      m.runningBalanceEgp = runningBalanceEgp.toFixed(2);
+      m.runningBalance = runningBalanceEgp.toFixed(2);
     });
 
     return { supplier, movements };
@@ -2403,6 +2535,7 @@ export class DatabaseStorage implements IStorage {
   }) {
     const allShipments = await this.getAllShipments();
     const allPayments = await this.getAllPayments();
+    const allAllocations = await this.getAllPaymentAllocations();
     const allSuppliers = await this.getAllSuppliers();
     const allShippingCompanies = await this.getAllShippingCompanies();
     const allUsers = await this.getAllUsers();
@@ -2493,6 +2626,7 @@ export class DatabaseStorage implements IStorage {
       paymentMethod?: string;
       originalCurrency?: string;
       amountOriginal?: string;
+      amountRmb?: string;
       amountEgp: string;
       direction: 'cost' | 'payment';
       userName?: string;
@@ -2560,7 +2694,8 @@ export class DatabaseStorage implements IStorage {
 
       for (const ct of costTypes) {
         const egpAmount = parseFloat(ct.egp || "0");
-        if (egpAmount <= 0) continue;
+        const rmbAmount = parseFloat(ct.rmb || "0");
+        if (egpAmount <= 0 && rmbAmount <= 0) continue;
 
         if (filters?.partyType && ct.partyType !== filters.partyType) {
           continue;
@@ -2580,7 +2715,8 @@ export class DatabaseStorage implements IStorage {
           movementType: ct.type,
           originalCurrency: ct.rmb ? "RMB" : "EGP",
           amountOriginal: ct.rmb || ct.egp || "0",
-          amountEgp: ct.egp || "0",
+          amountRmb: rmbAmount > 0 ? rmbAmount.toFixed(2) : undefined,
+          amountEgp: rmbAmount > 0 ? "0" : ct.egp || "0",
           direction: 'cost',
         });
       }
@@ -2648,12 +2784,94 @@ export class DatabaseStorage implements IStorage {
         paymentMethod: p.paymentMethod,
         originalCurrency: p.paymentCurrency,
         amountOriginal: p.amountOriginal || "0",
-        amountEgp: p.amountEgp || "0",
+        amountRmb:
+          p.paymentCurrency === "RMB" ? parseAmount(p.amountOriginal).toFixed(2) : undefined,
+        amountEgp: p.paymentCurrency === "RMB" ? "0" : p.amountEgp || "0",
         direction: 'payment',
         userName,
         paymentId: p.id,
         attachmentUrl: p.attachmentUrl ?? null,
         attachmentOriginalName: p.attachmentOriginalName ?? null,
+      });
+    }
+
+    const paymentById = new Map(allPayments.map((payment) => [payment.id, payment]));
+    let filteredAllocations = allAllocations.filter((allocation) => {
+      if (!baseFilteredShipmentIds.has(allocation.shipmentId)) return false;
+      if (
+        allocation.component !== PURCHASE_COST_COMPONENT ||
+        allocation.currency !== "RMB"
+      ) {
+        return false;
+      }
+      if (filters?.partyType && filters.partyId) {
+        if (filters.partyType !== "supplier") return false;
+        return allocation.supplierId === filters.partyId;
+      }
+      return filteredShipmentIds.has(allocation.shipmentId);
+    });
+
+    if (filters?.dateFrom) {
+      const fromDate = new Date(filters.dateFrom);
+      filteredAllocations = filteredAllocations.filter((allocation) => {
+        const payment = paymentById.get(allocation.paymentId);
+        if (!payment?.paymentDate) return false;
+        return new Date(payment.paymentDate) >= fromDate;
+      });
+    }
+
+    if (filters?.dateTo) {
+      const toDate = new Date(filters.dateTo);
+      filteredAllocations = filteredAllocations.filter((allocation) => {
+        const payment = paymentById.get(allocation.paymentId);
+        if (!payment?.paymentDate) return false;
+        return new Date(payment.paymentDate) <= toDate;
+      });
+    }
+
+    if (filters?.costComponent) {
+      filteredAllocations = filteredAllocations.filter(
+        () => filters.costComponent === "goods_cost",
+      );
+    }
+
+    for (const allocation of filteredAllocations) {
+      const shipment = allShipments.find((s) => s.id === allocation.shipmentId);
+      const payment = paymentById.get(allocation.paymentId);
+      if (!shipment || !payment) continue;
+
+      if (
+        filters?.movementType &&
+        filters.movementType !== "دفعة" &&
+        filters.movementType !== "all"
+      ) {
+        continue;
+      }
+
+      const partyName = supplierMap.get(allocation.supplierId);
+      const userName = payment.createdByUserId
+        ? userMap.get(payment.createdByUserId)
+        : undefined;
+
+      movements.push({
+        date: payment.paymentDate,
+        shipmentCode: shipment.shipmentCode,
+        shipmentName: shipment.shipmentName,
+        partyName,
+        partyId: allocation.supplierId,
+        partyType: "supplier",
+        movementType: "دفعة",
+        costComponent: "goods_cost",
+        paymentMethod: payment.paymentMethod,
+        originalCurrency: "RMB",
+        amountOriginal: parseAmount(allocation.allocatedAmount).toFixed(2),
+        amountRmb: parseAmount(allocation.allocatedAmount).toFixed(2),
+        amountEgp: "0",
+        direction: 'payment',
+        userName,
+        paymentId: allocation.paymentId,
+        attachmentUrl: payment.attachmentUrl ?? null,
+        attachmentOriginalName: payment.attachmentOriginalName ?? null,
       });
     }
 
@@ -2667,11 +2885,22 @@ export class DatabaseStorage implements IStorage {
       .filter(m => m.direction === 'payment')
       .reduce((sum, m) => sum + parseFloat(m.amountEgp), 0);
 
+    const totalCostRmb = movements
+      .filter(m => m.direction === 'cost')
+      .reduce((sum, m) => sum + parseFloat(m.amountRmb || "0"), 0);
+
+    const totalPaidRmb = movements
+      .filter(m => m.direction === 'payment')
+      .reduce((sum, m) => sum + parseFloat(m.amountRmb || "0"), 0);
+
     return {
       movements,
       totalCostEgp: totalCostEgp.toFixed(2),
       totalPaidEgp: totalPaidEgp.toFixed(2),
       netMovement: (totalCostEgp - totalPaidEgp).toFixed(2),
+      totalCostRmb: totalCostRmb.toFixed(2),
+      totalPaidRmb: totalPaidRmb.toFixed(2),
+      netMovementRmb: (totalCostRmb - totalPaidRmb).toFixed(2),
     };
   }
 
