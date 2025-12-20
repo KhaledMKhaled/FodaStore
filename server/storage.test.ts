@@ -7,6 +7,7 @@ import type {
   ShipmentItem,
   ShipmentShippingDetails,
   ShipmentPayment,
+  PaymentAllocation,
   Supplier,
 } from "@shared/schema";
 import { computeShipmentKnownTotal, DatabaseStorage, MissingRmbRateError } from "./storage";
@@ -113,6 +114,7 @@ const buildReportingStorage = (data: {
   shippingCompanies?: Array<{ id: number; name: string }>;
   shipments: Shipment[];
   payments: ShipmentPayment[];
+  allocations?: PaymentAllocation[];
   itemsByShipment: Map<number, ShipmentItem[]>;
   users?: Array<{ id: string; firstName?: string; username?: string }>;
 }) => {
@@ -125,11 +127,25 @@ const buildReportingStorage = (data: {
     data.shippingCompanies?.find((company) => company.id === id);
   storage.getAllShipments = async () => data.shipments;
   storage.getAllPayments = async () => data.payments;
+  storage.getAllPaymentAllocations = async () => data.allocations ?? [];
   storage.getShipmentItems = async (shipmentId: number) =>
     data.itemsByShipment.get(shipmentId) ?? [];
   storage.getAllUsers = async () => data.users ?? [];
   return storage;
 };
+
+const buildAllocation = (overrides: Partial<PaymentAllocation>): PaymentAllocation => ({
+  id: 1,
+  paymentId: 1,
+  shipmentId: baseShipment.id,
+  supplierId: 1,
+  component: "تكلفة البضاعة",
+  currency: "RMB",
+  allocatedAmount: "40",
+  createdByUserId: null,
+  createdAt: new Date("2024-01-05"),
+  ...overrides,
+});
 
 describe("computeShipmentKnownTotal", () => {
   it("sums available EGP components for جديدة without NaN", () => {
@@ -257,31 +273,42 @@ describe("computeShipmentKnownTotal", () => {
   });
 });
 
-describe("supplier reporting with payment supplier overrides", () => {
-  it("prefers payment supplier party for supplier balances", async () => {
+describe("supplier reporting with payment allocations", () => {
+  it("uses allocations to calculate supplier balances in RMB", async () => {
     const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
     const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
     const shipment = buildShipment({
       id: 10,
       shipmentCode: "S-10",
       shipmentName: "Shipment 10",
-      finalTotalCostEgp: "100.00",
       purchaseDate: new Date("2024-01-03"),
     });
     const itemsByShipment = new Map<number, ShipmentItem[]>([
-      [shipment.id, [buildItem({ shipmentId: shipment.id, supplierId: 1 })]],
+      [
+        shipment.id,
+        [buildItem({ shipmentId: shipment.id, supplierId: 1, totalPurchaseCostRmb: "100" })],
+      ],
     ]);
     const payment = buildPayment({
       shipmentId: shipment.id,
-      partyType: "supplier",
-      partyId: 2,
-      amountEgp: "40.00",
+      partyType: "shipping_company",
+      partyId: 99,
+      paymentCurrency: "RMB",
+      amountOriginal: "40",
+      amountEgp: "0",
+    });
+    const allocation = buildAllocation({
+      shipmentId: shipment.id,
+      supplierId: supplierA.id,
+      paymentId: payment.id,
+      allocatedAmount: "40",
     });
 
     const storage = buildReportingStorage({
       suppliers: [supplierA, supplierB],
       shipments: [shipment],
       payments: [payment],
+      allocations: [allocation],
       itemsByShipment,
     });
 
@@ -290,93 +317,118 @@ describe("supplier reporting with payment supplier overrides", () => {
     const balanceA = balances.find((row) => row.supplierId === supplierA.id);
     const balanceB = balances.find((row) => row.supplierId === supplierB.id);
 
-    assert.equal(balanceA?.totalCostEgp, "100.00");
-    assert.equal(balanceA?.totalPaidEgp, "0.00");
-    assert.equal(balanceA?.balanceStatus, "owing");
+    assert.equal(balanceA?.totalCostRmb, "100.00");
+    assert.equal(balanceA?.totalPaidRmb, "40.00");
+    assert.equal(balanceA?.balanceStatusRmb, "owing");
 
-    assert.equal(balanceB?.totalCostEgp, "0.00");
-    assert.equal(balanceB?.totalPaidEgp, "40.00");
-    assert.equal(balanceB?.balanceStatus, "credit");
+    assert.equal(balanceB?.totalCostRmb, "0.00");
+    assert.equal(balanceB?.totalPaidRmb, "0.00");
+    assert.equal(balanceB?.balanceStatusRmb, "settled");
   });
 
-  it("uses payment supplier party in supplier statements", async () => {
+  it("includes allocation movements in supplier statements", async () => {
     const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
     const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
     const shipment = buildShipment({
       id: 11,
       shipmentCode: "S-11",
       shipmentName: "Shipment 11",
-      finalTotalCostEgp: "75.00",
       purchaseDate: new Date("2024-01-04"),
     });
     const itemsByShipment = new Map<number, ShipmentItem[]>([
-      [shipment.id, [buildItem({ shipmentId: shipment.id, supplierId: 1 })]],
+      [
+        shipment.id,
+        [buildItem({ shipmentId: shipment.id, supplierId: 1, totalPurchaseCostRmb: "75" })],
+      ],
     ]);
     const payment = buildPayment({
       shipmentId: shipment.id,
-      partyType: "supplier",
-      partyId: 2,
-      amountEgp: "20.00",
+      partyType: "shipping_company",
+      partyId: 99,
+      paymentCurrency: "RMB",
+      amountOriginal: "20",
+      amountEgp: "0",
       paymentDate: new Date("2024-01-06"),
+    });
+    const allocation = buildAllocation({
+      shipmentId: shipment.id,
+      supplierId: supplierA.id,
+      paymentId: payment.id,
+      allocatedAmount: "20",
     });
 
     const storage = buildReportingStorage({
       suppliers: [supplierA, supplierB],
       shipments: [shipment],
       payments: [payment],
+      allocations: [allocation],
       itemsByShipment,
     });
 
     const statementA = await storage.getSupplierStatement(1);
-    assert.equal(statementA.movements.some((move) => move.type === "payment"), false);
+    const allocationMovement = statementA.movements.find(
+      (move) => move.description.includes("توزيع تلقائي"),
+    );
+    assert.equal(allocationMovement?.paidRmb, "20.00");
+    assert.equal(allocationMovement?.runningBalanceRmb, "55.00");
 
     const statementB = await storage.getSupplierStatement(2);
-    const paymentMovement = statementB.movements.find((move) => move.type === "payment");
-    assert.equal(paymentMovement?.paidEgp, "20.00");
-    assert.equal(paymentMovement?.runningBalance, "-20.00");
+    assert.equal(statementB.movements.length, 0);
   });
 
-  it("attributes movement report payments to payment supplier party", async () => {
+  it("adds allocation movements to the movement report", async () => {
     const supplierA = buildSupplier({ id: 1, name: "Supplier A" });
     const supplierB = buildSupplier({ id: 2, name: "Supplier B" });
     const shipment = buildShipment({
       id: 12,
       shipmentCode: "S-12",
       shipmentName: "Shipment 12",
-      finalTotalCostEgp: "100.00",
-      purchaseCostEgp: "100.00",
+      purchaseCostRmb: "100.00",
       purchaseDate: new Date("2024-01-04"),
     });
     const itemsByShipment = new Map<number, ShipmentItem[]>([
-      [shipment.id, [buildItem({ shipmentId: shipment.id, supplierId: 1 })]],
+      [
+        shipment.id,
+        [buildItem({ shipmentId: shipment.id, supplierId: 1, totalPurchaseCostRmb: "100" })],
+      ],
     ]);
     const payment = buildPayment({
       shipmentId: shipment.id,
-      partyType: "supplier",
-      partyId: 2,
-      amountEgp: "30.00",
+      partyType: "shipping_company",
+      partyId: 99,
+      paymentCurrency: "RMB",
+      amountOriginal: "30",
+      amountEgp: "0",
       paymentDate: new Date("2024-01-07"),
+    });
+    const allocation = buildAllocation({
+      shipmentId: shipment.id,
+      supplierId: supplierA.id,
+      paymentId: payment.id,
+      allocatedAmount: "30",
     });
 
     const storage = buildReportingStorage({
       suppliers: [supplierA, supplierB],
       shipments: [shipment],
       payments: [payment],
+      allocations: [allocation],
       itemsByShipment,
       users: [{ id: "user-1", firstName: "User" }],
     });
 
     const report = await storage.getMovementReport();
     const paymentMovement = report.movements.find(
-      (movement) => movement.movementType === "دفعة",
+      (movement) => movement.costComponent === "goods_cost",
     );
     const costMovement = report.movements.find(
       (movement) => movement.movementType === "تكلفة بضاعة",
     );
 
-    assert.equal(paymentMovement?.partyId, supplierB.id);
-    assert.equal(paymentMovement?.partyName, "Supplier B");
+    assert.equal(paymentMovement?.partyId, supplierA.id);
+    assert.equal(paymentMovement?.partyName, "Supplier A");
     assert.equal(paymentMovement?.partyType, "supplier");
+    assert.equal(paymentMovement?.amountRmb, "30.00");
     assert.equal(costMovement?.partyId, supplierA.id);
   });
 
