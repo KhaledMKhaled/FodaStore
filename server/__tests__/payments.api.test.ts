@@ -40,13 +40,19 @@ const baseBody = {
 function createHandler(
   overrides: {
     createPayment?: (...args: any[]) => any;
-    getShipmentSuppliers?: (...args: any[]) => any;
+    getShipmentSupplierContext?: (...args: any[]) => any;
     getSupplier?: (...args: any[]) => any;
   } = {},
 ) {
   const storage = {
     createPayment: overrides.createPayment || (async () => ({ id: 99 })),
-    getShipmentSuppliers: overrides.getShipmentSuppliers || (async () => []),
+    getShipmentSupplierContext:
+      overrides.getShipmentSupplierContext ||
+      (async () => ({
+        itemSuppliers: [],
+        shippingCompanySupplierId: null,
+        shipmentSuppliers: [],
+      })),
     getSupplier: overrides.getSupplier || (async (id: number) => ({ id })),
   } as any;
 
@@ -67,7 +73,11 @@ test("POST /api/payments writes an audit log entry", async () => {
       createdAt: new Date("2024-02-02"),
       updatedAt: new Date("2024-02-02"),
     })),
-    getShipmentSuppliers: mock.fn(async () => []),
+    getShipmentSupplierContext: mock.fn(async () => ({
+      itemSuppliers: [],
+      shippingCompanySupplierId: null,
+      shipmentSuppliers: [],
+    })),
     getSupplier: mock.fn(async (id) => ({ id })),
   };
 
@@ -144,12 +154,16 @@ test("POST /api/payments writes an audit log entry", async () => {
 
 test("accepts payment creation with a valid supplierId", async () => {
   const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
-  const getShipmentSuppliers = mock.fn(async () => [55]);
+  const getShipmentSupplierContext = mock.fn(async () => ({
+    itemSuppliers: [55],
+    shippingCompanySupplierId: null,
+    shipmentSuppliers: [55],
+  }));
   const getSupplier = mock.fn(async (id: number) => (id === 55 ? { id } : undefined));
 
   const { handler } = createHandler({
     createPayment,
-    getShipmentSuppliers,
+    getShipmentSupplierContext,
     getSupplier,
   });
 
@@ -190,11 +204,15 @@ test("returns 400 for invalid supplierId", async () => {
 
 test("requires supplierId when shipment has supplier attribution", async () => {
   const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
-  const getShipmentSuppliers = mock.fn(async () => [5]);
+  const getShipmentSupplierContext = mock.fn(async () => ({
+    itemSuppliers: [5],
+    shippingCompanySupplierId: null,
+    shipmentSuppliers: [5],
+  }));
 
   const { handler } = createHandler({
     createPayment,
-    getShipmentSuppliers,
+    getShipmentSupplierContext,
   });
 
   const req = {

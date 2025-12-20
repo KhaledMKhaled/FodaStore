@@ -397,6 +397,11 @@ export interface IStorage {
   // Shipment Items
   getShipmentItems(shipmentId: number): Promise<ShipmentItem[]>;
   getShipmentSuppliers(shipmentId: number): Promise<number[]>;
+  getShipmentSupplierContext(shipmentId: number): Promise<{
+    itemSuppliers: number[];
+    shippingCompanySupplierId: number | null;
+    shipmentSuppliers: number[];
+  }>;
   createShipmentItem(data: InsertShipmentItem): Promise<ShipmentItem>;
   updateShipmentItem(id: number, data: Partial<InsertShipmentItem>): Promise<ShipmentItem | undefined>;
   deleteShipmentItem(id: number): Promise<boolean>;
@@ -726,19 +731,45 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(shipmentItems).where(eq(shipmentItems.shipmentId, shipmentId));
   }
 
-  async getShipmentSuppliers(shipmentId: number): Promise<number[]> {
+  async getShipmentSupplierContext(shipmentId: number): Promise<{
+    itemSuppliers: number[];
+    shippingCompanySupplierId: number | null;
+    shipmentSuppliers: number[];
+  }> {
+    const [shipment] = await db
+      .select({ shippingCompanySupplierId: shipments.shippingCompanySupplierId })
+      .from(shipments)
+      .where(eq(shipments.id, shipmentId));
+
     const rows = await db
       .select({ supplierId: shipmentItems.supplierId })
       .from(shipmentItems)
       .where(eq(shipmentItems.shipmentId, shipmentId));
 
-    return Array.from(
+    const itemSuppliers = Array.from(
       new Set(
         rows
           .map((row) => row.supplierId)
           .filter((supplierId): supplierId is number => typeof supplierId === "number"),
       ),
     );
+
+    const shippingCompanySupplierId = shipment?.shippingCompanySupplierId ?? null;
+    const shipmentSuppliers = new Set(itemSuppliers);
+    if (typeof shippingCompanySupplierId === "number") {
+      shipmentSuppliers.add(shippingCompanySupplierId);
+    }
+
+    return {
+      itemSuppliers,
+      shippingCompanySupplierId,
+      shipmentSuppliers: Array.from(shipmentSuppliers),
+    };
+  }
+
+  async getShipmentSuppliers(shipmentId: number): Promise<number[]> {
+    const { shipmentSuppliers } = await this.getShipmentSupplierContext(shipmentId);
+    return shipmentSuppliers;
   }
 
   async createShipmentItem(data: InsertShipmentItem): Promise<ShipmentItem> {

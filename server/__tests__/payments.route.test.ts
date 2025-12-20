@@ -31,6 +31,7 @@ const storageState: {
 };
 
 let shipmentSuppliers: number[] = [];
+let shipmentShippingCompanySupplierId: number | null = null;
 const suppliersById = new Map<number, { id: number; name?: string; isHidden?: boolean }>();
 
 const createAuditLogMock = mock.fn(async () => ({}));
@@ -93,10 +94,16 @@ const mockedGetShipmentsByIds = mock.method(
       status: storageState.shipments.get(id)?.status,
     })),
 );
-const mockedGetShipmentSuppliers = mock.method(
+const mockedGetShipmentSupplierContext = mock.method(
   storage,
-  "getShipmentSuppliers",
-  async () => shipmentSuppliers,
+  "getShipmentSupplierContext",
+  async () => ({
+    itemSuppliers: shipmentSuppliers,
+    shippingCompanySupplierId: shipmentShippingCompanySupplierId,
+    shipmentSuppliers: shipmentShippingCompanySupplierId
+      ? Array.from(new Set([...shipmentSuppliers, shipmentShippingCompanySupplierId]))
+      : shipmentSuppliers,
+  }),
 );
 const mockedGetSupplier = mock.method(
   storage,
@@ -112,6 +119,7 @@ function resetStorageState() {
   );
   storageState.payments = [];
   shipmentSuppliers = [];
+  shipmentShippingCompanySupplierId = null;
   suppliersById.clear();
   createPaymentMock.mock.resetCalls();
   createAuditLogMock.mock.resetCalls();
@@ -119,7 +127,7 @@ function resetStorageState() {
   mockedCreateAuditLog.mock.resetCalls();
   mockedGetAllPayments.mock.resetCalls();
   mockedGetShipmentsByIds.mock.resetCalls();
-  mockedGetShipmentSuppliers.mock.resetCalls();
+  mockedGetShipmentSupplierContext.mock.resetCalls();
   mockedGetSupplier.mock.resetCalls();
 }
 
