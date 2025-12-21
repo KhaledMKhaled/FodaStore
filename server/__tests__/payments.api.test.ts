@@ -186,6 +186,35 @@ test("accepts payment creation with a valid supplier party", async () => {
   assert.equal(createPayment.mock.calls[0].arguments[0].partyType, "supplier");
 });
 
+test("accepts purchase payment with shipping company when shipment allows it", async () => {
+  const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
+  const getShipmentSupplierContext = mock.fn(async () => ({
+    itemSuppliers: [55],
+    shippingCompanyId: 77,
+    shipmentSuppliers: [55],
+  }));
+  const getShippingCompany = mock.fn(async (id: number) => (id === 77 ? { id } : undefined));
+
+  const { handler } = createHandler({
+    createPayment,
+    getShipmentSupplierContext,
+    getShippingCompany,
+  });
+
+  const req = {
+    body: { ...baseBody, partyType: "shipping_company", partyId: 77 },
+    user: { id: "user-1" },
+  } as any;
+  const res = createResponse();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(createPayment.mock.calls.length, 1);
+  assert.equal(createPayment.mock.calls[0].arguments[0].partyId, 77);
+  assert.equal(createPayment.mock.calls[0].arguments[0].partyType, "shipping_company");
+});
+
 test("returns 400 for invalid supplier party", async () => {
   const createPayment = mock.fn(async (data) => ({ id: 10, ...data }));
   const getSupplier = mock.fn(async () => undefined);

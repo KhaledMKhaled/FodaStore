@@ -14,6 +14,7 @@ test("auto allocation visibility rules", () => {
       costComponent: "تكلفة البضاعة",
       partyType: "shipping_company",
       selectedShipmentId: 12,
+      shippingCompanyId: 5,
     }),
     true,
   );
@@ -23,6 +24,7 @@ test("auto allocation visibility rules", () => {
       costComponent: "الشحن",
       partyType: "shipping_company",
       selectedShipmentId: 12,
+      shippingCompanyId: 5,
     }),
     false,
   );
@@ -32,6 +34,7 @@ test("auto allocation visibility rules", () => {
       costComponent: "تكلفة البضاعة",
       partyType: "supplier",
       selectedShipmentId: 12,
+      shippingCompanyId: 5,
     }),
     false,
   );
@@ -41,6 +44,17 @@ test("auto allocation visibility rules", () => {
       costComponent: "تكلفة البضاعة",
       partyType: "shipping_company",
       selectedShipmentId: null,
+      shippingCompanyId: 5,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldShowAutoAllocationSection({
+      costComponent: "تكلفة البضاعة",
+      partyType: "shipping_company",
+      selectedShipmentId: 12,
+      shippingCompanyId: null,
     }),
     false,
   );
@@ -53,6 +67,7 @@ test("auto allocate toggle requires RMB payments", () => {
       partyType: "shipping_company",
       selectedShipmentId: 44,
       paymentCurrency: "RMB",
+      shippingCompanyId: 7,
     }),
     true,
   );
@@ -63,6 +78,7 @@ test("auto allocate toggle requires RMB payments", () => {
       partyType: "shipping_company",
       selectedShipmentId: 44,
       paymentCurrency: "EGP",
+      shippingCompanyId: 7,
     }),
     false,
   );
