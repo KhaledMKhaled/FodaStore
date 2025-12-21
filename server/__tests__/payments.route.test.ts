@@ -299,6 +299,31 @@ test("creates payment with shipping company party", async () => {
   assert.equal(createPaymentMock.mock.calls[0].arguments[0].partyType, "shipping_company");
 });
 
+test("creates purchase payment with shipping company party when shipment has company", async () => {
+  const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
+  shipmentShippingCompanyId = 77;
+  shippingCompaniesById.set(77, { id: 77, name: "Shipping Co" });
+
+  const response = await fetch(`http://127.0.0.1:${port}/api/payments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...createPaymentPayload(101),
+      costComponent: "تكلفة البضاعة",
+      partyType: "shipping_company",
+      partyId: 77,
+    }),
+  });
+
+  const body = await response.json();
+  await close();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(createPaymentMock.mock.calls[0].arguments[0].partyId, 77);
+  assert.equal(createPaymentMock.mock.calls[0].arguments[0].partyType, "shipping_company");
+});
+
 test("rejects invalid supplier party", async () => {
   const { port, close } = await createTestServer({ id: "manager-1", role: "مدير" });
 

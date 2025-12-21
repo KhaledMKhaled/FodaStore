@@ -193,7 +193,10 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         allowedPartyTypes.set("supplier", allowedSuppliers);
       }
 
-      if (!isPurchaseComponent) {
+      const canUseShippingCompany =
+        allowedShippingCompanies.length > 0 && (isShippingComponent || isPurchaseComponent);
+
+      if (canUseShippingCompany) {
         allowedPartyTypes.set("shipping_company", allowedShippingCompanies);
       }
 
@@ -225,17 +228,18 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
       if (resolvedPartyType && resolvedPartyId) {
         const allowedIds = allowedPartyTypes.get(resolvedPartyType) ?? [];
         if (allowedIds.length === 0 || !allowedIds.includes(resolvedPartyId)) {
-        return res.status(400).json({
-          error: {
-            code: "PARTY_MISMATCH",
-            message: "الطرف المحدد لا يطابق أطراف الشحنة.",
-            details: {
-              field: "partyId",
-              partyId: resolvedPartyId,
-              shipmentSuppliers,
+          return res.status(400).json({
+            error: {
+              code: "PARTY_MISMATCH",
+              message: "الطرف المحدد لا يطابق أطراف الشحنة.",
+              details: {
+                field: "partyId",
+                partyId: resolvedPartyId,
+                shipmentSuppliers,
+                shippingCompanyId,
+              },
             },
-          },
-        });
+          });
         }
       }
 

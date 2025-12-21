@@ -352,11 +352,15 @@ export default function Payments() {
   const hasSupplierAttribution = supplierIds.size > 0;
   const autoSupplierId = supplierIds.size === 1 ? Array.from(supplierIds)[0] : null;
   const isShippingComponent = SHIPPING_COST_COMPONENTS.has(costComponent);
+  const isPurchaseComponent = costComponent === "تكلفة البضاعة";
   const autoShippingCompanyId = typeof shippingCompanyId === "number" ? shippingCompanyId : null;
+  const canUseShippingCompany =
+    typeof autoShippingCompanyId === "number" && (isShippingComponent || isPurchaseComponent);
   const showAutoAllocationSection = shouldShowAutoAllocationSection({
     costComponent,
     partyType,
     selectedShipmentId,
+    shippingCompanyId,
   });
   const showSupplierGoodsSummary = shouldUseSupplierGoodsSummary({
     costComponent,
@@ -369,6 +373,7 @@ export default function Payments() {
     partyType,
     selectedShipmentId,
     paymentCurrency,
+    shippingCompanyId,
   });
   const amountOriginalNumber = parseFloat(amountOriginalValue);
   const hasPreviewAmount = Number.isFinite(amountOriginalNumber) && amountOriginalNumber > 0;
@@ -405,17 +410,21 @@ export default function Payments() {
 
   useEffect(() => {
     if (!isDialogOpen) return;
-    if (isShippingComponent) {
-      if (autoShippingCompanyId) {
-        if (partyType !== "shipping_company") {
-          form.setValue("partyType", "shipping_company", { shouldValidate: true });
-        }
-        if (partyId !== autoShippingCompanyId) {
-          form.setValue("partyId", String(autoShippingCompanyId), { shouldValidate: true });
-        }
-        return;
+    if (
+      canUseShippingCompany &&
+      (isShippingComponent ||
+        (!hasSupplierAttribution && isPurchaseComponent) ||
+        partyType === "shipping_company")
+    ) {
+      if (partyType !== "shipping_company") {
+        form.setValue("partyType", "shipping_company", { shouldValidate: true });
       }
-    } else if (autoSupplierId) {
+      if (partyId !== autoShippingCompanyId) {
+        form.setValue("partyId", String(autoShippingCompanyId), { shouldValidate: true });
+      }
+      return;
+    }
+    if (!isShippingComponent && autoSupplierId) {
       if (partyType !== "supplier") {
         form.setValue("partyType", "supplier", { shouldValidate: true });
       }
@@ -432,8 +441,10 @@ export default function Payments() {
   }, [
     autoSupplierId,
     autoShippingCompanyId,
+    canUseShippingCompany,
     hasSupplierAttribution,
     isDialogOpen,
+    isPurchaseComponent,
     isShippingComponent,
     partyId,
     partyType,
@@ -657,17 +668,17 @@ export default function Payments() {
     const latestShippingCompanyId = selectedShipment?.shippingCompanyId ?? null;
 
     const isShippingPayment = SHIPPING_COST_COMPONENTS.has(costComponent);
-    const allowedSuppliers =
-      costComponent === "تكلفة البضاعة" ? latestItemSupplierIds : new Set(latestItemSupplierIds);
-    const allowedShippingCompanies =
-      typeof latestShippingCompanyId === "number" ? new Set([latestShippingCompanyId]) : new Set();
+    const isPurchasePayment = costComponent === "تكلفة البضاعة";
+    const canUseShippingCompanyForPayment =
+      typeof latestShippingCompanyId === "number" && (isShippingPayment || isPurchasePayment);
+    const allowedSuppliers = isShippingPayment ? new Set<number>() : latestItemSupplierIds;
+    const allowedShippingCompanies = canUseShippingCompanyForPayment
+      ? new Set([latestShippingCompanyId])
+      : new Set<number>();
 
-    const shouldRequireParty =
-      costComponent === "تكلفة البضاعة"
-        ? allowedSuppliers.size > 0
-        : isShippingPayment
-          ? allowedShippingCompanies.size > 0
-          : allowedSuppliers.size + allowedShippingCompanies.size > 0;
+    const shouldRequireParty = isShippingPayment
+      ? allowedShippingCompanies.size > 0
+      : allowedSuppliers.size + allowedShippingCompanies.size > 0;
 
     if (shouldRequireParty && (!partyType || !partyId)) {
       const message = "يرجى اختيار الطرف لهذه الشحنة";

@@ -3,16 +3,19 @@ export type AutoAllocationVisibilityInput = {
   partyType: "supplier" | "shipping_company";
   selectedShipmentId: number | null;
   paymentCurrency?: string;
+  shippingCompanyId?: number | null;
 };
 
 export const shouldShowAutoAllocationSection = ({
   costComponent,
   partyType,
   selectedShipmentId,
+  shippingCompanyId,
 }: AutoAllocationVisibilityInput): boolean =>
   costComponent === "تكلفة البضاعة" &&
   partyType === "shipping_company" &&
-  Boolean(selectedShipmentId);
+  Boolean(selectedShipmentId) &&
+  typeof shippingCompanyId === "number";
 
 export const canAutoAllocatePayment = ({
   paymentCurrency,
