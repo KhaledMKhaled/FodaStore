@@ -27,6 +27,7 @@ import {
   ArrowUpDown,
 } from "lucide-react";
 import type { ShippingCompany } from "@shared/schema";
+import { formatCurrency } from "@/lib/currency";
 
 interface ShippingCompanyBalance {
   shippingCompanyId: number;
@@ -61,21 +62,9 @@ interface ShippingCompanyStatement {
   totalPaidRmb: string;
 }
 
-function formatCurrency(value: string | number) {
-  const num = typeof value === "string" ? parseFloat(value) : value;
-  return new Intl.NumberFormat("ar-EG", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num || 0);
-}
-
 function formatDate(date: string | Date | null) {
   if (!date) return "-";
   return new Date(date).toLocaleDateString("ar-EG");
-}
-
-function formatCurrencyLabel(currency?: string) {
-  return currency === "RMB" ? "رممبي" : "جنيه";
 }
 
 export default function ShippingCompanyBalancesPage() {
@@ -136,7 +125,7 @@ export default function ShippingCompanyBalancesPage() {
       return (
         <Badge variant="destructive" className="gap-1">
           <TrendingUp className="w-3 h-3" />
-          فلوس عليك: {formatCurrency(balanceNum)} جنيه
+          فلوس عليك: {formatCurrency(balanceNum, "EGP")}
         </Badge>
       );
     }
@@ -144,7 +133,7 @@ export default function ShippingCompanyBalancesPage() {
       return (
         <Badge variant="default" className="gap-1 bg-green-600">
           <TrendingDown className="w-3 h-3" />
-          فلوس ليك: {formatCurrency(Math.abs(balanceNum))} جنيه
+          فلوس ليك: {formatCurrency(Math.abs(balanceNum), "EGP")}
         </Badge>
       );
     }
@@ -300,12 +289,12 @@ export default function ShippingCompanyBalancesPage() {
                 balances?.map((balance) => (
                   <TableRow key={balance.shippingCompanyId} data-testid={`row-shippingCompany-${balance.shippingCompanyId}`}>
                     <TableCell className="font-medium">{balance.shippingCompanyName}</TableCell>
-                    <TableCell>{formatCurrency(balance.totalCostEgp)} جنيه</TableCell>
+                    <TableCell>{formatCurrency(balance.totalCostEgp, "EGP")}</TableCell>
                     <TableCell className="text-green-600">
-                      {formatCurrency(balance.totalPaidEgp)} جنيه
+                      {formatCurrency(balance.totalPaidEgp, "EGP")}
                     </TableCell>
                     <TableCell className="text-green-600">
-                      {formatCurrency(balance.totalPaidRmb)} رممبي
+                      {formatCurrency(balance.totalPaidRmb, "RMB")}
                     </TableCell>
                     <TableCell>
                       {getBalanceStatusBadge(balance.balanceStatus, balance.balanceEgp)}
@@ -339,8 +328,8 @@ export default function ShippingCompanyBalancesPage() {
           </DialogHeader>
           {statement ? (
             <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
-              <div>إجمالي المدفوع (جنيه): {formatCurrency(statement.totalPaidEgp)} جنيه</div>
-              <div>إجمالي المدفوع (رممبي): {formatCurrency(statement.totalPaidRmb)} رممبي</div>
+              <div>إجمالي المدفوع (جنيه): {formatCurrency(statement.totalPaidEgp, "EGP")}</div>
+              <div>إجمالي المدفوع (رممبي): {formatCurrency(statement.totalPaidRmb, "RMB")}</div>
             </div>
           ) : null}
           <ScrollArea className="max-h-[60vh]">
@@ -383,17 +372,13 @@ export default function ShippingCompanyBalancesPage() {
                         <TableCell className="text-red-600">
                           {(() => {
                             const { amount, currency } = getCostDisplay(m);
-                            return amount
-                              ? `${formatCurrency(amount)} ${formatCurrencyLabel(currency)}`
-                              : "-";
+                            return amount ? formatCurrency(amount, currency) : "-";
                           })()}
                         </TableCell>
                         <TableCell className="text-green-600">
                           {(() => {
                             const { amount, currency } = getPaidDisplay(m);
-                            return amount
-                              ? `${formatCurrency(amount)} ${formatCurrencyLabel(currency)}`
-                              : "-";
+                            return amount ? formatCurrency(amount, currency) : "-";
                           })()}
                         </TableCell>
                         <TableCell>
@@ -410,9 +395,7 @@ export default function ShippingCompanyBalancesPage() {
                         <TableCell className="font-medium">
                           {(() => {
                             const { amount, currency } = getMovementBalance(m);
-                            return amount
-                              ? `${formatCurrency(amount)} ${formatCurrencyLabel(currency)}`
-                              : "-";
+                            return amount ? formatCurrency(amount, currency) : "-";
                           })()}
                         </TableCell>
                       </TableRow>

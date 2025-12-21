@@ -11,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { formatCurrency } from "@/lib/currency";
 import { 
   Calculator, 
   TrendingUp, 
@@ -65,15 +66,6 @@ interface AccountingDashboard {
   totalBalanceCustomsEgp: string;
   totalPaidTakhreegEgp: string;
   totalBalanceTakhreegEgp: string;
-}
-
-function formatCurrency(value: string | number, currency: string = "EGP") {
-  const num = typeof value === "string" ? parseFloat(value) : value;
-  const formatted = new Intl.NumberFormat("ar-EG", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num || 0);
-  return `${formatted} ${currency === "RMB" ? "رممبي" : "جنيه"}`;
 }
 
 function formatNumber(value: number) {
