@@ -7,6 +7,7 @@
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
+    "postinstall": "node scripts/patch-tailwindcss.js",
     "check": "tsc",
     "test": "NODE_ENV=test tsx --test",
     "db:push": "drizzle-kit push",

@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -7,47 +8,54 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/hooks/useAuth";
-import NotFound from "@/pages/not-found";
-import Landing from "@/pages/landing";
-import Dashboard from "@/pages/dashboard";
-import Shipments from "@/pages/shipments";
-import ShipmentWizard from "@/pages/shipment-wizard";
-import Suppliers from "@/pages/suppliers";
-import ShippingCompanies from "@/pages/shipping-companies";
-import ProductTypes from "@/pages/product-types";
-import ExchangeRates from "@/pages/exchange-rates";
-import Payments from "@/pages/payments";
-import Inventory from "@/pages/inventory";
-import UsersPage from "@/pages/users";
-import AccountingPage from "@/pages/accounting";
-import SupplierBalancesPage from "@/pages/supplier-balances";
-import ShippingCompanyBalancesPage from "@/pages/shipping-company-balances";
-import MovementReportPage from "@/pages/movement-report";
-import PaymentMethodsReportPage from "@/pages/payment-methods-report";
 import { Skeleton } from "@/components/ui/skeleton";
+
+const Landing = lazy(() => import("@/pages/landing"));
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const Shipments = lazy(() => import("@/pages/shipments"));
+const ShipmentWizard = lazy(() => import("@/pages/shipment-wizard"));
+const Suppliers = lazy(() => import("@/pages/suppliers"));
+const ShippingCompanies = lazy(() => import("@/pages/shipping-companies"));
+const ProductTypes = lazy(() => import("@/pages/product-types"));
+const ExchangeRates = lazy(() => import("@/pages/exchange-rates"));
+const Payments = lazy(() => import("@/pages/payments"));
+const Inventory = lazy(() => import("@/pages/inventory"));
+const UsersPage = lazy(() => import("@/pages/users"));
+const AccountingPage = lazy(() => import("@/pages/accounting"));
+const SupplierBalancesPage = lazy(() => import("@/pages/supplier-balances"));
+const ShippingCompanyBalancesPage = lazy(
+  () => import("@/pages/shipping-company-balances"),
+);
+const MovementReportPage = lazy(() => import("@/pages/movement-report"));
+const PaymentMethodsReportPage = lazy(
+  () => import("@/pages/payment-methods-report"),
+);
+const NotFound = lazy(() => import("@/pages/not-found"));
 
 function AuthenticatedRouter() {
   return (
-    <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route path="/shipments" component={Shipments} />
-      <Route path="/shipments/new" component={ShipmentWizard} />
-      <Route path="/shipments/:id" component={ShipmentWizard} />
-      <Route path="/shipments/:id/edit" component={ShipmentWizard} />
-      <Route path="/suppliers" component={Suppliers} />
-      <Route path="/shipping-companies" component={ShippingCompanies} />
-      <Route path="/product-types" component={ProductTypes} />
-      <Route path="/exchange-rates" component={ExchangeRates} />
-      <Route path="/payments" component={Payments} />
-      <Route path="/inventory" component={Inventory} />
-      <Route path="/users" component={UsersPage} />
-      <Route path="/accounting" component={AccountingPage} />
-      <Route path="/supplier-balances" component={SupplierBalancesPage} />
-      <Route path="/shipping-company-balances" component={ShippingCompanyBalancesPage} />
-      <Route path="/movement-report" component={MovementReportPage} />
-      <Route path="/payment-methods-report" component={PaymentMethodsReportPage} />
-      <Route component={NotFound} />
-    </Switch>
+    <Suspense fallback={<LoadingScreen />}>
+      <Switch>
+        <Route path="/" component={Dashboard} />
+        <Route path="/shipments" component={Shipments} />
+        <Route path="/shipments/new" component={ShipmentWizard} />
+        <Route path="/shipments/:id" component={ShipmentWizard} />
+        <Route path="/shipments/:id/edit" component={ShipmentWizard} />
+        <Route path="/suppliers" component={Suppliers} />
+        <Route path="/shipping-companies" component={ShippingCompanies} />
+        <Route path="/product-types" component={ProductTypes} />
+        <Route path="/exchange-rates" component={ExchangeRates} />
+        <Route path="/payments" component={Payments} />
+        <Route path="/inventory" component={Inventory} />
+        <Route path="/users" component={UsersPage} />
+        <Route path="/accounting" component={AccountingPage} />
+        <Route path="/supplier-balances" component={SupplierBalancesPage} />
+        <Route path="/shipping-company-balances" component={ShippingCompanyBalancesPage} />
+        <Route path="/movement-report" component={MovementReportPage} />
+        <Route path="/payment-methods-report" component={PaymentMethodsReportPage} />
+        <Route component={NotFound} />
+      </Switch>
+    </Suspense>
   );
 }
 
@@ -97,7 +105,11 @@ function AppContent() {
   }
 
   if (!isAuthenticated) {
-    return <Landing />;
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <Landing />
+      </Suspense>
+    );
   }
 
   return <AuthenticatedLayout />;
