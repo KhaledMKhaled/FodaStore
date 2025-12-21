@@ -2478,6 +2478,29 @@ export class DatabaseStorage implements IStorage {
           allocation.currency === "RMB"
         );
       });
+      let supplierDirectPaymentsRmb = allPayments.filter((payment) => {
+        if (!supplierShipmentIdsFiltered.has(payment.shipmentId)) return false;
+        return (
+          payment.partyType === "supplier" &&
+          payment.partyId === supplier.id &&
+          payment.costComponent === PURCHASE_COST_COMPONENT &&
+          payment.paymentCurrency === "RMB"
+        );
+      });
+
+      if (filters?.dateFrom) {
+        const fromDate = new Date(filters.dateFrom);
+        supplierDirectPaymentsRmb = supplierDirectPaymentsRmb.filter(
+          (payment) => new Date(payment.paymentDate) >= fromDate,
+        );
+      }
+
+      if (filters?.dateTo) {
+        const toDate = new Date(filters.dateTo);
+        supplierDirectPaymentsRmb = supplierDirectPaymentsRmb.filter(
+          (payment) => new Date(payment.paymentDate) <= toDate,
+        );
+      }
 
       const totalCostRmb = supplierShipments.reduce((sum, shipment) => {
         const items = itemsByShipmentId.get(shipment.id) ?? [];
@@ -2485,6 +2508,9 @@ export class DatabaseStorage implements IStorage {
       }, 0);
       const totalPaidRmb = supplierAllocations.reduce(
         (sum, allocation) => sum + parseAmount(allocation.allocatedAmount),
+        0,
+      ) + supplierDirectPaymentsRmb.reduce(
+        (sum, payment) => sum + parseAmount(payment.amountOriginal),
         0,
       );
       const balanceRmb = totalCostRmb - totalPaidRmb;
@@ -2551,6 +2577,7 @@ export class DatabaseStorage implements IStorage {
     const {
       shipmentItemSuppliersMap,
       shipmentAnySuppliersMap,
+      shipmentShippingCompanyMap,
     } = buildShipmentSupplierMaps(allShipments, allItems);
 
     const itemsByShipmentId = new Map<number, ShipmentItem[]>();
@@ -2573,6 +2600,14 @@ export class DatabaseStorage implements IStorage {
       }
       return CUSTOMS_COST_COMPONENTS.has(p.costComponent);
     });
+    let directSupplierPayments = allPayments.filter((payment) => {
+      return (
+        payment.partyType === "supplier" &&
+        payment.partyId === supplierId &&
+        payment.costComponent === PURCHASE_COST_COMPONENT &&
+        payment.paymentCurrency === "RMB"
+      );
+    });
 
     const paymentById = new Map(allPayments.map((payment) => [payment.id, payment]));
     let supplierAllocations = allAllocations.filter((allocation) => {
@@ -2590,6 +2625,9 @@ export class DatabaseStorage implements IStorage {
         return purchaseDate && purchaseDate >= fromDate;
       });
       supplierPayments = supplierPayments.filter(p => new Date(p.paymentDate) >= fromDate);
+      directSupplierPayments = directSupplierPayments.filter(
+        (payment) => new Date(payment.paymentDate) >= fromDate,
+      );
       supplierAllocations = supplierAllocations.filter((allocation) => {
         const payment = paymentById.get(allocation.paymentId);
         if (!payment?.paymentDate) return false;
@@ -2604,6 +2642,9 @@ export class DatabaseStorage implements IStorage {
         return purchaseDate && purchaseDate <= toDate;
       });
       supplierPayments = supplierPayments.filter(p => new Date(p.paymentDate) <= toDate);
+      directSupplierPayments = directSupplierPayments.filter(
+        (payment) => new Date(payment.paymentDate) <= toDate,
+      );
       supplierAllocations = supplierAllocations.filter((allocation) => {
         const payment = paymentById.get(allocation.paymentId);
         if (!payment?.paymentDate) return false;
@@ -2620,6 +2661,7 @@ export class DatabaseStorage implements IStorage {
       costRmb?: string;
       paidEgp?: string;
       paidRmb?: string;
+      currency?: string;
       runningBalance: string;
       runningBalanceRmb?: string;
       runningBalanceEgp?: string;
@@ -2652,10 +2694,27 @@ export class DatabaseStorage implements IStorage {
         description: `دفعة - ${p.costComponent}`,
         shipmentCode: shipment?.shipmentCode,
         paidEgp: p.amountEgp || "0",
+        currency: p.paymentCurrency,
         runningBalance: "0",
         paymentId: p.id,
         attachmentUrl: p.attachmentUrl ?? null,
         attachmentOriginalName: p.attachmentOriginalName ?? null,
+      });
+    });
+
+    directSupplierPayments.forEach((payment) => {
+      const shipment = allShipments.find((s) => s.id === payment.shipmentId);
+      movements.push({
+        date: payment.paymentDate,
+        type: 'payment',
+        description: `دفعة مباشرة - ${payment.costComponent}`,
+        shipmentCode: shipment?.shipmentCode,
+        paidRmb: parseAmount(payment.amountOriginal).toFixed(2),
+        currency: payment.paymentCurrency,
+        runningBalance: "0",
+        paymentId: payment.id,
+        attachmentUrl: payment.attachmentUrl ?? null,
+        attachmentOriginalName: payment.attachmentOriginalName ?? null,
       });
     });
 
@@ -2669,6 +2728,7 @@ export class DatabaseStorage implements IStorage {
         description: `سداد تكلفة بضاعة عبر شركة الشحن (توزيع تلقائي) - دفعة ${allocation.paymentId} / شحنة ${allocation.shipmentId}`,
         shipmentCode: shipment?.shipmentCode,
         paidRmb: parseAmount(allocation.allocatedAmount).toFixed(2),
+        currency: payment.paymentCurrency,
         runningBalance: "0",
         paymentId: allocation.paymentId,
         attachmentUrl: payment.attachmentUrl ?? null,

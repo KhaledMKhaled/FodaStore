@@ -31,9 +31,14 @@ import type { Supplier } from "@shared/schema";
 interface SupplierBalance {
   supplierId: number;
   supplierName: string;
+  totalCostRmb: string;
+  totalPaidRmb: string;
+  balanceRmb: string;
   totalCostEgp: string;
   totalPaidEgp: string;
   balanceEgp: string;
+  balanceStatusRmb: 'owing' | 'settled' | 'credit';
+  balanceStatusEgp: 'owing' | 'settled' | 'credit';
   balanceStatus: 'owing' | 'settled' | 'credit';
 }
 
@@ -45,8 +50,13 @@ interface SupplierStatement {
     description: string;
     shipmentCode?: string;
     costEgp?: string;
+    costRmb?: string;
     paidEgp?: string;
+    paidRmb?: string;
     runningBalance: string;
+    runningBalanceRmb?: string;
+    runningBalanceEgp?: string;
+    currency?: string;
     paymentId?: number;
     attachmentUrl?: string | null;
     attachmentOriginalName?: string | null;
@@ -118,13 +128,13 @@ export default function SupplierBalancesPage() {
     setBalanceType("all");
   };
 
-  const getBalanceStatusBadge = (status: string, balance: string) => {
+  const getBalanceStatusBadge = (status: string, balance: string, currencyLabel: string) => {
     const balanceNum = parseFloat(balance);
     if (status === 'owing') {
       return (
         <Badge variant="destructive" className="gap-1">
           <TrendingUp className="w-3 h-3" />
-          فلوس عليك: {formatCurrency(balanceNum)} جنيه
+          فلوس عليك: {formatCurrency(balanceNum)} {currencyLabel}
         </Badge>
       );
     }
@@ -132,7 +142,7 @@ export default function SupplierBalancesPage() {
       return (
         <Badge variant="default" className="gap-1 bg-green-600">
           <TrendingDown className="w-3 h-3" />
-          فلوس ليك: {formatCurrency(Math.abs(balanceNum))} جنيه
+          فلوس ليك: {formatCurrency(Math.abs(balanceNum))} {currencyLabel}
         </Badge>
       );
     }
@@ -142,6 +152,13 @@ export default function SupplierBalancesPage() {
       </Badge>
     );
   };
+
+  const renderAmounts = (rmb?: string, egp?: string) => (
+    <div className="flex flex-col gap-1">
+      <span>{rmb ? `${formatCurrency(rmb)} رممبي` : "-"}</span>
+      <span>{egp ? `${formatCurrency(egp)} جنيه` : "-"}</span>
+    </div>
+  );
 
   if (isLoading) {
     return (
@@ -243,16 +260,19 @@ export default function SupplierBalancesPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="text-right">اسم المورد</TableHead>
-                <TableHead className="text-right">إجمالي تكلفة الشحنات</TableHead>
-                <TableHead className="text-right">إجمالي المدفوع</TableHead>
-                <TableHead className="text-right">الرصيد الحالي</TableHead>
+                <TableHead className="text-right">إجمالي تكلفة الشحنات (رممبي)</TableHead>
+                <TableHead className="text-right">إجمالي تكلفة الشحنات (جنيه)</TableHead>
+                <TableHead className="text-right">إجمالي المدفوع (رممبي)</TableHead>
+                <TableHead className="text-right">إجمالي المدفوع (جنيه)</TableHead>
+                <TableHead className="text-right">الرصيد الحالي (رممبي)</TableHead>
+                <TableHead className="text-right">الرصيد الحالي (جنيه)</TableHead>
                 <TableHead className="text-right">إجراءات</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {balances?.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground">
                     لا توجد بيانات
                   </TableCell>
                 </TableRow>
@@ -260,12 +280,27 @@ export default function SupplierBalancesPage() {
                 balances?.map((balance) => (
                   <TableRow key={balance.supplierId} data-testid={`row-supplier-${balance.supplierId}`}>
                     <TableCell className="font-medium">{balance.supplierName}</TableCell>
+                    <TableCell>{formatCurrency(balance.totalCostRmb)} رممبي</TableCell>
                     <TableCell>{formatCurrency(balance.totalCostEgp)} جنيه</TableCell>
+                    <TableCell className="text-green-600">
+                      {formatCurrency(balance.totalPaidRmb)} رممبي
+                    </TableCell>
                     <TableCell className="text-green-600">
                       {formatCurrency(balance.totalPaidEgp)} جنيه
                     </TableCell>
                     <TableCell>
-                      {getBalanceStatusBadge(balance.balanceStatus, balance.balanceEgp)}
+                      {getBalanceStatusBadge(
+                        balance.balanceStatusRmb,
+                        balance.balanceRmb,
+                        "رممبي",
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {getBalanceStatusBadge(
+                        balance.balanceStatusEgp,
+                        balance.balanceEgp,
+                        "جنيه",
+                      )}
                     </TableCell>
                     <TableCell>
                       <Button
@@ -308,10 +343,10 @@ export default function SupplierBalancesPage() {
                     <TableHead className="text-right">التاريخ</TableHead>
                     <TableHead className="text-right">البيان</TableHead>
                     <TableHead className="text-right">رقم الشحنة</TableHead>
-                    <TableHead className="text-right">تكلفة</TableHead>
-                    <TableHead className="text-right">مدفوع</TableHead>
+                    <TableHead className="text-right">تكلفة (رممبي/جنيه)</TableHead>
+                    <TableHead className="text-right">مدفوع (رممبي/جنيه)</TableHead>
                     <TableHead className="text-right">مرفق</TableHead>
-                    <TableHead className="text-right">الرصيد</TableHead>
+                    <TableHead className="text-right">الرصيد (رممبي/جنيه)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -332,10 +367,10 @@ export default function SupplierBalancesPage() {
                         </TableCell>
                         <TableCell>{m.shipmentCode || "-"}</TableCell>
                         <TableCell className="text-red-600">
-                          {m.costEgp ? `${formatCurrency(m.costEgp)} جنيه` : "-"}
+                          {renderAmounts(m.costRmb, m.costEgp)}
                         </TableCell>
                         <TableCell className="text-green-600">
-                          {m.paidEgp ? `${formatCurrency(m.paidEgp)} جنيه` : "-"}
+                          {renderAmounts(m.paidRmb, m.paidEgp)}
                         </TableCell>
                         <TableCell>
                           {m.type === "payment" ? (
@@ -349,7 +384,7 @@ export default function SupplierBalancesPage() {
                           )}
                         </TableCell>
                         <TableCell className="font-medium">
-                          {formatCurrency(m.runningBalance)} جنيه
+                          {renderAmounts(m.runningBalanceRmb, m.runningBalanceEgp)}
                         </TableCell>
                       </TableRow>
                     ))
