@@ -43,6 +43,7 @@ interface MovementReportData {
     originalCurrency?: string;
     amountOriginal?: string;
     amountEgp: string;
+    amountRmb?: string;
     direction: 'cost' | 'payment';
     userName?: string;
     paymentId?: number;
@@ -52,6 +53,9 @@ interface MovementReportData {
   totalCostEgp: string;
   totalPaidEgp: string;
   netMovement: string;
+  totalCostRmb?: string;
+  totalPaidRmb?: string;
+  netMovementRmb?: string;
 }
 
 function formatCurrency(value: string | number) {
@@ -60,6 +64,19 @@ function formatCurrency(value: string | number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(num || 0);
+}
+
+function formatCurrencyWithLabel(value: string | number, label: string) {
+  return `${formatCurrency(value)} ${label}`;
+}
+
+function getCurrencyLabel(currency?: string) {
+  if (!currency) return "جنيه";
+  const normalized = currency.toLowerCase();
+  if (["rmb", "cny", "yuan", "رممبي"].some((code) => normalized.includes(code))) {
+    return "رممبي";
+  }
+  return "جنيه";
 }
 
 function formatDate(date: string | Date | null) {
@@ -178,7 +195,7 @@ export default function MovementReportPage() {
   const exportToCSV = () => {
     if (!report?.movements) return;
     
-    const headers = ["التاريخ", "رقم الشحنة", "اسم الشحنة", "الطرف", "نوع الحركة", "تحت حساب", "طريقة الدفع", "العملة", "المبلغ الأصلي", "المبلغ بالجنيه", "الاتجاه"];
+    const headers = ["التاريخ", "رقم الشحنة", "اسم الشحنة", "الطرف", "نوع الحركة", "تحت حساب", "طريقة الدفع", "العملة", "المبلغ الأصلي", "المبلغ بالجنيه", "المبلغ بالرممبي", "الاتجاه"];
     const rows = report.movements.map(m => [
       formatDate(m.date),
       m.shipmentCode,
@@ -190,6 +207,7 @@ export default function MovementReportPage() {
       m.originalCurrency || "",
       m.amountOriginal || "",
       m.amountEgp,
+      m.amountRmb || "",
       m.direction === 'cost' ? 'تكلفة' : 'مدفوع'
     ]);
     
@@ -398,17 +416,17 @@ export default function MovementReportPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <Card className="bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-red-600" />
-              إجمالي التكلفة
+              إجمالي التكلفة (جنيه)
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-red-600" data-testid="text-total-cost">
-              {formatCurrency(report?.totalCostEgp || "0")} جنيه
+              {formatCurrencyWithLabel(report?.totalCostEgp || "0", "جنيه")}
             </div>
           </CardContent>
         </Card>
@@ -416,12 +434,12 @@ export default function MovementReportPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <TrendingDown className="w-4 h-4 text-green-600" />
-              إجمالي المدفوع
+              إجمالي المدفوع (جنيه)
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-green-600" data-testid="text-total-paid">
-              {formatCurrency(report?.totalPaidEgp || "0")} جنيه
+              {formatCurrencyWithLabel(report?.totalPaidEgp || "0", "جنيه")}
             </div>
           </CardContent>
         </Card>
@@ -429,12 +447,51 @@ export default function MovementReportPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <ArrowUpDown className="w-4 h-4 text-amber-600" />
-              صافي الحركة
+              صافي الحركة (جنيه)
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-amber-600" data-testid="text-net-movement">
-              {formatCurrency(report?.netMovement || "0")} جنيه
+              {formatCurrencyWithLabel(report?.netMovement || "0", "جنيه")}
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-red-50/70 dark:bg-red-950/20 border-red-200/70 dark:border-red-900">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-red-600" />
+              إجمالي التكلفة (رممبي)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl font-bold text-red-600" data-testid="text-total-cost-rmb">
+              {formatCurrencyWithLabel(report?.totalCostRmb || "0", "رممبي")}
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-green-50/70 dark:bg-green-950/20 border-green-200/70 dark:border-green-900">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <TrendingDown className="w-4 h-4 text-green-600" />
+              إجمالي المدفوع (رممبي)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl font-bold text-green-600" data-testid="text-total-paid-rmb">
+              {formatCurrencyWithLabel(report?.totalPaidRmb || "0", "رممبي")}
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-amber-50/70 dark:bg-amber-950/20 border-amber-200/70 dark:border-amber-900">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <ArrowUpDown className="w-4 h-4 text-amber-600" />
+              صافي الحركة (رممبي)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl font-bold text-amber-600" data-testid="text-net-movement-rmb">
+              {formatCurrencyWithLabel(report?.netMovementRmb || "0", "رممبي")}
             </div>
           </CardContent>
         </Card>
@@ -459,60 +516,76 @@ export default function MovementReportPage() {
                   <TableHead className="text-right sticky top-0 bg-background">تحت حساب</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">طريقة الدفع</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">مرفق</TableHead>
+                  <TableHead className="text-right sticky top-0 bg-background">العملة</TableHead>
+                  <TableHead className="text-right sticky top-0 bg-background">المبلغ الأصلي</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">المبلغ بالجنيه</TableHead>
+                  <TableHead className="text-right sticky top-0 bg-background">المبلغ بالرممبي</TableHead>
                   <TableHead className="text-right sticky top-0 bg-background">الاتجاه</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {report?.movements?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center text-muted-foreground">
+                    <TableCell colSpan={12} className="text-center text-muted-foreground">
                       لا توجد حركات
                     </TableCell>
                   </TableRow>
                 ) : (
-                  report?.movements?.map((m, idx) => (
-                    <TableRow key={idx} data-testid={`row-movement-${idx}`}>
-                      <TableCell>{formatDate(m.date)}</TableCell>
-                      <TableCell className="font-mono">{m.shipmentCode}</TableCell>
-                      <TableCell>{m.partyName || "-"}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{m.movementType}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {m.costComponent ? (
-                          <Badge
-                            variant="outline"
-                            className={costComponentColors[m.costComponent] || ""}
-                          >
-                            {m.costComponent}
+                  report?.movements?.map((m, idx) => {
+                    const currencyLabel = getCurrencyLabel(m.originalCurrency);
+                    const originalAmountValue =
+                      m.amountOriginal ??
+                      (currencyLabel === "رممبي" ? m.amountRmb ?? "0" : m.amountEgp);
+                    return (
+                      <TableRow key={idx} data-testid={`row-movement-${idx}`}>
+                        <TableCell>{formatDate(m.date)}</TableCell>
+                        <TableCell className="font-mono">{m.shipmentCode}</TableCell>
+                        <TableCell>{m.partyName || "-"}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{m.movementType}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          {m.costComponent ? (
+                            <Badge
+                              variant="outline"
+                              className={costComponentColors[m.costComponent] || ""}
+                            >
+                              {m.costComponent}
+                            </Badge>
+                          ) : (
+                            "-"
+                          )}
+                        </TableCell>
+                        <TableCell>{m.paymentMethod || "-"}</TableCell>
+                        <TableCell>
+                          {m.direction === "payment" ? (
+                            <PaymentAttachmentIcon
+                              paymentId={m.paymentId}
+                              attachmentUrl={m.attachmentUrl}
+                              attachmentOriginalName={m.attachmentOriginalName}
+                            />
+                          ) : (
+                            "-"
+                          )}
+                        </TableCell>
+                        <TableCell>{currencyLabel}</TableCell>
+                        <TableCell className={m.direction === 'cost' ? 'text-red-600' : 'text-green-600'}>
+                          {formatCurrencyWithLabel(originalAmountValue, currencyLabel)}
+                        </TableCell>
+                        <TableCell className={m.direction === 'cost' ? 'text-red-600' : 'text-green-600'}>
+                          {formatCurrencyWithLabel(m.amountEgp, "جنيه")}
+                        </TableCell>
+                        <TableCell className={m.direction === 'cost' ? 'text-red-600' : 'text-green-600'}>
+                          {m.amountRmb ? formatCurrencyWithLabel(m.amountRmb, "رممبي") : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={m.direction === 'cost' ? 'destructive' : 'default'}>
+                            {m.direction === 'cost' ? 'تكلفة' : 'مدفوع'}
                           </Badge>
-                        ) : (
-                          "-"
-                        )}
-                      </TableCell>
-                      <TableCell>{m.paymentMethod || "-"}</TableCell>
-                      <TableCell>
-                        {m.direction === "payment" ? (
-                          <PaymentAttachmentIcon
-                            paymentId={m.paymentId}
-                            attachmentUrl={m.attachmentUrl}
-                            attachmentOriginalName={m.attachmentOriginalName}
-                          />
-                        ) : (
-                          "-"
-                        )}
-                      </TableCell>
-                      <TableCell className={m.direction === 'cost' ? 'text-red-600' : 'text-green-600'}>
-                        {formatCurrency(m.amountEgp)} جنيه
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={m.direction === 'cost' ? 'destructive' : 'default'}>
-                          {m.direction === 'cost' ? 'تكلفة' : 'مدفوع'}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
