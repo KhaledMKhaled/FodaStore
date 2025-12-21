@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import type { Shipment, ShippingCompany, Supplier } from "@shared/schema";
 import { costComponentColors } from "@/lib/colorMaps";
+import { formatCurrency, getCurrencyLabel } from "@/lib/currency";
 
 interface MovementReportData {
   movements: Array<{
@@ -57,27 +58,6 @@ interface MovementReportData {
   totalCostRmb?: string;
   totalPaidRmb?: string;
   netMovementRmb?: string;
-}
-
-function formatCurrency(value: string | number) {
-  const num = typeof value === "string" ? parseFloat(value) : value;
-  return new Intl.NumberFormat("ar-EG", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num || 0);
-}
-
-function formatCurrencyWithLabel(value: string | number, label: string) {
-  return `${formatCurrency(value)} ${label}`;
-}
-
-function getCurrencyLabel(currency?: string) {
-  if (!currency) return "جنيه";
-  const normalized = currency.toLowerCase();
-  if (["rmb", "cny", "yuan", "رممبي"].some((code) => normalized.includes(code))) {
-    return "رممبي";
-  }
-  return "جنيه";
 }
 
 function formatDate(date: string | Date | null) {
@@ -428,7 +408,7 @@ export default function MovementReportPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-red-600" data-testid="text-total-cost">
-              {formatCurrencyWithLabel(report?.totalCostEgp || "0", "جنيه")}
+              {formatCurrency(report?.totalCostEgp || "0", "EGP")}
             </div>
           </CardContent>
         </Card>
@@ -441,7 +421,7 @@ export default function MovementReportPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-green-600" data-testid="text-total-paid">
-              {formatCurrencyWithLabel(report?.totalPaidEgp || "0", "جنيه")}
+              {formatCurrency(report?.totalPaidEgp || "0", "EGP")}
             </div>
           </CardContent>
         </Card>
@@ -454,7 +434,7 @@ export default function MovementReportPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-amber-600" data-testid="text-net-movement">
-              {formatCurrencyWithLabel(report?.netMovement || "0", "جنيه")}
+              {formatCurrency(report?.netMovement || "0", "EGP")}
             </div>
           </CardContent>
         </Card>
@@ -467,7 +447,7 @@ export default function MovementReportPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-red-600" data-testid="text-total-cost-rmb">
-              {formatCurrencyWithLabel(report?.totalCostRmb || "0", "رممبي")}
+              {formatCurrency(report?.totalCostRmb || "0", "RMB")}
             </div>
           </CardContent>
         </Card>
@@ -480,7 +460,7 @@ export default function MovementReportPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-green-600" data-testid="text-total-paid-rmb">
-              {formatCurrencyWithLabel(report?.totalPaidRmb || "0", "رممبي")}
+              {formatCurrency(report?.totalPaidRmb || "0", "RMB")}
             </div>
           </CardContent>
         </Card>
@@ -493,7 +473,7 @@ export default function MovementReportPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-amber-600" data-testid="text-net-movement-rmb">
-              {formatCurrencyWithLabel(report?.netMovementRmb || "0", "رممبي")}
+              {formatCurrency(report?.netMovementRmb || "0", "RMB")}
             </div>
           </CardContent>
         </Card>
@@ -572,13 +552,13 @@ export default function MovementReportPage() {
                         </TableCell>
                         <TableCell>{currencyLabel}</TableCell>
                         <TableCell className={m.direction === 'cost' ? 'text-red-600' : 'text-green-600'}>
-                          {formatCurrencyWithLabel(originalAmountValue, currencyLabel)}
+                          {formatCurrency(originalAmountValue, currencyLabel)}
                         </TableCell>
                         <TableCell className={m.direction === 'cost' ? 'text-red-600' : 'text-green-600'}>
-                          {formatCurrencyWithLabel(m.amountEgp, "جنيه")}
+                          {formatCurrency(m.amountEgp, "EGP")}
                         </TableCell>
                         <TableCell className={m.direction === 'cost' ? 'text-red-600' : 'text-green-600'}>
-                          {m.amountRmb ? formatCurrencyWithLabel(m.amountRmb, "رممبي") : "-"}
+                          {m.amountRmb ? formatCurrency(m.amountRmb, "RMB") : "-"}
                         </TableCell>
                         <TableCell>
                           <Badge variant={m.direction === 'cost' ? 'destructive' : 'default'}>

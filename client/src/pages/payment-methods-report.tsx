@@ -24,20 +24,13 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Cell } from "recharts";
+import { formatCurrency } from "@/lib/currency";
 
 interface PaymentMethodData {
   paymentMethod: string;
   paymentCount: number;
   totalAmountEgp: string;
   totalAmountRmb: string;
-}
-
-function formatCurrency(value: string | number) {
-  const num = typeof value === "string" ? parseFloat(value) : value;
-  return new Intl.NumberFormat("ar-EG", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num || 0);
 }
 
 const methodIcons: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -83,7 +76,7 @@ export default function PaymentMethodsReportPage() {
   const exportToCSV = () => {
     if (!report) return;
     
-    const headers = ["طريقة الدفع", "عدد الدفعات", "إجمالي المبلغ (جنيه)", "إجمالي المبلغ (يوان)"];
+    const headers = ["طريقة الدفع", "عدد الدفعات", "إجمالي المبلغ (جنيه)", "إجمالي المبلغ (رممبي)"];
     const rows = report.map(r => [
       r.paymentMethod,
       r.paymentCount.toString(),
@@ -196,13 +189,13 @@ export default function PaymentMethodsReportPage() {
             <div className="flex justify-between items-center p-3 bg-primary/5 rounded-md">
               <span className="text-muted-foreground">إجمالي المدفوع بالجنيه</span>
               <span className="text-xl font-bold text-primary" data-testid="text-total-amount-egp">
-                {formatCurrency(totalAmountEgp)} جنيه
+                {formatCurrency(totalAmountEgp, "EGP")}
               </span>
             </div>
             <div className="flex justify-between items-center p-3 bg-primary/5 rounded-md">
-              <span className="text-muted-foreground">إجمالي المدفوع باليوان</span>
+              <span className="text-muted-foreground">إجمالي المدفوع بالرممبي</span>
               <span className="text-xl font-bold text-primary" data-testid="text-total-amount-rmb">
-                {formatCurrency(totalAmountRmb)} يوان
+                {formatCurrency(totalAmountRmb, "RMB")}
               </span>
             </div>
           </CardContent>
@@ -221,7 +214,7 @@ export default function PaymentMethodsReportPage() {
                 <XAxis type="number" hide />
                 <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
                 <RechartsTooltip
-                  formatter={(value: number) => [`${formatCurrency(value)} جنيه`, "المبلغ"]}
+                  formatter={(value: number) => [formatCurrency(value, "EGP"), "المبلغ"]}
                   contentStyle={{ direction: "rtl" }}
                 />
                 <Bar dataKey="value" radius={[0, 4, 4, 0]}>
@@ -239,7 +232,7 @@ export default function PaymentMethodsReportPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <HelpCircle className="w-5 h-5" />
-            الرسم البياني (يوان)
+            الرسم البياني (رممبي)
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -248,7 +241,7 @@ export default function PaymentMethodsReportPage() {
               <XAxis type="number" hide />
               <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
               <RechartsTooltip
-                formatter={(value: number) => [`${formatCurrency(value)} يوان`, "المبلغ"]}
+                formatter={(value: number) => [formatCurrency(value, "RMB"), "المبلغ"]}
                 contentStyle={{ direction: "rtl" }}
               />
               <Bar dataKey="value" radius={[0, 4, 4, 0]}>
@@ -275,9 +268,9 @@ export default function PaymentMethodsReportPage() {
                 <TableHead className="text-right">طريقة الدفع</TableHead>
                 <TableHead className="text-right">إجمالي عدد الدفعات</TableHead>
                 <TableHead className="text-right">إجمالي المدفوع (جنيه)</TableHead>
-                <TableHead className="text-right">إجمالي المدفوع (يوان)</TableHead>
+                <TableHead className="text-right">إجمالي المدفوع (رممبي)</TableHead>
                 <TableHead className="text-right">نسبة من إجمالي الجنيه</TableHead>
-                <TableHead className="text-right">نسبة من إجمالي اليوان</TableHead>
+                <TableHead className="text-right">نسبة من إجمالي الرممبي</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -306,10 +299,10 @@ export default function PaymentMethodsReportPage() {
                       </TableCell>
                       <TableCell>{r.paymentCount} دفعة</TableCell>
                       <TableCell className="text-green-600 font-medium">
-                        {formatCurrency(r.totalAmountEgp)} جنيه
+                        {formatCurrency(r.totalAmountEgp, "EGP")}
                       </TableCell>
                       <TableCell className="text-blue-600 font-medium">
-                        {formatCurrency(r.totalAmountRmb)} يوان
+                        {formatCurrency(r.totalAmountRmb, "RMB")}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">

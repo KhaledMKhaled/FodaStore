@@ -27,6 +27,7 @@ import {
   ArrowUpDown,
 } from "lucide-react";
 import type { Supplier } from "@shared/schema";
+import { formatCurrency } from "@/lib/currency";
 
 interface SupplierBalance {
   supplierId: number;
@@ -61,14 +62,6 @@ interface SupplierStatement {
     attachmentUrl?: string | null;
     attachmentOriginalName?: string | null;
   }>;
-}
-
-function formatCurrency(value: string | number) {
-  const num = typeof value === "string" ? parseFloat(value) : value;
-  return new Intl.NumberFormat("ar-EG", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num || 0);
 }
 
 function formatDate(date: string | Date | null) {
@@ -134,7 +127,7 @@ export default function SupplierBalancesPage() {
       return (
         <Badge variant="destructive" className="gap-1">
           <TrendingUp className="w-3 h-3" />
-          فلوس عليك: {formatCurrency(balanceNum)} {currencyLabel}
+          فلوس عليك: {formatCurrency(balanceNum, currencyLabel)}
         </Badge>
       );
     }
@@ -142,7 +135,7 @@ export default function SupplierBalancesPage() {
       return (
         <Badge variant="default" className="gap-1 bg-green-600">
           <TrendingDown className="w-3 h-3" />
-          فلوس ليك: {formatCurrency(Math.abs(balanceNum))} {currencyLabel}
+          فلوس ليك: {formatCurrency(Math.abs(balanceNum), currencyLabel)}
         </Badge>
       );
     }
@@ -155,8 +148,8 @@ export default function SupplierBalancesPage() {
 
   const renderAmounts = (rmb?: string, egp?: string) => (
     <div className="flex flex-col gap-1">
-      <span>{rmb ? `${formatCurrency(rmb)} رممبي` : "-"}</span>
-      <span>{egp ? `${formatCurrency(egp)} جنيه` : "-"}</span>
+      <span>{rmb ? formatCurrency(rmb, "RMB") : "-"}</span>
+      <span>{egp ? formatCurrency(egp, "EGP") : "-"}</span>
     </div>
   );
 
@@ -280,13 +273,13 @@ export default function SupplierBalancesPage() {
                 balances?.map((balance) => (
                   <TableRow key={balance.supplierId} data-testid={`row-supplier-${balance.supplierId}`}>
                     <TableCell className="font-medium">{balance.supplierName}</TableCell>
-                    <TableCell>{formatCurrency(balance.totalCostRmb)} رممبي</TableCell>
-                    <TableCell>{formatCurrency(balance.totalCostEgp)} جنيه</TableCell>
+                    <TableCell>{formatCurrency(balance.totalCostRmb, "RMB")}</TableCell>
+                    <TableCell>{formatCurrency(balance.totalCostEgp, "EGP")}</TableCell>
                     <TableCell className="text-green-600">
-                      {formatCurrency(balance.totalPaidRmb)} رممبي
+                      {formatCurrency(balance.totalPaidRmb, "RMB")}
                     </TableCell>
                     <TableCell className="text-green-600">
-                      {formatCurrency(balance.totalPaidEgp)} جنيه
+                      {formatCurrency(balance.totalPaidEgp, "EGP")}
                     </TableCell>
                     <TableCell>
                       {getBalanceStatusBadge(
