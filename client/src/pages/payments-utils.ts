@@ -20,6 +20,24 @@ export const canAutoAllocatePayment = ({
 }: AutoAllocationVisibilityInput): boolean =>
   shouldShowAutoAllocationSection(rest) && paymentCurrency === "RMB";
 
+type SupplierGoodsSummaryInput = {
+  costComponent: string;
+  partyType: "supplier" | "shipping_company";
+  shipmentId: number | null;
+  partyId: number | null;
+};
+
+export const shouldUseSupplierGoodsSummary = ({
+  costComponent,
+  partyType,
+  shipmentId,
+  partyId,
+}: SupplierGoodsSummaryInput): boolean =>
+  costComponent === "تكلفة البضاعة" &&
+  partyType === "supplier" &&
+  Boolean(shipmentId) &&
+  Boolean(partyId);
+
 export type PaymentPayloadInput = {
   selectedShipmentId: number;
   partyType: "supplier" | "shipping_company" | null;

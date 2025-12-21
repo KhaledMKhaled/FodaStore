@@ -5,6 +5,7 @@ import {
   buildPaymentFormData,
   canAutoAllocatePayment,
   shouldShowAutoAllocationSection,
+  shouldUseSupplierGoodsSummary,
 } from "./payments-utils";
 
 test("auto allocation visibility rules", () => {
@@ -88,4 +89,46 @@ test("buildPaymentFormData includes autoAllocate when enabled", () => {
 
   const entries = new Map(payload.entries());
   assert.equal(entries.get("autoAllocate"), "true");
+});
+
+test("supplier goods summary visibility requires supplier goods selection", () => {
+  assert.equal(
+    shouldUseSupplierGoodsSummary({
+      costComponent: "تكلفة البضاعة",
+      partyType: "supplier",
+      shipmentId: 55,
+      partyId: 12,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldUseSupplierGoodsSummary({
+      costComponent: "تكلفة البضاعة",
+      partyType: "shipping_company",
+      shipmentId: 55,
+      partyId: 12,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldUseSupplierGoodsSummary({
+      costComponent: "الشحن",
+      partyType: "supplier",
+      shipmentId: 55,
+      partyId: 12,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldUseSupplierGoodsSummary({
+      costComponent: "تكلفة البضاعة",
+      partyType: "supplier",
+      shipmentId: null,
+      partyId: 12,
+    }),
+    false,
+  );
 });
