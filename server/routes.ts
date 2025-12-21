@@ -54,6 +54,143 @@ const uploadItemImage = multer({
 
 const MAX_PAYMENT_ATTACHMENT_SIZE = 2 * 1024 * 1024;
 
+type PartyPaymentSummary = {
+  currency: "RMB" | "EGP";
+  totalAllowed: number;
+  paidSoFar: number;
+  remainingBefore: number;
+};
+
+type PartyPaymentSummaryInput = {
+  shipmentId: number;
+  partyType: "supplier" | "shipping_company";
+  partyId: number;
+  component: string;
+};
+
+async function buildPartyPaymentSummary(
+  storage: Pick<
+    IStorage,
+    | "getShipment"
+    | "getShipmentPayments"
+    | "getShipmentItems"
+    | "getPaymentAllocationsByShipmentId"
+  >,
+  input: PartyPaymentSummaryInput,
+): Promise<PartyPaymentSummary> {
+  const { shipmentId, partyType, partyId, component } = input;
+  const shipment = await storage.getShipment(shipmentId);
+  if (!shipment) {
+    throw new ApiError("SHIPMENT_NOT_FOUND", undefined, 404, { shipmentId });
+  }
+
+  const payments = await storage.getShipmentPayments(shipmentId);
+  const componentCurrency =
+    component === "الجمرك" || component === "التخريج" ? "EGP" : "RMB";
+
+  let totalAllowed = 0;
+  let paidSoFar = 0;
+
+  if (partyType === "supplier") {
+    const [items, allocations] = await Promise.all([
+      storage.getShipmentItems(shipmentId),
+      storage.getPaymentAllocationsByShipmentId(shipmentId),
+    ]);
+
+    totalAllowed = items.reduce((sum, item) => {
+      if (item.supplierId !== partyId) return sum;
+      return sum + parseAmountOrZero(item.totalPurchaseCostRmb);
+    }, 0);
+
+    const supplierDirectPaidRmb = payments.reduce((sum, payment) => {
+      if (
+        payment.partyType !== "supplier" ||
+        payment.partyId !== partyId ||
+        payment.costComponent !== PURCHASE_COST_COMPONENT
+      ) {
+        return sum;
+      }
+
+      if (payment.paymentCurrency === "RMB") {
+        return sum + parseAmountOrZero(payment.amountOriginal);
+      }
+
+      if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
+        const rate = parseAmountOrZero(payment.exchangeRateToEgp);
+        if (rate > 0) {
+          return sum + parseAmountOrZero(payment.amountEgp) / rate;
+        }
+      }
+
+      return sum;
+    }, 0);
+
+    const supplierAllocatedPaidRmb = allocations.reduce((sum, allocation) => {
+      if (
+        allocation.supplierId !== partyId ||
+        allocation.component !== PURCHASE_COST_COMPONENT ||
+        allocation.currency !== "RMB"
+      ) {
+        return sum;
+      }
+
+      return sum + parseAmountOrZero(allocation.allocatedAmount);
+    }, 0);
+
+    paidSoFar = supplierDirectPaidRmb + supplierAllocatedPaidRmb;
+  }
+
+  if (partyType === "shipping_company") {
+    const goodsTotalRmbGross = parseAmountOrZero(shipment.purchaseCostRmb || "0");
+    const partialDiscountRmb = parseAmountOrZero(shipment.partialDiscountRmb || "0");
+    const goodsTotalRmb = Math.max(0, goodsTotalRmbGross - partialDiscountRmb);
+
+    const componentTotals: Record<string, number> = {
+      "تكلفة البضاعة": goodsTotalRmb,
+      "الشحن": parseAmountOrZero(shipment.shippingCostRmb || "0"),
+      "العمولة": parseAmountOrZero(shipment.commissionCostRmb || "0"),
+      "الجمرك": parseAmountOrZero(shipment.customsCostEgp || "0"),
+      "التخريج": parseAmountOrZero(shipment.takhreegCostEgp || "0"),
+    };
+
+    totalAllowed = componentTotals[component] ?? 0;
+
+    paidSoFar = payments.reduce((sum, payment) => {
+      if (
+        payment.partyType !== "shipping_company" ||
+        payment.partyId !== partyId ||
+        payment.costComponent !== component
+      ) {
+        return sum;
+      }
+
+      if (componentCurrency === "RMB") {
+        if (payment.paymentCurrency === "RMB") {
+          return sum + parseAmountOrZero(payment.amountOriginal);
+        }
+        if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
+          const rate = parseAmountOrZero(payment.exchangeRateToEgp);
+          if (rate > 0) {
+            return sum + parseAmountOrZero(payment.amountEgp) / rate;
+          }
+        }
+        return sum;
+      }
+
+      return sum + parseAmountOrZero(payment.amountEgp);
+    }, 0);
+  }
+
+  const remainingBefore = Math.max(0, totalAllowed - paidSoFar);
+
+  return {
+    currency: componentCurrency,
+    totalAllowed,
+    paidSoFar,
+    remainingBefore,
+  };
+}
+
 const paymentAttachmentStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     const uploadDir = "uploads/payments";
@@ -131,7 +268,14 @@ type RouteDependencies = {
 type CreatePaymentHandlerDeps = {
   storage: Pick<
     IStorage,
-    "createPayment" | "getSupplier" | "getShippingCompany" | "getShipmentSupplierContext"
+    | "createPayment"
+    | "getSupplier"
+    | "getShippingCompany"
+    | "getShipmentSupplierContext"
+    | "getShipment"
+    | "getShipmentPayments"
+    | "getShipmentItems"
+    | "getPaymentAllocationsByShipmentId"
   >;
   logAuditEvent: (event: Parameters<typeof logAuditEvent>[0]) => void;
 };
@@ -324,6 +468,36 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         amountOriginal: originalAmount,
         exchangeRateToEgp: paymentCurrency === "RMB" ? parseFloat(exchangeRateToEgp) : null,
       });
+
+      if (resolvedPartyType && resolvedPartyId && costComponent) {
+        const summary = await buildPartyPaymentSummary(deps.storage, {
+          shipmentId: parsedShipmentId,
+          partyType: resolvedPartyType,
+          partyId: resolvedPartyId,
+          component: costComponent,
+        });
+
+        if (summary.remainingBefore <= 0) {
+          return res.status(400).json({
+            message: "لا يوجد متبقي مسموح للدفع",
+          });
+        }
+
+        const amountInComponentCurrency =
+          summary.currency === "RMB"
+            ? paymentCurrency === "RMB"
+              ? originalAmount
+              : normalizedAmounts.exchangeRateToEgp
+                ? normalizedAmounts.amountEgp / normalizedAmounts.exchangeRateToEgp
+                : 0
+            : normalizedAmounts.amountEgp;
+
+        if (amountInComponentCurrency > summary.remainingBefore + 0.0001) {
+          return res.status(400).json({
+            message: "المبلغ أكبر من المتبقي المسموح",
+          });
+        }
+      }
 
       const shouldAutoAllocate =
         autoAllocate === true || autoAllocate === "true" || autoAllocate === "1";
@@ -1103,9 +1277,77 @@ export async function registerRoutes(
           return res.status(400).json({ message: "البند غير صالح" });
         }
 
-        const shipment = await routeStorage.getShipment(shipmentId);
-        if (!shipment) {
-          return res.status(404).json({ message: "الشحنة غير موجودة" });
+        const { shipmentSuppliers, shippingCompanyId } =
+          await routeStorage.getShipmentSupplierContext(shipmentId);
+
+        if (partyType === "supplier") {
+          if (component !== PURCHASE_COST_COMPONENT) {
+            return res.status(400).json({ message: "المكون غير صالح للمورد" });
+          }
+          if (!shipmentSuppliers.includes(partyId)) {
+            return res.status(400).json({ message: "المورد غير مرتبط بهذه الشحنة" });
+          }
+        }
+
+        if (partyType === "shipping_company") {
+          if (shippingCompanyId !== partyId) {
+            return res.status(400).json({ message: "شركة الشحن غير مرتبطة بهذه الشحنة" });
+          }
+        }
+
+        const { currency, totalAllowed, paidSoFar, remainingBefore } =
+          await buildPartyPaymentSummary(routeStorage, {
+            shipmentId,
+            partyType: partyType as "supplier" | "shipping_company",
+            partyId,
+            component,
+          });
+
+        res.json({
+          shipmentId,
+          partyType,
+          partyId,
+          component,
+          currency,
+          totalAllowed: totalAllowed.toFixed(2),
+          paidSoFar: paidSoFar.toFixed(2),
+          remainingBefore: remainingBefore.toFixed(2),
+        });
+      } catch (error) {
+        if (error instanceof ApiError) {
+          return res.status(error.status).json({ message: error.message });
+        }
+        console.error("Error fetching party payment summary:", error);
+        res.status(500).json({ message: "خطأ في جلب ملخص الدفعات" });
+      }
+    },
+  );
+
+  app.get(
+    "/api/shipments/:shipmentId/payment-remaining",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const shipmentId = parseInt(req.params.shipmentId);
+        const partyType = req.query.partyType as string | undefined;
+        const partyId = req.query.partyId ? Number(req.query.partyId) : null;
+        const component = req.query.component as string | undefined;
+
+        if (Number.isNaN(shipmentId) || !partyType || !component || !partyId) {
+          return res.status(400).json({
+            message: "بيانات غير صالحة",
+          });
+        }
+
+        if (partyType !== "supplier" && partyType !== "shipping_company") {
+          return res.status(400).json({ message: "نوع الطرف غير صالح" });
+        }
+
+        if (
+          component !== PURCHASE_COST_COMPONENT &&
+          !SHIPPING_COST_COMPONENTS.has(component)
+        ) {
+          return res.status(400).json({ message: "البند غير صالح" });
         }
 
         const { shipmentSuppliers, shippingCompanyId } =
@@ -1126,124 +1368,26 @@ export async function registerRoutes(
           }
         }
 
-        const payments = await routeStorage.getShipmentPayments(shipmentId);
-        const componentCurrency =
-          component === "الجمرك" || component === "التخريج" ? "EGP" : "RMB";
-
-        let totalAllowed = 0;
-        let paidSoFar = 0;
-
-        if (partyType === "supplier") {
-          if (component !== PURCHASE_COST_COMPONENT) {
-            return res.status(400).json({
-              message: "المكون غير صالح للمورد",
-            });
-          }
-
-          const [items, allocations] = await Promise.all([
-            routeStorage.getShipmentItems(shipmentId),
-            routeStorage.getPaymentAllocationsByShipmentId(shipmentId),
-          ]);
-
-          totalAllowed = items.reduce((sum, item) => {
-            if (item.supplierId !== partyId) return sum;
-            return sum + parseAmountOrZero(item.totalPurchaseCostRmb);
-          }, 0);
-
-          const supplierDirectPaidRmb = payments.reduce((sum, payment) => {
-            if (
-              payment.partyType !== "supplier" ||
-              payment.partyId !== partyId ||
-              payment.costComponent !== PURCHASE_COST_COMPONENT
-            ) {
-              return sum;
-            }
-
-            if (payment.paymentCurrency === "RMB") {
-              return sum + parseAmountOrZero(payment.amountOriginal);
-            }
-
-            if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
-              const rate = parseAmountOrZero(payment.exchangeRateToEgp);
-              if (rate > 0) {
-                return sum + parseAmountOrZero(payment.amountEgp) / rate;
-              }
-            }
-
-            return sum;
-          }, 0);
-
-          const supplierAllocatedPaidRmb = allocations.reduce((sum, allocation) => {
-            if (
-              allocation.supplierId !== partyId ||
-              allocation.component !== PURCHASE_COST_COMPONENT ||
-              allocation.currency !== "RMB"
-            ) {
-              return sum;
-            }
-
-            return sum + parseAmountOrZero(allocation.allocatedAmount);
-          }, 0);
-
-          paidSoFar = supplierDirectPaidRmb + supplierAllocatedPaidRmb;
-        }
-
-        if (partyType === "shipping_company") {
-          const goodsTotalRmbGross = parseAmountOrZero(shipment.purchaseCostRmb || "0");
-          const partialDiscountRmb = parseAmountOrZero(shipment.partialDiscountRmb || "0");
-          const goodsTotalRmb = Math.max(0, goodsTotalRmbGross - partialDiscountRmb);
-
-          const componentTotals: Record<string, number> = {
-            "تكلفة البضاعة": goodsTotalRmb,
-            "الشحن": parseAmountOrZero(shipment.shippingCostRmb || "0"),
-            "العمولة": parseAmountOrZero(shipment.commissionCostRmb || "0"),
-            "الجمرك": parseAmountOrZero(shipment.customsCostEgp || "0"),
-            "التخريج": parseAmountOrZero(shipment.takhreegCostEgp || "0"),
-          };
-
-          totalAllowed = componentTotals[component] ?? 0;
-
-          paidSoFar = payments.reduce((sum, payment) => {
-            if (
-              payment.partyType !== "shipping_company" ||
-              payment.partyId !== partyId ||
-              payment.costComponent !== component
-            ) {
-              return sum;
-            }
-
-            if (componentCurrency === "RMB") {
-              if (payment.paymentCurrency === "RMB") {
-                return sum + parseAmountOrZero(payment.amountOriginal);
-              }
-              if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
-                const rate = parseAmountOrZero(payment.exchangeRateToEgp);
-                if (rate > 0) {
-                  return sum + parseAmountOrZero(payment.amountEgp) / rate;
-                }
-              }
-              return sum;
-            }
-
-            return sum + parseAmountOrZero(payment.amountEgp);
-          }, 0);
-        }
-
-        const remainingBefore = Math.max(0, totalAllowed - paidSoFar);
+        const { currency, remainingBefore, totalAllowed, paidSoFar } =
+          await buildPartyPaymentSummary(routeStorage, {
+            shipmentId,
+            partyType: partyType as "supplier" | "shipping_company",
+            partyId,
+            component,
+          });
 
         res.json({
-          shipmentId,
-          partyType,
-          partyId,
-          component,
-          currency: componentCurrency,
+          currency,
+          remainingBefore: remainingBefore.toFixed(2),
           totalAllowed: totalAllowed.toFixed(2),
           paidSoFar: paidSoFar.toFixed(2),
-          remainingBefore: remainingBefore.toFixed(2),
         });
       } catch (error) {
-        console.error("Error fetching party payment summary:", error);
-        res.status(500).json({ message: "خطأ في جلب ملخص الدفعات" });
+        if (error instanceof ApiError) {
+          return res.status(error.status).json({ message: error.message });
+        }
+        console.error("Error fetching payment remaining:", error);
+        res.status(500).json({ message: "خطأ في جلب المتبقي للدفع" });
       }
     },
   );

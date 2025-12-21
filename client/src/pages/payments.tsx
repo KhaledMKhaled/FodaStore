@@ -231,15 +231,11 @@ interface AllocationPreview {
   }>;
 }
 
-interface PartyPaymentSummary {
-  shipmentId: number;
-  partyType: "supplier" | "shipping_company";
-  partyId: number;
-  component: string;
+interface PaymentRemaining {
   currency: "RMB" | "EGP";
-  totalAllowed: string;
-  paidSoFar: string;
   remainingBefore: string;
+  totalAllowed?: string;
+  paidSoFar?: string;
 }
 
 interface PaymentSummarySnapshot {
@@ -396,29 +392,29 @@ export default function Payments() {
     { id: "review", title: "مراجعة وتأكيد" },
   ];
 
-  const shouldFetchPartySummary =
+  const shouldFetchPaymentRemaining =
     !!selectedShipmentId &&
     !!partyId &&
     !!costComponent &&
     (partyType === "shipping_company" || costComponent === "تكلفة البضاعة");
 
-  const partySummaryQueryKey = shouldFetchPartySummary
+  const paymentRemainingQueryKey = shouldFetchPaymentRemaining
     ? [
         "/api/shipments",
         selectedShipmentId,
-        `party-payment-summary?partyType=${partyType}&partyId=${partyId}&component=${encodeURIComponent(
+        `payment-remaining?partyType=${partyType}&partyId=${partyId}&component=${encodeURIComponent(
           costComponent,
         )}`,
       ]
     : null;
 
   const {
-    data: partyPaymentSummary,
+    data: paymentRemaining,
     isFetching: loadingPartyPaymentSummary,
     error: partyPaymentSummaryError,
-  } = useQuery<PartyPaymentSummary>({
-    queryKey: partySummaryQueryKey ?? ["/api/shipments", "party-summary", "disabled"],
-    enabled: Boolean(partySummaryQueryKey),
+  } = useQuery<PaymentRemaining>({
+    queryKey: paymentRemainingQueryKey ?? ["/api/shipments", "payment-remaining", "disabled"],
+    enabled: Boolean(paymentRemainingQueryKey),
   });
 
   useEffect(() => {
@@ -821,7 +817,7 @@ export default function Payments() {
     const pendingPartyLabel = `${partyType === "supplier" ? "مورد" : "شركة شحن"}${
       selectedPartyName ? ` - ${selectedPartyName}` : ""
     }`;
-    const allowanceValue = remainingAfter;
+    const allowanceValue = remainingDisplay;
     const allowanceCurrencyLabel = partyCurrencyLabel || (paymentCurrency === "RMB" ? rmbLabel : egpLabel);
 
     pendingSummaryRef.current = {
@@ -872,30 +868,19 @@ export default function Payments() {
   const currencyDisplayLabel = paymentCurrency === "RMB" ? "رممبي" : "جنيه";
 
   const partySummaryValues = useMemo(() => {
-    if (!partyPaymentSummary) return null;
-    const totalAllowed = parseFloat(partyPaymentSummary.totalAllowed);
-    const paidSoFar = parseFloat(partyPaymentSummary.paidSoFar);
-    const remainingBefore = parseFloat(partyPaymentSummary.remainingBefore);
+    if (!paymentRemaining) return null;
+    const remainingBefore = parseFloat(paymentRemaining.remainingBefore);
 
     return {
-      currency: partyPaymentSummary.currency,
-      totalAllowed: Number.isFinite(totalAllowed) ? totalAllowed : 0,
-      paidSoFar: Number.isFinite(paidSoFar) ? paidSoFar : 0,
+      currency: paymentRemaining.currency,
       remainingBefore: Number.isFinite(remainingBefore) ? remainingBefore : 0,
     };
-  }, [partyPaymentSummary]);
-
-  const paidAfter = useMemo(() => {
-    const paid = partySummaryValues?.paidSoFar ?? 0;
-    return paid + amountEntered;
-  }, [amountEntered, partySummaryValues?.paidSoFar]);
-
-  const remainingAfter = useMemo(() => {
-    const totalAllowed = partySummaryValues?.totalAllowed ?? 0;
-    return Math.max(0, totalAllowed - paidAfter);
-  }, [paidAfter, partySummaryValues?.totalAllowed]);
+  }, [paymentRemaining]);
 
   const remainingBeforeValue = partySummaryValues?.remainingBefore ?? 0;
+  const totalDisplay = remainingBeforeValue;
+  const paidDisplay = amountEntered;
+  const remainingDisplay = Math.max(0, remainingBeforeValue - amountEntered);
 
   const partyCurrencyLabel =
     partySummaryValues?.currency === "RMB" ? rmbLabel : egpLabel;
@@ -933,7 +918,7 @@ export default function Payments() {
       selectedPartyName ? ` - ${selectedPartyName}` : ""
     }`;
 
-    const allowanceValue = remainingAfter;
+    const allowanceValue = remainingDisplay;
     const allowanceCurrencyLabel =
       partyCurrencyLabel || (paymentCurrency === "RMB" ? rmbLabel : egpLabel);
 
@@ -970,7 +955,7 @@ export default function Payments() {
     attachmentFile,
     partyCurrencyLabel,
     partySummaryValues,
-    remainingAfter,
+    remainingDisplay,
     rmbLabel,
     egpLabel,
   ]);
@@ -1039,8 +1024,8 @@ export default function Payments() {
     </Card>
   );
 
-  const componentBreakdown =
-    costComponent && shouldFetchPartySummary && (
+  const paymentPreviewBlock =
+    costComponent && shouldFetchPaymentRemaining && (
       <div className="mt-2 space-y-2 rounded-md bg-muted/50 p-3 text-sm">
         {loadingPartyPaymentSummary && (
           <p className="text-xs text-muted-foreground">جاري تحميل ملخص الطرف...</p>
@@ -1055,19 +1040,19 @@ export default function Payments() {
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">الإجمالي</span>
               <span className="font-semibold">
-                {formatCurrency(partySummaryValues.totalAllowed)} {partyCurrencyLabel}
+                {formatCurrency(totalDisplay)} {partyCurrencyLabel}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">المدفوع</span>
               <span className="font-semibold text-green-600">
-                {formatCurrency(paidAfter)} {partyCurrencyLabel}
+                {formatCurrency(paidDisplay)} {partyCurrencyLabel}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">المتبقي</span>
               <span className="font-semibold text-amber-600">
-                {formatCurrency(remainingAfter)} {partyCurrencyLabel}
+                {formatCurrency(remainingDisplay)} {partyCurrencyLabel}
               </span>
             </div>
           </>
@@ -1593,7 +1578,7 @@ export default function Payments() {
                             )}
                           </div>
 
-                          {componentBreakdown}
+                          {paymentPreviewBlock}
 
                           {showAutoAllocationSection && (
                             <div className="space-y-3 rounded-md border border-border p-3">
@@ -1785,6 +1770,7 @@ export default function Payments() {
                         </p>
                       </CardHeader>
                       <CardContent className="space-y-4">
+                        {paymentPreviewBlock}
                         <PaymentSummaryReceipt data={reviewReceiptData} />
                         {renderSummaryCard("ملخص المراجعة")}
 

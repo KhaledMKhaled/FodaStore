@@ -43,6 +43,10 @@ function createHandler(
     getShipmentSupplierContext?: (...args: any[]) => any;
     getSupplier?: (...args: any[]) => any;
     getShippingCompany?: (...args: any[]) => any;
+    getShipment?: (...args: any[]) => any;
+    getShipmentPayments?: (...args: any[]) => any;
+    getShipmentItems?: (...args: any[]) => any;
+    getPaymentAllocationsByShipmentId?: (...args: any[]) => any;
   } = {},
 ) {
   const storage = {
@@ -56,6 +60,11 @@ function createHandler(
       })),
     getSupplier: overrides.getSupplier || (async (id: number) => ({ id })),
     getShippingCompany: overrides.getShippingCompany || (async (id: number) => ({ id })),
+    getShipment: overrides.getShipment || (async (id: number) => ({ id })),
+    getShipmentPayments: overrides.getShipmentPayments || (async () => []),
+    getShipmentItems: overrides.getShipmentItems || (async () => []),
+    getPaymentAllocationsByShipmentId:
+      overrides.getPaymentAllocationsByShipmentId || (async () => []),
   } as any;
 
   const handler = createPaymentHandler({ storage, logAuditEvent: () => {} });
@@ -82,6 +91,10 @@ test("POST /api/payments writes an audit log entry", async () => {
     })),
     getSupplier: mock.fn(async (id) => ({ id })),
     getShippingCompany: mock.fn(async (id) => ({ id })),
+    getShipment: mock.fn(async (id) => ({ id })),
+    getShipmentPayments: mock.fn(async () => []),
+    getShipmentItems: mock.fn(async () => []),
+    getPaymentAllocationsByShipmentId: mock.fn(async () => []),
   };
 
   const auditLogger = mock.fn();
