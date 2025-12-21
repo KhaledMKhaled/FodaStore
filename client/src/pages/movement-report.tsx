@@ -45,6 +45,7 @@ interface MovementReportData {
     amountEgp: string;
     amountRmb?: string;
     direction: 'cost' | 'payment';
+    isAllocation?: boolean;
     userName?: string;
     paymentId?: number;
     attachmentUrl?: string | null;
@@ -92,6 +93,7 @@ const movementTypes = [
   { value: "جمرك", label: "جمرك" },
   { value: "تخريج", label: "تخريج" },
   { value: "دفعة", label: "دفعة" },
+  { value: "تسوية/توزيع تكلفة", label: "تسوية/توزيع تكلفة" },
 ];
 
 const costComponents = [
