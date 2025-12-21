@@ -57,15 +57,15 @@ export function PaymentSummaryReceipt({
     <div
       dir="rtl"
       className={cn(
-        "space-y-4 rounded-lg border p-4 text-sm",
+        "min-w-0 space-y-4 rounded-lg border p-4 text-sm",
         variant === "export" ? "bg-white text-slate-900 border-slate-200" : "bg-background",
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center justify-between gap-3">
         <h3 className="text-base font-semibold">ملخص الدفعة</h3>
         {data.referenceNumber && data.referenceNumber !== "-" && (
-          <span className="rounded-md border px-2 py-1 text-xs font-mono">
+          <span className="max-w-[60%] break-words rounded-md border px-2 py-1 text-xs font-mono">
             {data.referenceNumber}
           </span>
         )}
