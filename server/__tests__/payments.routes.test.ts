@@ -646,3 +646,36 @@ test("returns 404 for missing shipments and 400 for invalid dates", async () => 
 
   httpServer.close();
 });
+
+test("creates payment with shipping company party details", async () => {
+  storage.seedShipments([
+    shipmentFixture(10, { purchaseCostEgp: "150", shippingCompanyId: 20 }),
+  ]);
+
+  const { httpServer, baseUrl } = await createTestServer();
+
+  const response = await fetch(`${baseUrl}/api/payments`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({
+      shipmentId: 10,
+      paymentDate: "2024-03-05",
+      paymentCurrency: "EGP",
+      amountOriginal: "50",
+      amountEgp: "50",
+      costComponent: "الشحن",
+      paymentMethod: "نقدي",
+      cashReceiverName: "Mona",
+      partyType: "shipping_company",
+      partyId: 20,
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as any;
+  assert.equal(body.ok, true);
+  assert.equal(body.data.partyType, "shipping_company");
+  assert.equal(body.data.partyId, 20);
+
+  httpServer.close();
+});
