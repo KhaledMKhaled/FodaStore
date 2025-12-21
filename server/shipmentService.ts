@@ -156,8 +156,13 @@ export async function createShipmentWithItems(
           purchaseRmbToEgpRate: purchaseRate.toFixed(4),
           customsCostEgp: totals.customsCostEgp.toFixed(2),
           takhreegCostEgp: totals.takhreegCostEgp.toFixed(2),
+          commissionCostRmb: "0.00",
+          commissionCostEgp: "0.00",
+          shippingCostRmb: "0.00",
+          shippingCostEgp: "0.00",
           finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
           balanceEgp: finalTotalCostEgp.toFixed(2),
+          totalPaidEgp: "0.00",
           updatedAt: new Date(),
         })
         .where(eq(shipments.id, createdShipment.id))
