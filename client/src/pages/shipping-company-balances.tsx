@@ -33,7 +33,9 @@ interface ShippingCompanyBalance {
   shippingCompanyName: string;
   totalCostEgp: string;
   totalPaidEgp: string;
+  totalPaidRmb: string;
   balanceEgp: string;
+  balanceRmb: string;
   balanceStatus: 'owing' | 'settled' | 'credit';
 }
 
@@ -45,12 +47,18 @@ interface ShippingCompanyStatement {
     description: string;
     shipmentCode?: string;
     costEgp?: string;
+    costRmb?: string;
     paidEgp?: string;
+    paidRmb?: string;
     runningBalance: string;
+    runningBalanceRmb?: string;
+    originalCurrency?: string;
     paymentId?: number;
     attachmentUrl?: string | null;
     attachmentOriginalName?: string | null;
   }>;
+  totalPaidEgp: string;
+  totalPaidRmb: string;
 }
 
 function formatCurrency(value: string | number) {
@@ -64,6 +72,10 @@ function formatCurrency(value: string | number) {
 function formatDate(date: string | Date | null) {
   if (!date) return "-";
   return new Date(date).toLocaleDateString("ar-EG");
+}
+
+function formatCurrencyLabel(currency?: string) {
+  return currency === "RMB" ? "رممبي" : "جنيه";
 }
 
 export default function ShippingCompanyBalancesPage() {
@@ -141,6 +153,33 @@ export default function ShippingCompanyBalancesPage() {
         لا يوجد رصيد بينكم
       </Badge>
     );
+  };
+
+  const getCostDisplay = (movement: ShippingCompanyStatement["movements"][number]) => {
+    if (movement.costRmb) {
+      return { amount: movement.costRmb, currency: "RMB" };
+    }
+    if (movement.costEgp) {
+      return { amount: movement.costEgp, currency: "EGP" };
+    }
+    return { amount: undefined, currency: movement.originalCurrency ?? "EGP" };
+  };
+
+  const getPaidDisplay = (movement: ShippingCompanyStatement["movements"][number]) => {
+    if (movement.originalCurrency === "RMB" && movement.paidRmb) {
+      return { amount: movement.paidRmb, currency: "RMB" };
+    }
+    if (movement.paidEgp) {
+      return { amount: movement.paidEgp, currency: "EGP" };
+    }
+    return { amount: undefined, currency: movement.originalCurrency ?? "EGP" };
+  };
+
+  const getMovementBalance = (movement: ShippingCompanyStatement["movements"][number]) => {
+    if (movement.originalCurrency === "RMB") {
+      return { amount: movement.runningBalanceRmb, currency: "RMB" };
+    }
+    return { amount: movement.runningBalance, currency: "EGP" };
   };
 
   if (isLoading) {
@@ -244,7 +283,8 @@ export default function ShippingCompanyBalancesPage() {
               <TableRow>
                 <TableHead className="text-right">اسم شركة الشحن</TableHead>
                 <TableHead className="text-right">إجمالي تكلفة الشحنات</TableHead>
-                <TableHead className="text-right">إجمالي المدفوع</TableHead>
+                <TableHead className="text-right">إجمالي المدفوع (جنيه)</TableHead>
+                <TableHead className="text-right">إجمالي المدفوع (رممبي)</TableHead>
                 <TableHead className="text-right">الرصيد الحالي</TableHead>
                 <TableHead className="text-right">إجراءات</TableHead>
               </TableRow>
@@ -252,7 +292,7 @@ export default function ShippingCompanyBalancesPage() {
             <TableBody>
               {balances?.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
                     لا توجد بيانات
                   </TableCell>
                 </TableRow>
@@ -263,6 +303,9 @@ export default function ShippingCompanyBalancesPage() {
                     <TableCell>{formatCurrency(balance.totalCostEgp)} جنيه</TableCell>
                     <TableCell className="text-green-600">
                       {formatCurrency(balance.totalPaidEgp)} جنيه
+                    </TableCell>
+                    <TableCell className="text-green-600">
+                      {formatCurrency(balance.totalPaidRmb)} رممبي
                     </TableCell>
                     <TableCell>
                       {getBalanceStatusBadge(balance.balanceStatus, balance.balanceEgp)}
@@ -294,6 +337,12 @@ export default function ShippingCompanyBalancesPage() {
               كشف حساب: {statement?.shippingCompany?.name}
             </DialogTitle>
           </DialogHeader>
+          {statement ? (
+            <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+              <div>إجمالي المدفوع (جنيه): {formatCurrency(statement.totalPaidEgp)} جنيه</div>
+              <div>إجمالي المدفوع (رممبي): {formatCurrency(statement.totalPaidRmb)} رممبي</div>
+            </div>
+          ) : null}
           <ScrollArea className="max-h-[60vh]">
             {statementLoading ? (
               <div className="space-y-2">
@@ -332,10 +381,20 @@ export default function ShippingCompanyBalancesPage() {
                         </TableCell>
                         <TableCell>{m.shipmentCode || "-"}</TableCell>
                         <TableCell className="text-red-600">
-                          {m.costEgp ? `${formatCurrency(m.costEgp)} جنيه` : "-"}
+                          {(() => {
+                            const { amount, currency } = getCostDisplay(m);
+                            return amount
+                              ? `${formatCurrency(amount)} ${formatCurrencyLabel(currency)}`
+                              : "-";
+                          })()}
                         </TableCell>
                         <TableCell className="text-green-600">
-                          {m.paidEgp ? `${formatCurrency(m.paidEgp)} جنيه` : "-"}
+                          {(() => {
+                            const { amount, currency } = getPaidDisplay(m);
+                            return amount
+                              ? `${formatCurrency(amount)} ${formatCurrencyLabel(currency)}`
+                              : "-";
+                          })()}
                         </TableCell>
                         <TableCell>
                           {m.type === "payment" ? (
@@ -349,7 +408,12 @@ export default function ShippingCompanyBalancesPage() {
                           )}
                         </TableCell>
                         <TableCell className="font-medium">
-                          {formatCurrency(m.runningBalance)} جنيه
+                          {(() => {
+                            const { amount, currency } = getMovementBalance(m);
+                            return amount
+                              ? `${formatCurrency(amount)} ${formatCurrencyLabel(currency)}`
+                              : "-";
+                          })()}
                         </TableCell>
                       </TableRow>
                     ))
