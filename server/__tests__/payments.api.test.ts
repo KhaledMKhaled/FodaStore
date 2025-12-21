@@ -339,6 +339,21 @@ test("rejects non-numeric exchange rate for RMB payments", async () => {
   assert.equal(res.body?.error?.details?.field, "exchangeRateToEgp");
 });
 
+test("returns 400 when shipment id is missing", async () => {
+  const { handler } = createHandler();
+  const req = {
+    body: { ...baseBody, shipmentId: undefined },
+    user: { id: "user-1" },
+  } as any;
+  const res = createResponse();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body?.error?.code, "PAYMENT_PAYLOAD_INVALID");
+  assert.equal(res.body?.error?.details?.field, "shipmentId");
+});
+
 test("rejects zero exchange rate for RMB payments", async () => {
   const { handler } = createHandler();
   const req = {
