@@ -84,4 +84,5 @@ FIX REMAINING AMOUNT CURRENCY DISPLAY - December 21, 2025
 [x] 64. Updated review receipt allowanceLabel with proper currency conversion
 [x] 65. Changed label from "الحد المتبقي (ج.م)" to "الحد المتبقي" (without hardcoded currency)
 [x] 66. Applied dynamic currency label based on payment currency (RMB/EGP)
-[x] 67. Workflow running - remaining amount now displays in correct currency
+[x] 67. Workflow restarted successfully - Application running on port 5000
+[x] 68. Task complete - الحد المتبقي now displays in correct currency
