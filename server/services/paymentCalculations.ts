@@ -27,9 +27,25 @@ export const parseAmountOrZero = (value: unknown): number => {
 };
 
 export const computeKnownTotalCost = (shipment: Shipment): number => {
-  const purchase = parseAmountOrZero(shipment.purchaseCostEgp);
-  const commission = parseAmountOrZero(shipment.commissionCostEgp);
-  const shipping = parseAmountOrZero(shipment.shippingCostEgp);
+  const purchaseRate = parseAmountOrZero(shipment.purchaseRmbToEgpRate);
+  const purchaseFromRmb =
+    purchaseRate > 0
+      ? parseAmountOrZero(shipment.purchaseCostRmb) * purchaseRate
+      : 0;
+  const purchase = parseAmountOrZero(shipment.purchaseCostEgp) || purchaseFromRmb;
+
+  const commissionFromRmb =
+    purchaseRate > 0
+      ? parseAmountOrZero(shipment.commissionCostRmb) * purchaseRate
+      : 0;
+  const commission =
+    parseAmountOrZero(shipment.commissionCostEgp) || commissionFromRmb;
+
+  const shippingFromRmb =
+    purchaseRate > 0
+      ? parseAmountOrZero(shipment.shippingCostRmb) * purchaseRate
+      : 0;
+  const shipping = parseAmountOrZero(shipment.shippingCostEgp) || shippingFromRmb;
   const customs = parseAmountOrZero(shipment.customsCostEgp);
   const takhreeg = parseAmountOrZero(shipment.takhreegCostEgp);
 

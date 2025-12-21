@@ -363,9 +363,19 @@ const getSupplierShipmentCustomsCostEgp = (
 };
 
 const computeKnownTotal = (shipment: Shipment): number => {
-  const purchase = parseAmount(shipment.purchaseCostEgp);
-  const commission = parseAmount(shipment.commissionCostEgp);
-  const shipping = parseAmount(shipment.shippingCostEgp);
+  const purchaseRate = parseAmount(shipment.purchaseRmbToEgpRate);
+  const purchaseFromRmb =
+    purchaseRate > 0 ? parseAmount(shipment.purchaseCostRmb) * purchaseRate : 0;
+  const purchase = parseAmount(shipment.purchaseCostEgp) || purchaseFromRmb;
+
+  const commissionFromRmb =
+    purchaseRate > 0 ? parseAmount(shipment.commissionCostRmb) * purchaseRate : 0;
+  const commission =
+    parseAmount(shipment.commissionCostEgp) || commissionFromRmb;
+
+  const shippingFromRmb =
+    purchaseRate > 0 ? parseAmount(shipment.shippingCostRmb) * purchaseRate : 0;
+  const shipping = parseAmount(shipment.shippingCostEgp) || shippingFromRmb;
   const customs = parseAmount(shipment.customsCostEgp);
   const takhreeg = parseAmount(shipment.takhreegCostEgp);
 
