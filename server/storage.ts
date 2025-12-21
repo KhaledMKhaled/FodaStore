@@ -44,6 +44,7 @@ import {
   type InsertAuditLog,
 } from "@shared/schema";
 import { normalizePaymentAmounts, roundAmount } from "./services/currency";
+import { getCurrencyTotals } from "./services/currencyTotals";
 import {
   calculatePaymentSnapshot,
   parseAmountOrZero,
@@ -2521,22 +2522,31 @@ export class DatabaseStorage implements IStorage {
         const items = itemsByShipmentId.get(shipment.id) ?? [];
         return sum + getSupplierShipmentGoodsCostRmb(items, supplier.id);
       }, 0);
-      const totalPaidRmb = supplierAllocations.reduce(
-        (sum, allocation) => sum + parseAmount(allocation.allocatedAmount),
-        0,
-      ) + supplierDirectPaymentsRmb.reduce(
-        (sum, payment) => sum + parseAmount(payment.amountOriginal),
-        0,
+      const supplierPaymentsTotals = getCurrencyTotals(
+        supplierPayments.map((payment) => ({
+          paymentCurrency: payment.paymentCurrency,
+          amountEgp: payment.amountEgp,
+          amountOriginal: payment.amountOriginal,
+        })),
       );
+      const supplierRmbTotals = getCurrencyTotals([
+        ...supplierAllocations.map((allocation) => ({
+          originalCurrency: "RMB",
+          amountOriginal: allocation.allocatedAmount,
+        })),
+        ...supplierDirectPaymentsRmb.map((payment) => ({
+          paymentCurrency: payment.paymentCurrency,
+          amountOriginal: payment.amountOriginal,
+        })),
+      ]);
+      const totalPaidRmb = supplierRmbTotals.sumRmb;
       const balanceRmb = totalCostRmb - totalPaidRmb;
 
       const totalCostEgp = supplierShipments.reduce((sum, shipment) => {
         const items = itemsByShipmentId.get(shipment.id) ?? [];
         return sum + getSupplierShipmentCustomsCostEgp(items, supplier.id);
       }, 0);
-      const totalPaidEgp = supplierPayments.reduce(
-        (sum, p) => sum + parseFloat(p.amountEgp || "0"), 0
-      );
+      const totalPaidEgp = supplierPaymentsTotals.sumEgp;
       const balanceEgp = totalCostEgp - totalPaidEgp;
 
       const getBalanceStatus = (value: number): 'owing' | 'settled' | 'credit' => {
@@ -2755,13 +2765,19 @@ export class DatabaseStorage implements IStorage {
 
     let runningBalanceRmb = 0;
     let runningBalanceEgp = 0;
-    movements.forEach(m => {
-      if (m.type === 'shipment') {
-        runningBalanceRmb += parseFloat(m.costRmb || "0");
-        runningBalanceEgp += parseFloat(m.costEgp || "0");
+    movements.forEach((m) => {
+      if (m.type === "shipment") {
+        const { sumEgp, sumRmb } = getCurrencyTotals([
+          { costEgp: m.costEgp, costRmb: m.costRmb },
+        ]);
+        runningBalanceRmb += sumRmb;
+        runningBalanceEgp += sumEgp;
       } else {
-        runningBalanceRmb -= parseFloat(m.paidRmb || "0");
-        runningBalanceEgp -= parseFloat(m.paidEgp || "0");
+        const { sumEgp, sumRmb } = getCurrencyTotals([
+          { paidEgp: m.paidEgp, paidRmb: m.paidRmb, currency: m.currency },
+        ]);
+        runningBalanceRmb -= sumRmb;
+        runningBalanceEgp -= sumEgp;
       }
       m.runningBalanceRmb = runningBalanceRmb.toFixed(2);
       m.runningBalanceEgp = runningBalanceEgp.toFixed(2);
@@ -2828,14 +2844,15 @@ export class DatabaseStorage implements IStorage {
         (sum, s) => sum + getShipmentShippingCompanyCostRmb(s),
         0,
       );
-      const totalPaid = companyPayments.reduce(
-        (sum, p) => sum + parseFloat(p.amountEgp || "0"),
-        0,
+      const companyPaymentTotals = getCurrencyTotals(
+        companyPayments.map((payment) => ({
+          paymentCurrency: payment.paymentCurrency,
+          amountEgp: payment.amountEgp,
+          amountOriginal: payment.amountOriginal,
+        })),
       );
-      const totalPaidRmb = companyPayments.reduce((sum, p) => {
-        if (p.paymentCurrency !== "RMB") return sum;
-        return sum + parseFloat(p.amountOriginal || "0");
-      }, 0);
+      const totalPaid = companyPaymentTotals.sumEgp;
+      const totalPaidRmb = companyPaymentTotals.sumRmb;
       const balance = totalCost - totalPaid;
       const balanceRmb = totalCostRmb - totalPaidRmb;
 
@@ -2950,26 +2967,37 @@ export class DatabaseStorage implements IStorage {
 
     let runningBalance = 0;
     let runningBalanceRmb = 0;
-    movements.forEach(m => {
-      if (m.type === 'shipment') {
-        runningBalance += parseFloat(m.costEgp || "0");
-        runningBalanceRmb += parseFloat(m.costRmb || "0");
+    movements.forEach((m) => {
+      if (m.type === "shipment") {
+        const { sumEgp, sumRmb } = getCurrencyTotals([
+          { costEgp: m.costEgp, costRmb: m.costRmb },
+        ]);
+        runningBalance += sumEgp;
+        runningBalanceRmb += sumRmb;
       } else {
-        runningBalance -= parseFloat(m.paidEgp || "0");
-        runningBalanceRmb -= parseFloat(m.paidRmb || "0");
+        const { sumEgp, sumRmb } = getCurrencyTotals([
+          {
+            paidEgp: m.paidEgp,
+            paidRmb: m.paidRmb,
+            originalCurrency: m.originalCurrency,
+          },
+        ]);
+        runningBalance -= sumEgp;
+        runningBalanceRmb -= sumRmb;
       }
       m.runningBalance = runningBalance.toFixed(2);
       m.runningBalanceRmb = runningBalanceRmb.toFixed(2);
     });
 
-    const totalPaidEgp = companyPayments.reduce(
-      (sum, payment) => sum + parseFloat(payment.amountEgp || "0"),
-      0,
+    const companyPaymentTotals = getCurrencyTotals(
+      companyPayments.map((payment) => ({
+        paymentCurrency: payment.paymentCurrency,
+        amountEgp: payment.amountEgp,
+        amountOriginal: payment.amountOriginal,
+      })),
     );
-    const totalPaidRmb = companyPayments.reduce((sum, payment) => {
-      if (payment.paymentCurrency !== "RMB") return sum;
-      return sum + parseFloat(payment.amountOriginal || "0");
-    }, 0);
+    const totalPaidEgp = companyPaymentTotals.sumEgp;
+    const totalPaidRmb = companyPaymentTotals.sumRmb;
 
     return {
       shippingCompany,
@@ -3342,32 +3370,39 @@ export class DatabaseStorage implements IStorage {
 
     movements.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    const totalCostEgp = movements
-      .filter(m => m.direction === 'cost')
-      .reduce((sum, m) => sum + parseFloat(m.amountEgp), 0);
-
     const includeAllocationsInTotals =
       filters?.movementType === "تسوية/توزيع تكلفة";
 
-    const totalPaidEgp = movements
-      .filter(
-        (m) =>
-          m.direction === "payment" &&
-          (includeAllocationsInTotals || !m.isAllocation),
-      )
-      .reduce((sum, m) => sum + parseFloat(m.amountEgp), 0);
+    const costTotals = getCurrencyTotals(
+      movements
+        .filter((m) => m.direction === "cost")
+        .map((m) => ({
+          originalCurrency: m.originalCurrency,
+          amountEgp: m.amountEgp,
+          amountRmb: m.amountRmb,
+          amountOriginal: m.amountOriginal,
+        })),
+    );
 
-    const totalCostRmb = movements
-      .filter(m => m.direction === 'cost')
-      .reduce((sum, m) => sum + parseFloat(m.amountRmb || "0"), 0);
+    const paymentTotals = getCurrencyTotals(
+      movements
+        .filter(
+          (m) =>
+            m.direction === "payment" &&
+            (includeAllocationsInTotals || !m.isAllocation),
+        )
+        .map((m) => ({
+          originalCurrency: m.originalCurrency,
+          amountEgp: m.amountEgp,
+          amountRmb: m.amountRmb,
+          amountOriginal: m.amountOriginal,
+        })),
+    );
 
-    const totalPaidRmb = movements
-      .filter(
-        (m) =>
-          m.direction === "payment" &&
-          (includeAllocationsInTotals || !m.isAllocation),
-      )
-      .reduce((sum, m) => sum + parseFloat(m.amountRmb || "0"), 0);
+    const totalCostEgp = costTotals.sumEgp;
+    const totalPaidEgp = paymentTotals.sumEgp;
+    const totalCostRmb = costTotals.sumRmb;
+    const totalPaidRmb = paymentTotals.sumRmb;
 
     return {
       movements,
@@ -3410,11 +3445,15 @@ export class DatabaseStorage implements IStorage {
         totalRmb: 0,
       };
       current.count += 1;
-      if (p.paymentCurrency === "RMB") {
-        current.totalRmb += parseAmount(p.amountOriginal);
-      } else if (p.paymentCurrency === "EGP") {
-        current.totalEgp += parseAmount(p.amountEgp);
-      }
+      const { sumEgp, sumRmb } = getCurrencyTotals([
+        {
+          paymentCurrency: p.paymentCurrency,
+          amountEgp: p.amountEgp,
+          amountOriginal: p.amountOriginal,
+        },
+      ]);
+      current.totalEgp += sumEgp;
+      current.totalRmb += sumRmb;
       methodStats.set(method, current);
     }
 
