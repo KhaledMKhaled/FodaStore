@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, Fragment, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -18,10 +18,15 @@ import {
   Receipt,
   ChevronsUpDown,
   Check,
-  Image,
-  Wallet,
   Building2,
+  CheckCircle2,
+  Download,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,6 +62,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Command,
   CommandEmpty,
   CommandGroup,
@@ -65,6 +75,13 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/components/ui/drawer";
 import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
@@ -85,6 +102,7 @@ import {
   shouldShowAutoAllocationSection,
   shouldUseSupplierGoodsSummary,
 } from "./payments-utils";
+import { PaymentWizard } from "@/components/payment-wizard";
 
 const PAYMENT_METHODS = [
   { value: "نقدي", label: "نقدي" },
@@ -107,6 +125,48 @@ const COST_COMPONENTS = [
 const SHIPPING_COST_COMPONENTS = new Set(["الشحن", "العمولة", "الجمرك", "التخريج"]);
 
 const ITEMS_PER_PAGE = 25;
+
+const paymentFormSchema = z
+  .object({
+    shipmentId: z.string().min(1, "يرجى اختيار الشحنة"),
+    paymentDate: z.string().min(1, "يرجى تحديد تاريخ الدفع"),
+    paymentCurrency: z.enum(["EGP", "RMB"]),
+    costComponent: z.string().min(1, "يرجى اختيار بند التكلفة"),
+    partyType: z.enum(["supplier", "shipping_company"]),
+    partyId: z.string().optional().nullable(),
+    amountOriginal: z
+      .string()
+      .min(1, "يرجى إدخال المبلغ")
+      .refine((value) => Number.isFinite(parseFloat(value)), "يرجى إدخال مبلغ صحيح"),
+    exchangeRateToEgp: z.string().optional().nullable(),
+    paymentMethod: z.string().min(1, "يرجى اختيار طريقة الدفع"),
+    cashReceiverName: z.string().optional().nullable(),
+    referenceNumber: z.string().optional().nullable(),
+    note: z.string().optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.paymentCurrency === "RMB") {
+      if (!data.exchangeRateToEgp || !data.exchangeRateToEgp.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["exchangeRateToEgp"],
+          message: "يرجى إدخال سعر الصرف",
+        });
+      }
+    }
+
+    if (data.paymentMethod === "نقدي") {
+      if (!data.cashReceiverName || !data.cashReceiverName.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["cashReceiverName"],
+          message: "يرجى إدخال اسم مستلم الكاش",
+        });
+      }
+    }
+  });
+
+type PaymentFormValues = z.infer<typeof paymentFormSchema>;
 
 interface PaymentsStats {
   totalCostEgp: string;
@@ -191,13 +251,7 @@ export default function Payments() {
   const [dateTo, setDateTo] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
-  const [partyType, setPartyType] = useState<"supplier" | "shipping_company">("supplier");
-  const [partyId, setPartyId] = useState<number | null>(null);
   const [partyPopoverOpen, setPartyPopoverOpen] = useState(false);
-  const [paymentCurrency, setPaymentCurrency] = useState("EGP");
-  const [paymentMethod, setPaymentMethod] = useState("");
-  const [costComponent, setCostComponent] = useState("");
   const [expandedShipments, setExpandedShipments] = useState<Set<number>>(new Set());
   const [showInvoiceSummary, setShowInvoiceSummary] = useState(false);
   const [clientValidationError, setClientValidationError] = useState<string | null>(null);
@@ -206,13 +260,60 @@ export default function Payments() {
   const [attachmentInputKey, setAttachmentInputKey] = useState(0);
   const [currentPageShipments, setCurrentPageShipments] = useState(1);
   const [currentPagePayments, setCurrentPagePayments] = useState(1);
-  const [amountOriginalValue, setAmountOriginalValue] = useState("");
   const [autoAllocate, setAutoAllocate] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [completedPaymentRef, setCompletedPaymentRef] = useState<string | null>(null);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const [isWizardMode, setIsWizardMode] = useState(false);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [summaryDrawerOpen, setSummaryDrawerOpen] = useState(false);
+  const summaryExportRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
+
+  const form = useForm<PaymentFormValues>({
+    resolver: zodResolver(paymentFormSchema),
+    defaultValues: {
+      shipmentId: "",
+      paymentDate: new Date().toISOString().split("T")[0],
+      paymentCurrency: "EGP",
+      costComponent: "",
+      partyType: "supplier",
+      partyId: "",
+      amountOriginal: "",
+      exchangeRateToEgp: "",
+      paymentMethod: "",
+      cashReceiverName: "",
+      referenceNumber: "",
+      note: "",
+    },
+    mode: "onBlur",
+  });
+
+  const paymentCurrency = useWatch({ control: form.control, name: "paymentCurrency" });
+  const costComponent = useWatch({ control: form.control, name: "costComponent" });
+  const partyType = useWatch({ control: form.control, name: "partyType" });
+  const partyIdValue = useWatch({ control: form.control, name: "partyId" });
+  const shipmentIdValue = useWatch({ control: form.control, name: "shipmentId" });
+  const paymentMethod = useWatch({ control: form.control, name: "paymentMethod" });
+  const amountOriginalValue = useWatch({ control: form.control, name: "amountOriginal" });
+  const selectedShipmentId = shipmentIdValue ? Number(shipmentIdValue) : null;
+  const partyId = partyIdValue ? Number(partyIdValue) : null;
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
     queryKey: ["/api/payments/stats"],
   });
+
+  useEffect(() => {
+    const updateViewport = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      setViewportSize({ width, height });
+      setIsWizardMode(width < 1024 || height < 720);
+    };
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, []);
 
   const { data: suppliers, isLoading: loadingSuppliers } = useQuery<Supplier[]>({
     queryKey: ["/api/suppliers"],
@@ -236,7 +337,12 @@ export default function Payments() {
     queryKey: ["/api/payments"],
   });
 
-  const { data: invoiceSummary, isLoading: loadingInvoiceSummary, isError: invoiceSummaryError } = useQuery<InvoiceSummary>({
+  const {
+    data: invoiceSummary,
+    isLoading: loadingInvoiceSummary,
+    isFetching: fetchingInvoiceSummary,
+    error: invoiceSummaryError,
+  } = useQuery<InvoiceSummary>({
     queryKey: ["/api/shipments", selectedShipmentId, "invoice-summary"],
     enabled: !!selectedShipmentId,
   });
@@ -275,11 +381,29 @@ export default function Payments() {
   });
   const amountOriginalNumber = parseFloat(amountOriginalValue);
   const hasPreviewAmount = Number.isFinite(amountOriginalNumber) && amountOriginalNumber > 0;
+  const selectedShipment = useMemo(
+    () => shipments?.find((shipment) => shipment.id === selectedShipmentId),
+    [shipments, selectedShipmentId],
+  );
+  const selectedPartyName =
+    partyId && partyType === "supplier"
+      ? suppliers?.find((supplier) => supplier.id === partyId)?.name
+      : partyId && partyType === "shipping_company"
+        ? shippingCompanies?.find((company) => company.id === partyId)?.name
+        : "";
+
+  const wizardSteps = [
+    { id: "basics", title: "الأساسيات" },
+    { id: "details", title: "تفاصيل الدفع" },
+    { id: "advanced", title: "تفاصيل إضافية" },
+    { id: "review", title: "مراجعة وتأكيد" },
+  ];
+  const showSummaryAside = !isWizardMode && viewportSize.width >= 1280 && viewportSize.height >= 720;
 
   const {
     data: supplierGoodsSummary,
     isFetching: loadingSupplierGoodsSummary,
-    isError: supplierGoodsSummaryError,
+    error: supplierGoodsSummaryError,
   } = useQuery<SupplierGoodsSummary>({
     queryKey: [
       "/api/shipments",
@@ -296,18 +420,18 @@ export default function Payments() {
     if (isShippingComponent) {
       if (autoShippingCompanyId) {
         if (partyType !== "shipping_company") {
-          setPartyType("shipping_company");
+          form.setValue("partyType", "shipping_company", { shouldValidate: true });
         }
         if (partyId !== autoShippingCompanyId) {
-          setPartyId(autoShippingCompanyId);
+          form.setValue("partyId", String(autoShippingCompanyId), { shouldValidate: true });
         }
         return;
       }
     } else if (autoSupplierId) {
       if (partyType !== "supplier") {
-        setPartyType("supplier");
+        form.setValue("partyType", "supplier", { shouldValidate: true });
       }
-      setPartyId(autoSupplierId);
+      form.setValue("partyId", String(autoSupplierId), { shouldValidate: true });
       return;
     }
     if (hasSupplierAttribution && partyType === "supplier" && partyId) {
@@ -316,7 +440,7 @@ export default function Payments() {
     if (partyType === "shipping_company" && partyId) {
       return;
     }
-    setPartyId(null);
+    form.setValue("partyId", "", { shouldValidate: true });
   }, [
     autoSupplierId,
     autoShippingCompanyId,
@@ -326,18 +450,48 @@ export default function Payments() {
     partyId,
     partyType,
     selectedShipmentId,
+    form,
   ]);
 
   useEffect(() => {
     if (!isDialogOpen) return;
-    setPartyId(null);
-  }, [partyType, isDialogOpen]);
+    form.setValue("partyId", "", { shouldValidate: true });
+  }, [partyType, isDialogOpen, form]);
 
   useEffect(() => {
     if (!showAutoAllocationSection || paymentCurrency !== "RMB") {
       setAutoAllocate(false);
     }
   }, [paymentCurrency, showAutoAllocationSection]);
+
+  useEffect(() => {
+    if (paymentCurrency !== "RMB") {
+      form.setValue("exchangeRateToEgp", "");
+    }
+  }, [paymentCurrency, form]);
+
+  useEffect(() => {
+    if (paymentMethod !== "نقدي") {
+      form.setValue("cashReceiverName", "");
+    }
+  }, [paymentMethod, form]);
+
+  useEffect(() => {
+    if (!isWizardMode) {
+      setCurrentStep(0);
+    }
+  }, [isWizardMode]);
+
+  useEffect(() => {
+    if (
+      form.formState.errors.paymentMethod ||
+      form.formState.errors.cashReceiverName ||
+      form.formState.errors.referenceNumber ||
+      form.formState.errors.note
+    ) {
+      setIsAdvancedOpen(true);
+    }
+  }, [form.formState.errors]);
 
   useEffect(() => {
     setClientValidationError(null);
@@ -348,9 +502,41 @@ export default function Payments() {
     invoiceSummary?.paymentAllowance?.remainingAllowedEgp,
   ]);
 
+  useEffect(() => {
+    if (!isDialogOpen || !selectedShipmentId) return;
+    const storageKey = `payment-draft-${selectedShipmentId}`;
+    const stored = localStorage.getItem(storageKey);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as Partial<PaymentFormValues> & {
+        autoAllocate?: boolean;
+      };
+      form.reset({
+        ...form.getValues(),
+        ...parsed,
+      });
+      if (typeof parsed.autoAllocate === "boolean") {
+        setAutoAllocate(parsed.autoAllocate);
+      }
+    } catch (error) {
+      console.error("Failed to restore payment draft", error);
+    }
+  }, [form, isDialogOpen, selectedShipmentId]);
+
+  useEffect(() => {
+    if (!isDialogOpen || !selectedShipmentId) return;
+    const subscription = form.watch((values) => {
+      const storageKey = `payment-draft-${selectedShipmentId}`;
+      const payload = { ...values, autoAllocate };
+      localStorage.setItem(storageKey, JSON.stringify(payload));
+    });
+    return () => subscription.unsubscribe();
+  }, [autoAllocate, form, isDialogOpen, selectedShipmentId]);
+
   const createMutation = useMutation({
     mutationFn: async (data: { payload: FormData; shipmentId: number }) => {
-      return apiRequest("POST", "/api/payments", data.payload);
+      const response = await apiRequest("POST", "/api/payments", data.payload);
+      return response.json();
     },
     onSuccess: (_response, variables) => {
       toast({ title: "تم تسجيل الدفعة بنجاح" });
@@ -362,28 +548,57 @@ export default function Payments() {
           queryKey: ["/api/shipments", variables.shipmentId, "invoice-summary"],
         });
       }
-      setIsDialogOpen(false);
-      resetForm();
+      if (variables?.shipmentId) {
+        localStorage.removeItem(`payment-draft-${variables.shipmentId}`);
+      }
+      const paymentId = _response?.data?.id ?? _response?.payment?.id ?? _response?.id ?? null;
+      const apiReference =
+        _response?.data?.paymentReference ?? _response?.data?.referenceNumber ?? null;
+      const formattedReference = paymentId
+        ? `PAY-${String(paymentId).padStart(6, "0")}`
+        : null;
+      if (isWizardMode && (apiReference || formattedReference)) {
+        setCompletedPaymentRef(apiReference ?? formattedReference);
+      } else {
+        setIsDialogOpen(false);
+        resetForm();
+      }
     },
     onError: (error: Error) => {
-      toast({ title: getErrorMessage(error), variant: "destructive" });
+      console.error("Payment creation failed", error);
+      toast({
+        title: getErrorMessage(error, paymentErrorOverrides),
+        variant: "destructive",
+      });
     },
   });
 
   const resetForm = () => {
-    setSelectedShipmentId(null);
-    setPartyType("supplier");
-    setPartyId(null);
-    setPaymentCurrency("EGP");
-    setPaymentMethod("");
-    setCostComponent("");
+    form.reset({
+      shipmentId: "",
+      paymentDate: new Date().toISOString().split("T")[0],
+      paymentCurrency: "EGP",
+      costComponent: "",
+      partyType: "supplier",
+      partyId: "",
+      amountOriginal: "",
+      exchangeRateToEgp: "",
+      paymentMethod: "",
+      cashReceiverName: "",
+      referenceNumber: "",
+      note: "",
+    });
     setShowInvoiceSummary(false);
     setClientValidationError(null);
     setAttachmentFile(null);
     setAttachmentError(null);
     setAttachmentInputKey((prev) => prev + 1);
-    setAmountOriginalValue("");
     setAutoAllocate(false);
+    setCurrentStep(0);
+    setCompletedPaymentRef(null);
+    setCompletedPaymentId(null);
+    setSummaryDrawerOpen(false);
+    setIsAdvancedOpen(false);
   };
 
   const handleAttachmentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -412,14 +627,22 @@ export default function Payments() {
     setAttachmentError(null);
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setClientValidationError(null);
-    const formData = new FormData(e.currentTarget);
+  const paymentErrorOverrides = {
+    401: "انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى.",
+    403: "ليست لديك صلاحية لإضافة دفعة.",
+    409: "توجد دفعة مشابهة لهذه الشحنة بالفعل.",
+    defaultMessage: "تعذر حفظ الدفعة، يرجى المحاولة مرة أخرى.",
+  } as const;
 
+  const summaryErrorOverrides = {
+    401: "انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى.",
+    403: "ليست لديك صلاحية لعرض الملخص.",
+    defaultMessage: "تعذر تحميل البيانات المطلوبة.",
+  } as const;
+
+  const validatePartySelection = async (shouldToast = true) => {
     if (!selectedShipmentId) {
-      toast({ title: "يرجى اختيار الشحنة", variant: "destructive" });
-      return;
+      return { ok: false, message: "يرجى اختيار الشحنة" };
     }
 
     let latestShipmentItems = shipmentItems;
@@ -431,11 +654,11 @@ export default function Payments() {
           "items",
         ]);
       } catch (error) {
-        toast({
-          title: "تعذر التحقق من المورد",
-          variant: "destructive",
-        });
-        return;
+        const message = "تعذر التحقق من المورد";
+        if (shouldToast) {
+          toast({ title: message, variant: "destructive" });
+        }
+        return { ok: false, message };
       }
     }
 
@@ -463,40 +686,52 @@ export default function Payments() {
     if (shouldRequireParty && (!partyType || !partyId)) {
       const message = "يرجى اختيار الطرف لهذه الشحنة";
       setClientValidationError(message);
-      toast({ title: message, variant: "destructive" });
-      return;
+      form.setError("partyId", { message });
+      if (shouldToast) {
+        toast({ title: message, variant: "destructive" });
+      }
+      return { ok: false, message };
     }
 
     if (partyType === "supplier" && partyId && !allowedSuppliers.has(partyId)) {
       const message = "المورد المحدد غير مرتبط بهذه الشحنة";
       setClientValidationError(message);
-      toast({ title: message, variant: "destructive" });
-      return;
+      form.setError("partyId", { message });
+      if (shouldToast) {
+        toast({ title: message, variant: "destructive" });
+      }
+      return { ok: false, message };
     }
 
-    if (
-      partyType === "shipping_company" &&
-      partyId &&
-      !allowedShippingCompanies.has(partyId)
-    ) {
+    if (partyType === "shipping_company" && partyId && !allowedShippingCompanies.has(partyId)) {
       const message = "شركة الشحن المحددة غير مرتبطة بهذه الشحنة";
       setClientValidationError(message);
-      toast({ title: message, variant: "destructive" });
+      form.setError("partyId", { message });
+      if (shouldToast) {
+        toast({ title: message, variant: "destructive" });
+      }
+      return { ok: false, message };
+    }
+
+    form.clearErrors("partyId");
+    return { ok: true, message: "" };
+  };
+
+  const handleSubmit = form.handleSubmit(async (data) => {
+    setClientValidationError(null);
+
+    if (!selectedShipmentId) {
+      toast({ title: "يرجى اختيار الشحنة", variant: "destructive" });
       return;
     }
 
-    if (!costComponent) {
-      toast({ title: "يرجى اختيار بند التكلفة", variant: "destructive" });
+    const partyValidation = await validatePartySelection();
+    if (!partyValidation.ok) {
       return;
     }
 
-    if (!paymentMethod) {
-      toast({ title: "يرجى اختيار طريقة الدفع", variant: "destructive" });
-      return;
-    }
-
-    const amountOriginal = formData.get("amountOriginal") as string;
-    const exchangeRate = formData.get("exchangeRateToEgp") as string;
+    const amountOriginal = data.amountOriginal;
+    const exchangeRate = data.exchangeRateToEgp ?? "";
     const amountEgpNumber = deriveAmountEgp({
       paymentCurrency,
       amountOriginal,
@@ -549,22 +784,22 @@ export default function Payments() {
       selectedShipmentId,
       partyType,
       partyId,
-      paymentDate: formData.get("paymentDate") as string,
+      paymentDate: data.paymentDate,
       paymentCurrency,
       amountOriginal,
       exchangeRateToEgp: exchangeRate,
       amountEgp: paymentCurrency === "EGP" ? amountOriginal : safeAmountEgp.toFixed(2),
       costComponent,
       paymentMethod,
-      cashReceiverName: (formData.get("cashReceiverName") as string) || "",
-      referenceNumber: (formData.get("referenceNumber") as string) || "",
-      note: (formData.get("note") as string) || "",
+      cashReceiverName: data.cashReceiverName || "",
+      referenceNumber: data.referenceNumber || "",
+      note: data.note || "",
       autoAllocate,
       attachment: attachmentFile,
     });
 
     createMutation.mutate({ payload, shipmentId: selectedShipmentId });
-  };
+  });
 
   const formatCurrency = (value: string | number | null) => {
     const num = typeof value === "string" ? parseFloat(value) : value;
@@ -581,6 +816,178 @@ export default function Payments() {
 
   const rmbLabel = "رممبي / RMB";
   const egpLabel = "جنيه / EGP";
+
+  const componentBreakdown = costComponent &&
+    (invoiceSummary || supplierGoodsSummary || loadingSupplierGoodsSummary) && (
+      <div className="mt-2 space-y-2 rounded-md bg-muted/50 p-3 text-sm">
+        {costComponent === "تكلفة البضاعة" && showSupplierGoodsSummary && (
+          <>
+            {loadingSupplierGoodsSummary && (
+              <p className="text-xs text-muted-foreground">جاري تحميل ملخص المورد...</p>
+            )}
+            {supplierGoodsSummaryError && (
+              <p className="text-xs text-destructive">
+                {getErrorMessage(supplierGoodsSummaryError, summaryErrorOverrides)}
+              </p>
+            )}
+            {!loadingSupplierGoodsSummary && supplierGoodsSummary && (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">الإجمالي</span>
+                  <span className="font-semibold">
+                    {formatCurrency(supplierGoodsSummary.supplierGoodsTotalRmb)} {rmbLabel}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">المدفوع</span>
+                  <span className="font-semibold text-green-600">
+                    {formatCurrency(supplierGoodsSummary.supplierPaidRmb)} {rmbLabel}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">المتبقي</span>
+                  <span className="font-semibold text-amber-600">
+                    {formatCurrency(supplierGoodsSummary.supplierRemainingRmb)} {rmbLabel}
+                  </span>
+                </div>
+              </>
+            )}
+          </>
+        )}
+        {costComponent === "تكلفة البضاعة" && !showSupplierGoodsSummary && invoiceSummary && (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">الإجمالي</span>
+              <span className="font-semibold">
+                {formatCurrency(invoiceSummary.rmb.goodsTotal)} {rmbLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المدفوع</span>
+              <span className="font-semibold text-green-600">
+                {formatCurrency(
+                  (invoiceSummary as any).paidByComponent?.["تكلفة البضاعة"] || "0",
+                )}{" "}
+                {rmbLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المتبقي</span>
+              <span className="font-semibold text-amber-600">
+                {formatCurrency(
+                  (invoiceSummary as any).remainingByComponent?.["تكلفة البضاعة"] || "0",
+                )}{" "}
+                {rmbLabel}
+              </span>
+            </div>
+          </>
+        )}
+        {costComponent === "الشحن" && invoiceSummary && (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">الإجمالي</span>
+              <span className="font-semibold">
+                {formatCurrency(invoiceSummary.rmb.shippingTotal)} {rmbLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المدفوع</span>
+              <span className="font-semibold text-green-600">
+                {formatCurrency((invoiceSummary as any).paidByComponent?.["الشحن"] || "0")}{" "}
+                {rmbLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المتبقي</span>
+              <span className="font-semibold text-amber-600">
+                {formatCurrency(
+                  (invoiceSummary as any).remainingByComponent?.["الشحن"] || "0",
+                )}{" "}
+                {rmbLabel}
+              </span>
+            </div>
+          </>
+        )}
+        {costComponent === "العمولة" && invoiceSummary && (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">الإجمالي</span>
+              <span className="font-semibold">
+                {formatCurrency(invoiceSummary.rmb.commissionTotal)} {rmbLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المدفوع</span>
+              <span className="font-semibold text-green-600">
+                {formatCurrency((invoiceSummary as any).paidByComponent?.["العمولة"] || "0")}{" "}
+                {rmbLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المتبقي</span>
+              <span className="font-semibold text-amber-600">
+                {formatCurrency(
+                  (invoiceSummary as any).remainingByComponent?.["العمولة"] || "0",
+                )}{" "}
+                {rmbLabel}
+              </span>
+            </div>
+          </>
+        )}
+        {costComponent === "الجمرك" && invoiceSummary && (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">الإجمالي</span>
+              <span className="font-semibold">
+                {formatCurrency(invoiceSummary.egp.customsTotal)} {egpLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المدفوع</span>
+              <span className="font-semibold text-green-600">
+                {formatCurrency((invoiceSummary as any).paidByComponent?.["الجمرك"] || "0")}{" "}
+                {egpLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المتبقي</span>
+              <span className="font-semibold text-amber-600">
+                {formatCurrency(
+                  (invoiceSummary as any).remainingByComponent?.["الجمرك"] || "0",
+                )}{" "}
+                {egpLabel}
+              </span>
+            </div>
+          </>
+        )}
+        {costComponent === "التخريج" && invoiceSummary && (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">الإجمالي</span>
+              <span className="font-semibold">
+                {formatCurrency(invoiceSummary.egp.takhreegTotal)} {egpLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المدفوع</span>
+              <span className="font-semibold text-green-600">
+                {formatCurrency((invoiceSummary as any).paidByComponent?.["التخريج"] || "0")}{" "}
+                {egpLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">المتبقي</span>
+              <span className="font-semibold text-amber-600">
+                {formatCurrency(
+                  (invoiceSummary as any).remainingByComponent?.["التخريج"] || "0",
+                )}{" "}
+                {egpLabel}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+    );
 
   const allocationPreviewQueryKey = showAutoAllocationSection && hasPreviewAmount && canAutoAllocate
     ? [
@@ -600,6 +1007,142 @@ export default function Payments() {
     queryKey: allocationPreviewQueryKey ?? ["/api/shipments", "allocation-preview", "disabled"],
     enabled: Boolean(allocationPreviewQueryKey && autoAllocate),
   });
+
+  const stepFieldGroups: Array<Array<keyof PaymentFormValues>> = [
+    ["shipmentId", "paymentDate", "paymentCurrency"],
+    ["costComponent", "partyType", "partyId", "amountOriginal", "exchangeRateToEgp"],
+    ["paymentMethod", "cashReceiverName", "referenceNumber", "note"],
+    [],
+  ];
+
+  const handleNextStep = async () => {
+    const fields = stepFieldGroups[currentStep] ?? [];
+    const filteredFields = fields.filter((field) => {
+      if (field === "exchangeRateToEgp" && paymentCurrency !== "RMB") return false;
+      if (field === "cashReceiverName" && paymentMethod !== "نقدي") return false;
+      return true;
+    });
+
+    const isValid = await form.trigger(filteredFields, { shouldFocus: true });
+    if (!isValid) return;
+
+    if (currentStep === 1) {
+      const partyValidation = await validatePartySelection();
+      if (!partyValidation.ok) return;
+    }
+
+    setCurrentStep((prev) => Math.min(prev + 1, wizardSteps.length - 1));
+  };
+
+  const handlePreviousStep = () => {
+    setCurrentStep((prev) => Math.max(prev - 1, 0));
+  };
+
+  const handleExportSummary = async () => {
+    if (!summaryExportRef.current) return;
+    const printWindow = window.open("", "payment-summary", "width=900,height=700");
+    if (!printWindow) {
+      toast({
+        title: "تعذر فتح نافذة التصدير.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const contentHtml = summaryExportRef.current.innerHTML;
+    printWindow.document.write(`
+      <html lang="ar">
+        <head>
+          <title>ملخص الدفعة</title>
+          <style>
+            body { font-family: 'Arial', sans-serif; direction: rtl; padding: 24px; }
+            .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
+            .text-muted-foreground { color: #6b7280; }
+            .font-semibold { font-weight: 600; }
+            .font-medium { font-weight: 500; }
+          </style>
+        </head>
+        <body>
+          <div class="card">${contentHtml}</div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    printWindow.close();
+  };
+
+  const summaryDetails = (
+    <div className="space-y-3">
+      <div className="space-y-1 text-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">الشحنة</span>
+          <span className="font-medium">
+            {selectedShipment
+              ? `${selectedShipment.shipmentCode} - ${selectedShipment.shipmentName}`
+              : "لم يتم اختيار شحنة"}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">البند</span>
+          <span className="font-medium">{costComponent || "-"}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">الطرف</span>
+          <span className="font-medium">
+            {partyType === "supplier" ? "مورد" : "شركة شحن"} {selectedPartyName ? `- ${selectedPartyName}` : ""}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">المبلغ</span>
+          <span className="font-semibold">
+            {amountOriginalValue ? formatCurrency(amountOriginalValue) : "0.00"}{" "}
+            {paymentCurrency === "RMB" ? rmbLabel : egpLabel}
+          </span>
+        </div>
+      </div>
+
+      {(loadingInvoiceSummary || fetchingInvoiceSummary) && (
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+      )}
+
+      {invoiceSummaryError && (
+        <div className="text-xs text-destructive">
+          {getErrorMessage(invoiceSummaryError, summaryErrorOverrides)}
+        </div>
+      )}
+
+      {componentBreakdown}
+
+      {invoiceSummary?.paymentAllowance && (
+        <div className="rounded-md border border-border bg-muted/30 p-3 text-sm space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">الحد المسموح بالدفع (ج.م)</span>
+            <span className="font-medium">
+              {formatCurrency(invoiceSummary.paymentAllowance.remainingAllowedEgp)} ج.م
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>المصدر: {invoiceSummary.paymentAllowance.source === "declared" ? "معلن" : "مسترجع"}</span>
+            <span>تم التحديث {formatDate(invoiceSummary.computedAt)}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const summaryCard = (
+    <Card className={cn(showSummaryAside && "sticky top-6")}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">ملخص الدفعة</CardTitle>
+      </CardHeader>
+      <CardContent>{summaryDetails}</CardContent>
+    </Card>
+  );
 
   const toggleShipmentExpand = (shipmentId: number) => {
     setExpandedShipments(prev => {
@@ -684,557 +1227,1047 @@ export default function Payments() {
             متابعة إجمالي ما تم دفعه وما هو متبقي على جميع الشحنات
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog
+          open={isDialogOpen}
+          onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) {
+              resetForm();
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button data-testid="button-add-payment">
               <Plus className="w-4 h-4 ml-2" />
               إضافة دفعة جديدة
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
+          <DialogContent
+            className={cn(
+              "w-full max-h-[90vh] overflow-y-auto",
+              isWizardMode ? "max-w-3xl" : "max-w-6xl",
+            )}
+          >
             <DialogHeader>
               <DialogTitle>تسجيل دفعة جديدة</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label>اختر الشحنة *</Label>
-                <div className="flex gap-2">
-                  <Select
-                    value={selectedShipmentId?.toString() || ""}
-                    onValueChange={(v) => setSelectedShipmentId(parseInt(v))}
-                  >
-                    <SelectTrigger data-testid="select-shipment" className="flex-1">
-                      <SelectValue placeholder="اختر الشحنة" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activeShipments?.map((s) => (
-                        <SelectItem key={s.id} value={s.id.toString()}>
-                          {s.shipmentCode} - {s.shipmentName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    disabled={!selectedShipmentId}
-                    onClick={() => setShowInvoiceSummary(true)}
-                    data-testid="button-invoice-summary"
-                    title="ملخص الفاتورة"
-                  >
-                    <Receipt className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="paymentDate">تاريخ الدفع *</Label>
-                  <Input
-                    id="paymentDate"
-                    name="paymentDate"
-                    type="date"
-                    defaultValue={new Date().toISOString().split("T")[0]}
-                    required
-                    data-testid="input-payment-date"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>عملة الدفع *</Label>
-                  <Select value={paymentCurrency} onValueChange={setPaymentCurrency}>
-                    <SelectTrigger data-testid="select-currency">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="EGP">جنيه مصري (ج.م)</SelectItem>
-                      <SelectItem value="RMB">رممبي صيني (¥)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>تحت حساب أي جزء؟ *</Label>
-                <Select value={costComponent} onValueChange={setCostComponent}>
-                  <SelectTrigger data-testid="select-cost-component">
-                    <SelectValue placeholder="اختر البند" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {COST_COMPONENTS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>نوع الطرف</Label>
-                  <Select
-                    value={partyType}
-                    onValueChange={(value) =>
-                      setPartyType(value as "supplier" | "shipping_company")
-                    }
-                  >
-                    <SelectTrigger data-testid="select-party-type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="supplier">مورد</SelectItem>
-                      <SelectItem value="shipping_company">شركة شحن</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>الطرف</Label>
-                  <Popover open={partyPopoverOpen} onOpenChange={setPartyPopoverOpen}>
-                    <PopoverTrigger asChild>
+              <PaymentWizard
+                mode={isWizardMode ? "wizard" : "single"}
+                steps={wizardSteps}
+                currentStep={currentStep}
+                onStepChange={setCurrentStep}
+                summary={summaryCard}
+                summaryPlacement={showSummaryAside ? "sidebar" : "top"}
+                footer={
+                  isWizardMode ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                      <Drawer open={summaryDrawerOpen} onOpenChange={setSummaryDrawerOpen}>
+                        <DrawerTrigger asChild>
+                          <Button type="button" variant="outline">
+                            ملخص
+                          </Button>
+                        </DrawerTrigger>
+                        <DrawerContent className="max-h-[80vh] overflow-y-auto">
+                          <DrawerHeader>
+                            <DrawerTitle>ملخص الدفعة</DrawerTitle>
+                          </DrawerHeader>
+                          <div className="px-4 pb-6">{summaryDetails}</div>
+                        </DrawerContent>
+                      </Drawer>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handlePreviousStep}
+                          disabled={currentStep === 0}
+                        >
+                          <ChevronRight className="h-4 w-4 ml-2" />
+                          رجوع
+                        </Button>
+                        {currentStep < wizardSteps.length - 1 && (
+                          <Button type="button" onClick={handleNextStep}>
+                            التالي
+                            <ChevronLeft className="h-4 w-4 mr-2" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2 pt-2">
                       <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={partyPopoverOpen}
-                        className="w-full justify-between"
-                        data-testid="select-party"
+                        type="submit"
+                        className="flex-1"
+                        disabled={createMutation.isPending}
+                        data-testid="button-save-payment"
                       >
-                        {partyId
-                          ? partyType === "supplier"
-                            ? suppliers?.find((supplier) => supplier.id === partyId)?.name
-                            : shippingCompanies?.find((company) => company.id === partyId)?.name
-                          : partyType === "supplier"
-                            ? "اختر المورد…"
-                            : "اختر شركة الشحن…"}
-                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                        {createMutation.isPending ? "جاري الحفظ..." : "حفظ الدفعة"}
                       </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-full p-0" align="start">
-                      <Command>
-                        <CommandInput
-                          placeholder={
-                            partyType === "supplier" ? "ابحث عن المورد..." : "ابحث عن شركة الشحن..."
-                          }
-                        />
-                        <CommandList>
-                          <CommandEmpty>
-                            {partyType === "supplier"
-                              ? loadingSuppliers
-                                ? "جاري التحميل..."
-                                : "لا يوجد مورد مطابق"
-                              : loadingShippingCompanies
-                                ? "جاري التحميل..."
-                                : "لا توجد شركة شحن مطابقة"}
-                          </CommandEmpty>
-                          <CommandGroup>
-                            {(partyType === "supplier" ? suppliers : shippingCompanies)?.map(
-                              (party) => (
-                                <CommandItem
-                                  key={party.id}
-                                  value={party.name}
-                                  onSelect={() => {
-                                    setPartyId(party.id);
-                                    setPartyPopoverOpen(false);
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setIsDialogOpen(false);
+                          resetForm();
+                        }}
+                      >
+                        إلغاء
+                      </Button>
+                    </div>
+                  )
+                }
+              >
+                {isWizardMode ? (
+                  <>
+                    {currentStep === 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-base">الأساسيات</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>اختر الشحنة *</Label>
+                            <div className="flex gap-2">
+                              <Controller
+                                control={form.control}
+                                name="shipmentId"
+                                render={({ field }) => (
+                                  <Select value={field.value} onValueChange={field.onChange}>
+                                    <SelectTrigger data-testid="select-shipment" className="flex-1">
+                                      <SelectValue placeholder="اختر الشحنة" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {activeShipments?.map((s) => (
+                                        <SelectItem key={s.id} value={s.id.toString()}>
+                                          {s.shipmentCode} - {s.shipmentName}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                disabled={!selectedShipmentId}
+                                onClick={() => setShowInvoiceSummary(true)}
+                                data-testid="button-invoice-summary"
+                                title="ملخص الفاتورة"
+                              >
+                                <Receipt className="w-4 h-4" />
+                              </Button>
+                            </div>
+                            {form.formState.errors.shipmentId && (
+                              <p className="text-xs text-destructive">
+                                {form.formState.errors.shipmentId.message}
+                              </p>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="paymentDate">تاريخ الدفع *</Label>
+                              <Input
+                                id="paymentDate"
+                                type="date"
+                                data-testid="input-payment-date"
+                                {...form.register("paymentDate")}
+                              />
+                              {form.formState.errors.paymentDate && (
+                                <p className="text-xs text-destructive">
+                                  {form.formState.errors.paymentDate.message}
+                                </p>
+                              )}
+                            </div>
+                            <div className="space-y-2">
+                              <Label>عملة الدفع *</Label>
+                              <Controller
+                                control={form.control}
+                                name="paymentCurrency"
+                                render={({ field }) => (
+                                  <Select value={field.value} onValueChange={field.onChange}>
+                                    <SelectTrigger data-testid="select-currency">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="EGP">جنيه مصري (ج.م)</SelectItem>
+                                      <SelectItem value="RMB">رممبي صيني (¥)</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              />
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {currentStep === 1 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-base">تفاصيل الدفع</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>تحت حساب أي جزء؟ *</Label>
+                            <Controller
+                              control={form.control}
+                              name="costComponent"
+                              render={({ field }) => (
+                                <Select value={field.value} onValueChange={field.onChange}>
+                                  <SelectTrigger data-testid="select-cost-component">
+                                    <SelectValue placeholder="اختر البند" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {COST_COMPONENTS.map((option) => (
+                                      <SelectItem key={option.value} value={option.value}>
+                                        {option.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            />
+                            {form.formState.errors.costComponent && (
+                              <p className="text-xs text-destructive">
+                                {form.formState.errors.costComponent.message}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>نوع الطرف</Label>
+                              <Controller
+                                control={form.control}
+                                name="partyType"
+                                render={({ field }) => (
+                                  <Select value={field.value} onValueChange={field.onChange}>
+                                    <SelectTrigger data-testid="select-party-type">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="supplier">مورد</SelectItem>
+                                      <SelectItem value="shipping_company">شركة شحن</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>الطرف</Label>
+                              <Popover open={partyPopoverOpen} onOpenChange={setPartyPopoverOpen}>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={partyPopoverOpen}
+                                    className="w-full justify-between"
+                                    data-testid="select-party"
+                                  >
+                                    {partyId
+                                      ? partyType === "supplier"
+                                        ? suppliers?.find((supplier) => supplier.id === partyId)?.name
+                                        : shippingCompanies?.find((company) => company.id === partyId)
+                                            ?.name
+                                      : partyType === "supplier"
+                                        ? "اختر المورد…"
+                                        : "اختر شركة الشحن…"}
+                                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-full p-0" align="start">
+                                  <Command>
+                                    <CommandInput
+                                      placeholder={
+                                        partyType === "supplier"
+                                          ? "ابحث عن المورد..."
+                                          : "ابحث عن شركة الشحن..."
+                                      }
+                                    />
+                                    <CommandList>
+                                      <CommandEmpty>
+                                        {partyType === "supplier"
+                                          ? loadingSuppliers
+                                            ? "جاري التحميل..."
+                                            : "لا يوجد مورد مطابق"
+                                          : loadingShippingCompanies
+                                            ? "جاري التحميل..."
+                                            : "لا توجد شركة شحن مطابقة"}
+                                      </CommandEmpty>
+                                      <CommandGroup>
+                                        {(partyType === "supplier" ? suppliers : shippingCompanies)?.map(
+                                          (party) => (
+                                            <CommandItem
+                                              key={party.id}
+                                              value={party.name}
+                                              onSelect={() => {
+                                                form.setValue("partyId", String(party.id), {
+                                                  shouldValidate: true,
+                                                });
+                                                setPartyPopoverOpen(false);
+                                              }}
+                                            >
+                                              <Check
+                                                className={cn(
+                                                  "ml-2 h-4 w-4",
+                                                  partyId === party.id
+                                                    ? "opacity-100"
+                                                    : "opacity-0",
+                                                )}
+                                              />
+                                              {party.name}
+                                            </CommandItem>
+                                          ),
+                                        )}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                              {form.formState.errors.partyId && (
+                                <p className="text-xs text-destructive">
+                                  {form.formState.errors.partyId.message}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="amountOriginal">المبلغ *</Label>
+                              <Input
+                                id="amountOriginal"
+                                type="number"
+                                step="0.01"
+                                placeholder="0.00"
+                                data-testid="input-amount"
+                                {...form.register("amountOriginal")}
+                              />
+                              {form.formState.errors.amountOriginal && (
+                                <p className="text-xs text-destructive">
+                                  {form.formState.errors.amountOriginal.message}
+                                </p>
+                              )}
+                            </div>
+                            {paymentCurrency === "RMB" && (
+                              <div className="space-y-2">
+                                <Label htmlFor="exchangeRateToEgp">سعر الصرف (RMB→EGP) *</Label>
+                                <Input
+                                  id="exchangeRateToEgp"
+                                  type="number"
+                                  step="0.0001"
+                                  placeholder="7.00"
+                                  data-testid="input-exchange-rate"
+                                  {...form.register("exchangeRateToEgp")}
+                                />
+                                {form.formState.errors.exchangeRateToEgp && (
+                                  <p className="text-xs text-destructive">
+                                    {form.formState.errors.exchangeRateToEgp.message}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {componentBreakdown}
+
+                          {showAutoAllocationSection && (
+                            <div className="space-y-3 rounded-md border border-border p-3">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="space-y-1">
+                                  <Label htmlFor="autoAllocate" className="text-sm">
+                                    توزيع التكلفة
+                                  </Label>
+                                  <p className="text-xs text-muted-foreground">
+                                    توزيع مبلغ دفعة شركة الشحن على الموردين تلقائيًا بحسب إجمالي البضاعة والمتبقي.
+                                  </p>
+                                  {!canAutoAllocate && (
+                                    <p className="text-xs text-amber-600">
+                                      يتطلب تفعيل التوزيع الدفع بالرنمبي (RMB).
+                                    </p>
+                                  )}
+                                </div>
+                                <Switch
+                                  id="autoAllocate"
+                                  checked={autoAllocate}
+                                  onCheckedChange={setAutoAllocate}
+                                  disabled={!canAutoAllocate}
+                                />
+                              </div>
+                              {autoAllocate && canAutoAllocate && (
+                                <div className="space-y-2">
+                                  {!hasPreviewAmount && (
+                                    <p className="text-xs text-muted-foreground">
+                                      أدخل مبلغًا لعرض توزيع التكلفة المقترح.
+                                    </p>
+                                  )}
+                                  {hasPreviewAmount && allocationPreviewLoading && (
+                                    <p className="text-xs text-muted-foreground">
+                                      جاري تحميل معاينة التوزيع...
+                                    </p>
+                                  )}
+                                  {hasPreviewAmount && allocationPreviewError && (
+                                    <p className="text-xs text-destructive">
+                                      تعذر تحميل معاينة التوزيع.
+                                    </p>
+                                  )}
+                                  {hasPreviewAmount &&
+                                    allocationPreview &&
+                                    allocationPreview.suppliers.length > 0 && (
+                                      <div className="overflow-x-auto rounded-md border border-border">
+                                        <Table>
+                                          <TableHeader>
+                                            <TableRow>
+                                              <TableHead className="text-right">المورد</TableHead>
+                                              <TableHead className="text-right">إجمالي البضاعة (¥)</TableHead>
+                                              <TableHead className="text-right">المتبقي (¥)</TableHead>
+                                              <TableHead className="text-right">التوزيع المقترح (¥)</TableHead>
+                                            </TableRow>
+                                          </TableHeader>
+                                          <TableBody>
+                                            {allocationPreview.suppliers.map((supplier) => {
+                                              const supplierName =
+                                                suppliers?.find((entry) => entry.id === supplier.supplierId)
+                                                  ?.name || `مورد #${supplier.supplierId}`;
+                                              return (
+                                                <TableRow key={supplier.supplierId}>
+                                                  <TableCell className="font-medium">{supplierName}</TableCell>
+                                                  <TableCell>{formatCurrency(supplier.goodsTotalRmb)}</TableCell>
+                                                  <TableCell>{formatCurrency(supplier.outstandingRmb)}</TableCell>
+                                                  <TableCell className="font-semibold text-primary">
+                                                    {formatCurrency(supplier.allocatedRmb)}
+                                                  </TableCell>
+                                                </TableRow>
+                                              );
+                                            })}
+                                          </TableBody>
+                                        </Table>
+                                      </div>
+                                    )}
+                                  {hasPreviewAmount &&
+                                    allocationPreview &&
+                                    allocationPreview.suppliers.length === 0 && (
+                                      <p className="text-xs text-muted-foreground">
+                                        لا توجد بيانات كافية لعرض التوزيع.
+                                      </p>
+                                    )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {currentStep === 2 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-base">تفاصيل متقدمة</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>طريقة الدفع *</Label>
+                            <Controller
+                              control={form.control}
+                              name="paymentMethod"
+                              render={({ field }) => (
+                                <Select value={field.value} onValueChange={field.onChange}>
+                                  <SelectTrigger data-testid="select-payment-method">
+                                    <SelectValue placeholder="اختر طريقة الدفع" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PAYMENT_METHODS.map((m) => (
+                                      <SelectItem key={m.value} value={m.value}>
+                                        {m.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            />
+                            {form.formState.errors.paymentMethod && (
+                              <p className="text-xs text-destructive">
+                                {form.formState.errors.paymentMethod.message}
+                              </p>
+                            )}
+                          </div>
+
+                          {paymentMethod === "نقدي" && (
+                            <div className="space-y-2">
+                              <Label htmlFor="cashReceiverName">اسم مستلم الكاش *</Label>
+                              <Input
+                                id="cashReceiverName"
+                                data-testid="input-cash-receiver"
+                                {...form.register("cashReceiverName")}
+                              />
+                              {form.formState.errors.cashReceiverName && (
+                                <p className="text-xs text-destructive">
+                                  {form.formState.errors.cashReceiverName.message}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {paymentMethod && paymentMethod !== "نقدي" && (
+                            <div className="space-y-2">
+                              <Label htmlFor="referenceNumber">الرقم المرجعي</Label>
+                              <Input
+                                id="referenceNumber"
+                                data-testid="input-reference"
+                                {...form.register("referenceNumber")}
+                              />
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <Label htmlFor="note">ملاحظات</Label>
+                            <Textarea
+                              id="note"
+                              rows={2}
+                              data-testid="input-note"
+                              {...form.register("note")}
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="attachment">إرفاق صورة (اختياري)</Label>
+                            <Input
+                              key={attachmentInputKey}
+                              id="attachment"
+                              type="file"
+                              accept="image/*"
+                              onChange={handleAttachmentChange}
+                              data-testid="input-attachment"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              يُسمح بالصور فقط بحد أقصى 2MB.
+                            </p>
+                            {attachmentError && (
+                              <p className="text-xs text-destructive">{attachmentError}</p>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {currentStep === 3 && (
+                      <Card>
+                        <CardHeader className="space-y-2">
+                          <CardTitle className="text-base">مراجعة وتأكيد</CardTitle>
+                          <p className="text-sm text-muted-foreground">
+                            راجع تفاصيل الدفعة قبل الحفظ النهائي.
+                          </p>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div ref={summaryExportRef}>{summaryCard}</div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button type="button" variant="outline" onClick={handleExportSummary}>
+                              <Download className="h-4 w-4 ml-2" />
+                              تصدير الملخص (PDF)
+                            </Button>
+                            <Button
+                              type="submit"
+                              disabled={createMutation.isPending || Boolean(completedPaymentRef)}
+                            >
+                              {createMutation.isPending ? "جاري الحفظ..." : "حفظ الدفعة"}
+                            </Button>
+                          </div>
+
+                          {completedPaymentRef && (
+                            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+                              <div className="flex items-center gap-2 font-semibold">
+                                <CheckCircle2 className="h-5 w-5" />
+                                تم حفظ الدفعة بنجاح
+                              </div>
+                              <div className="mt-2 flex items-center justify-between">
+                                <span>رقم المرجع</span>
+                                <span className="font-mono">{completedPaymentRef}</span>
+                              </div>
+                              <div className="mt-3 flex items-center justify-end">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setIsDialogOpen(false);
+                                    resetForm();
                                   }}
                                 >
-                                  <Check
-                                    className={cn(
-                                      "ml-2 h-4 w-4",
-                                      partyId === party.id ? "opacity-100" : "opacity-0",
-                                    )}
-                                  />
-                                  {party.name}
-                                </CommandItem>
-                              ),
+                                  إغلاق
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap gap-2 text-sm">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={() => setCurrentStep(0)}
+                            >
+                              تعديل الأساسيات
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={() => setCurrentStep(1)}
+                            >
+                              تعديل تفاصيل الدفع
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={() => setCurrentStep(2)}
+                            >
+                              تعديل التفاصيل المتقدمة
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </>
+                ) : (
+                  <div className="space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">الأساسيات</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>اختر الشحنة *</Label>
+                          <div className="flex gap-2">
+                            <Controller
+                              control={form.control}
+                              name="shipmentId"
+                              render={({ field }) => (
+                                <Select value={field.value} onValueChange={field.onChange}>
+                                  <SelectTrigger data-testid="select-shipment" className="flex-1">
+                                    <SelectValue placeholder="اختر الشحنة" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {activeShipments?.map((s) => (
+                                      <SelectItem key={s.id} value={s.id.toString()}>
+                                        {s.shipmentCode} - {s.shipmentName}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              disabled={!selectedShipmentId}
+                              onClick={() => setShowInvoiceSummary(true)}
+                              data-testid="button-invoice-summary"
+                              title="ملخص الفاتورة"
+                            >
+                              <Receipt className="w-4 h-4" />
+                            </Button>
+                          </div>
+                          {form.formState.errors.shipmentId && (
+                            <p className="text-xs text-destructive">
+                              {form.formState.errors.shipmentId.message}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="paymentDate">تاريخ الدفع *</Label>
+                            <Input
+                              id="paymentDate"
+                              type="date"
+                              data-testid="input-payment-date"
+                              {...form.register("paymentDate")}
+                            />
+                            {form.formState.errors.paymentDate && (
+                              <p className="text-xs text-destructive">
+                                {form.formState.errors.paymentDate.message}
+                              </p>
                             )}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>عملة الدفع *</Label>
+                            <Controller
+                              control={form.control}
+                              name="paymentCurrency"
+                              render={({ field }) => (
+                                <Select value={field.value} onValueChange={field.onChange}>
+                                  <SelectTrigger data-testid="select-currency">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="EGP">جنيه مصري (ج.م)</SelectItem>
+                                    <SelectItem value="RMB">رممبي صيني (¥)</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            />
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
 
-              <div className="space-y-2">
-                {costComponent &&
-                  (invoiceSummary || supplierGoodsSummary || loadingSupplierGoodsSummary) && (
-                    <div className="mt-2 p-3 bg-muted/50 rounded text-sm space-y-2">
-                      {costComponent === "تكلفة البضاعة" && showSupplierGoodsSummary && (
-                        <>
-                          {loadingSupplierGoodsSummary && (
-                            <p className="text-xs text-muted-foreground">جاري تحميل ملخص المورد...</p>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">تفاصيل الدفع</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>تحت حساب أي جزء؟ *</Label>
+                          <Controller
+                            control={form.control}
+                            name="costComponent"
+                            render={({ field }) => (
+                              <Select value={field.value} onValueChange={field.onChange}>
+                                <SelectTrigger data-testid="select-cost-component">
+                                  <SelectValue placeholder="اختر البند" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {COST_COMPONENTS.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          />
+                          {form.formState.errors.costComponent && (
+                            <p className="text-xs text-destructive">
+                              {form.formState.errors.costComponent.message}
+                            </p>
                           )}
-                          {supplierGoodsSummaryError && (
-                            <p className="text-xs text-destructive">تعذر تحميل ملخص المورد.</p>
-                          )}
-                          {!loadingSupplierGoodsSummary && supplierGoodsSummary && (
-                            <>
-                              <div className="flex items-center justify-between">
-                                <span className="text-muted-foreground">الإجمالي</span>
-                                <span className="font-semibold">
-                                  {formatCurrency(supplierGoodsSummary.supplierGoodsTotalRmb)} {rmbLabel}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-muted-foreground">المدفوع</span>
-                                <span className="font-semibold text-green-600">
-                                  {formatCurrency(supplierGoodsSummary.supplierPaidRmb)} {rmbLabel}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-muted-foreground">المتبقي</span>
-                                <span className="font-semibold text-amber-600">
-                                  {formatCurrency(supplierGoodsSummary.supplierRemainingRmb)} {rmbLabel}
-                                </span>
-                              </div>
-                            </>
-                          )}
-                        </>
-                      )}
-                      {costComponent === "تكلفة البضاعة" && !showSupplierGoodsSummary && invoiceSummary && (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">الإجمالي</span>
-                            <span className="font-semibold">
-                              {formatCurrency(invoiceSummary.rmb.goodsTotal)} {rmbLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المدفوع</span>
-                            <span className="font-semibold text-green-600">
-                              {formatCurrency(
-                                (invoiceSummary as any).paidByComponent?.["تكلفة البضاعة"] || "0",
-                              )}{" "}
-                              {rmbLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المتبقي</span>
-                            <span className="font-semibold text-amber-600">
-                              {formatCurrency(
-                                (invoiceSummary as any).remainingByComponent?.["تكلفة البضاعة"] || "0",
-                              )}{" "}
-                              {rmbLabel}
-                            </span>
-                          </div>
-                        </>
-                      )}
-                      {costComponent === "الشحن" && invoiceSummary && (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">الإجمالي</span>
-                            <span className="font-semibold">
-                              {formatCurrency(invoiceSummary.rmb.shippingTotal)} {rmbLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المدفوع</span>
-                            <span className="font-semibold text-green-600">
-                              {formatCurrency((invoiceSummary as any).paidByComponent?.["الشحن"] || "0")}{" "}
-                              {rmbLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المتبقي</span>
-                            <span className="font-semibold text-amber-600">
-                              {formatCurrency(
-                                (invoiceSummary as any).remainingByComponent?.["الشحن"] || "0",
-                              )}{" "}
-                              {rmbLabel}
-                            </span>
-                          </div>
-                        </>
-                      )}
-                      {costComponent === "العمولة" && invoiceSummary && (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">الإجمالي</span>
-                            <span className="font-semibold">
-                              {formatCurrency(invoiceSummary.rmb.commissionTotal)} {rmbLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المدفوع</span>
-                            <span className="font-semibold text-green-600">
-                              {formatCurrency((invoiceSummary as any).paidByComponent?.["العمولة"] || "0")}{" "}
-                              {rmbLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المتبقي</span>
-                            <span className="font-semibold text-amber-600">
-                              {formatCurrency(
-                                (invoiceSummary as any).remainingByComponent?.["العمولة"] || "0",
-                              )}{" "}
-                              {rmbLabel}
-                            </span>
-                          </div>
-                        </>
-                      )}
-                      {costComponent === "الجمرك" && invoiceSummary && (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">الإجمالي</span>
-                            <span className="font-semibold">
-                              {formatCurrency(invoiceSummary.egp.customsTotal)} {egpLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المدفوع</span>
-                            <span className="font-semibold text-green-600">
-                              {formatCurrency((invoiceSummary as any).paidByComponent?.["الجمرك"] || "0")}{" "}
-                              {egpLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المتبقي</span>
-                            <span className="font-semibold text-amber-600">
-                              {formatCurrency(
-                                (invoiceSummary as any).remainingByComponent?.["الجمرك"] || "0",
-                              )}{" "}
-                              {egpLabel}
-                            </span>
-                          </div>
-                        </>
-                      )}
-                      {costComponent === "التخريج" && invoiceSummary && (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">الإجمالي</span>
-                            <span className="font-semibold">
-                              {formatCurrency(invoiceSummary.egp.takhreegTotal)} {egpLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المدفوع</span>
-                            <span className="font-semibold text-green-600">
-                              {formatCurrency((invoiceSummary as any).paidByComponent?.["التخريج"] || "0")}{" "}
-                              {egpLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-muted-foreground">المتبقي</span>
-                            <span className="font-semibold text-amber-600">
-                              {formatCurrency(
-                                (invoiceSummary as any).remainingByComponent?.["التخريج"] || "0",
-                              )}{" "}
-                              {egpLabel}
-                            </span>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-              </div>
+                        </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="amountOriginal">المبلغ *</Label>
-                  <Input
-                    id="amountOriginal"
-                    name="amountOriginal"
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    data-testid="input-amount"
-                    value={amountOriginalValue}
-                    onChange={(event) => setAmountOriginalValue(event.target.value)}
-                  />
-                </div>
-                {paymentCurrency === "RMB" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="exchangeRateToEgp">سعر الصرف (RMB→EGP) *</Label>
-                    <Input
-                      id="exchangeRateToEgp"
-                      name="exchangeRateToEgp"
-                      type="number"
-                      step="0.0001"
-                      required
-                      placeholder="7.00"
-                      data-testid="input-exchange-rate"
-                    />
-                  </div>
-                )}
-              </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>نوع الطرف</Label>
+                            <Controller
+                              control={form.control}
+                              name="partyType"
+                              render={({ field }) => (
+                                <Select value={field.value} onValueChange={field.onChange}>
+                                  <SelectTrigger data-testid="select-party-type">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="supplier">مورد</SelectItem>
+                                    <SelectItem value="shipping_company">شركة شحن</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>الطرف</Label>
+                            <Popover open={partyPopoverOpen} onOpenChange={setPartyPopoverOpen}>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  role="combobox"
+                                  aria-expanded={partyPopoverOpen}
+                                  className="w-full justify-between"
+                                  data-testid="select-party"
+                                >
+                                  {partyId
+                                    ? partyType === "supplier"
+                                      ? suppliers?.find((supplier) => supplier.id === partyId)?.name
+                                      : shippingCompanies?.find((company) => company.id === partyId)?.name
+                                    : partyType === "supplier"
+                                      ? "اختر المورد…"
+                                      : "اختر شركة الشحن…"}
+                                  <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-full p-0" align="start">
+                                <Command>
+                                  <CommandInput
+                                    placeholder={
+                                      partyType === "supplier"
+                                        ? "ابحث عن المورد..."
+                                        : "ابحث عن شركة الشحن..."
+                                    }
+                                  />
+                                  <CommandList>
+                                    <CommandEmpty>
+                                      {partyType === "supplier"
+                                        ? loadingSuppliers
+                                          ? "جاري التحميل..."
+                                          : "لا يوجد مورد مطابق"
+                                        : loadingShippingCompanies
+                                          ? "جاري التحميل..."
+                                          : "لا توجد شركة شحن مطابقة"}
+                                    </CommandEmpty>
+                                    <CommandGroup>
+                                      {(partyType === "supplier" ? suppliers : shippingCompanies)?.map(
+                                        (party) => (
+                                          <CommandItem
+                                            key={party.id}
+                                            value={party.name}
+                                            onSelect={() => {
+                                              form.setValue("partyId", String(party.id), {
+                                                shouldValidate: true,
+                                              });
+                                              setPartyPopoverOpen(false);
+                                            }}
+                                          >
+                                            <Check
+                                              className={cn(
+                                                "ml-2 h-4 w-4",
+                                                partyId === party.id ? "opacity-100" : "opacity-0",
+                                              )}
+                                            />
+                                            {party.name}
+                                          </CommandItem>
+                                        ),
+                                      )}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
+                            {form.formState.errors.partyId && (
+                              <p className="text-xs text-destructive">
+                                {form.formState.errors.partyId.message}
+                              </p>
+                            )}
+                          </div>
+                        </div>
 
-              {showAutoAllocationSection && (
-                <div className="space-y-3 rounded-md border border-border p-3">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-1">
-                      <Label htmlFor="autoAllocate" className="text-sm">
-                        توزيع التكلفة
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        توزيع مبلغ دفعة شركة الشحن على الموردين تلقائيًا بحسب إجمالي البضاعة والمتبقي.
-                      </p>
-                      {!canAutoAllocate && (
-                        <p className="text-xs text-amber-600">
-                          يتطلب تفعيل التوزيع الدفع بالرنمبي (RMB).
-                        </p>
-                      )}
-                    </div>
-                    <Switch
-                      id="autoAllocate"
-                      checked={autoAllocate}
-                      onCheckedChange={setAutoAllocate}
-                      disabled={!canAutoAllocate}
-                    />
-                  </div>
-                  {autoAllocate && canAutoAllocate && (
-                    <div className="space-y-2">
-                      {!hasPreviewAmount && (
-                        <p className="text-xs text-muted-foreground">
-                          أدخل مبلغًا لعرض توزيع التكلفة المقترح.
-                        </p>
-                      )}
-                      {hasPreviewAmount && allocationPreviewLoading && (
-                        <p className="text-xs text-muted-foreground">جاري تحميل معاينة التوزيع...</p>
-                      )}
-                      {hasPreviewAmount && allocationPreviewError && (
-                        <p className="text-xs text-destructive">
-                          تعذر تحميل معاينة التوزيع.
-                        </p>
-                      )}
-                      {hasPreviewAmount &&
-                        allocationPreview &&
-                        allocationPreview.suppliers.length > 0 && (
-                          <div className="overflow-x-auto rounded-md border border-border">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="text-right">المورد</TableHead>
-                                  <TableHead className="text-right">إجمالي البضاعة (¥)</TableHead>
-                                  <TableHead className="text-right">المتبقي (¥)</TableHead>
-                                  <TableHead className="text-right">التوزيع المقترح (¥)</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {allocationPreview.suppliers.map((supplier) => {
-                                  const supplierName =
-                                    suppliers?.find((entry) => entry.id === supplier.supplierId)?.name ||
-                                    `مورد #${supplier.supplierId}`;
-                                  return (
-                                    <TableRow key={supplier.supplierId}>
-                                      <TableCell className="font-medium">{supplierName}</TableCell>
-                                      <TableCell>{formatCurrency(supplier.goodsTotalRmb)}</TableCell>
-                                      <TableCell>{formatCurrency(supplier.outstandingRmb)}</TableCell>
-                                      <TableCell className="font-semibold text-primary">
-                                        {formatCurrency(supplier.allocatedRmb)}
-                                      </TableCell>
-                                    </TableRow>
-                                  );
-                                })}
-                              </TableBody>
-                            </Table>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="amountOriginal">المبلغ *</Label>
+                            <Input
+                              id="amountOriginal"
+                              type="number"
+                              step="0.01"
+                              placeholder="0.00"
+                              data-testid="input-amount"
+                              {...form.register("amountOriginal")}
+                            />
+                            {form.formState.errors.amountOriginal && (
+                              <p className="text-xs text-destructive">
+                                {form.formState.errors.amountOriginal.message}
+                              </p>
+                            )}
+                          </div>
+                          {paymentCurrency === "RMB" && (
+                            <div className="space-y-2">
+                              <Label htmlFor="exchangeRateToEgp">سعر الصرف (RMB→EGP) *</Label>
+                              <Input
+                                id="exchangeRateToEgp"
+                                type="number"
+                                step="0.0001"
+                                placeholder="7.00"
+                                data-testid="input-exchange-rate"
+                                {...form.register("exchangeRateToEgp")}
+                              />
+                              {form.formState.errors.exchangeRateToEgp && (
+                                <p className="text-xs text-destructive">
+                                  {form.formState.errors.exchangeRateToEgp.message}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {componentBreakdown}
+
+                        {showAutoAllocationSection && (
+                          <div className="space-y-3 rounded-md border border-border p-3">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="space-y-1">
+                                <Label htmlFor="autoAllocate" className="text-sm">
+                                  توزيع التكلفة
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                  توزيع مبلغ دفعة شركة الشحن على الموردين تلقائيًا بحسب إجمالي البضاعة والمتبقي.
+                                </p>
+                                {!canAutoAllocate && (
+                                  <p className="text-xs text-amber-600">
+                                    يتطلب تفعيل التوزيع الدفع بالرنمبي (RMB).
+                                  </p>
+                                )}
+                              </div>
+                              <Switch
+                                id="autoAllocate"
+                                checked={autoAllocate}
+                                onCheckedChange={setAutoAllocate}
+                                disabled={!canAutoAllocate}
+                              />
+                            </div>
+                            {autoAllocate && canAutoAllocate && (
+                              <div className="space-y-2">
+                                {!hasPreviewAmount && (
+                                  <p className="text-xs text-muted-foreground">
+                                    أدخل مبلغًا لعرض توزيع التكلفة المقترح.
+                                  </p>
+                                )}
+                                {hasPreviewAmount && allocationPreviewLoading && (
+                                  <p className="text-xs text-muted-foreground">جاري تحميل معاينة التوزيع...</p>
+                                )}
+                                {hasPreviewAmount && allocationPreviewError && (
+                                  <p className="text-xs text-destructive">
+                                    تعذر تحميل معاينة التوزيع.
+                                  </p>
+                                )}
+                                {hasPreviewAmount &&
+                                  allocationPreview &&
+                                  allocationPreview.suppliers.length > 0 && (
+                                    <div className="overflow-x-auto rounded-md border border-border">
+                                      <Table>
+                                        <TableHeader>
+                                          <TableRow>
+                                            <TableHead className="text-right">المورد</TableHead>
+                                            <TableHead className="text-right">إجمالي البضاعة (¥)</TableHead>
+                                            <TableHead className="text-right">المتبقي (¥)</TableHead>
+                                            <TableHead className="text-right">التوزيع المقترح (¥)</TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {allocationPreview.suppliers.map((supplier) => {
+                                            const supplierName =
+                                              suppliers?.find((entry) => entry.id === supplier.supplierId)
+                                                ?.name || `مورد #${supplier.supplierId}`;
+                                            return (
+                                              <TableRow key={supplier.supplierId}>
+                                                <TableCell className="font-medium">{supplierName}</TableCell>
+                                                <TableCell>{formatCurrency(supplier.goodsTotalRmb)}</TableCell>
+                                                <TableCell>{formatCurrency(supplier.outstandingRmb)}</TableCell>
+                                                <TableCell className="font-semibold text-primary">
+                                                  {formatCurrency(supplier.allocatedRmb)}
+                                                </TableCell>
+                                              </TableRow>
+                                            );
+                                          })}
+                                        </TableBody>
+                                      </Table>
+                                    </div>
+                                  )}
+                                {hasPreviewAmount &&
+                                  allocationPreview &&
+                                  allocationPreview.suppliers.length === 0 && (
+                                    <p className="text-xs text-muted-foreground">
+                                      لا توجد بيانات كافية لعرض التوزيع.
+                                    </p>
+                                  )}
+                              </div>
+                            )}
                           </div>
                         )}
-                      {hasPreviewAmount &&
-                        allocationPreview &&
-                        allocationPreview.suppliers.length === 0 && (
-                          <p className="text-xs text-muted-foreground">
-                            لا توجد بيانات كافية لعرض التوزيع.
-                          </p>
-                        )}
-                    </div>
-                  )}
-                </div>
-              )}
+                      </CardContent>
+                    </Card>
 
-              <div className="space-y-2">
-                <Label>طريقة الدفع *</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                  <SelectTrigger data-testid="select-payment-method">
-                    <SelectValue placeholder="اختر طريقة الدفع" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_METHODS.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                    <Card>
+                      <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
+                        <CardHeader className="flex flex-row items-center justify-between">
+                          <CardTitle className="text-base">تفاصيل متقدمة</CardTitle>
+                          <CollapsibleTrigger asChild>
+                            <Button type="button" variant="ghost" size="sm">
+                              {isAdvancedOpen ? "إخفاء" : "عرض"}
+                            </Button>
+                          </CollapsibleTrigger>
+                        </CardHeader>
+                        <CollapsibleContent>
+                          <CardContent className="space-y-4">
+                            <div className="space-y-2">
+                              <Label>طريقة الدفع *</Label>
+                              <Controller
+                                control={form.control}
+                                name="paymentMethod"
+                                render={({ field }) => (
+                                  <Select value={field.value} onValueChange={field.onChange}>
+                                    <SelectTrigger data-testid="select-payment-method">
+                                      <SelectValue placeholder="اختر طريقة الدفع" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {PAYMENT_METHODS.map((m) => (
+                                        <SelectItem key={m.value} value={m.value}>
+                                          {m.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              />
+                              {form.formState.errors.paymentMethod && (
+                                <p className="text-xs text-destructive">
+                                  {form.formState.errors.paymentMethod.message}
+                                </p>
+                              )}
+                            </div>
 
-              {paymentMethod === "نقدي" && (
-                <div className="space-y-2">
-                  <Label htmlFor="cashReceiverName">اسم مستلم الكاش *</Label>
-                  <Input
-                    id="cashReceiverName"
-                    name="cashReceiverName"
-                    required
-                    data-testid="input-cash-receiver"
-                  />
-                </div>
-              )}
+                            {paymentMethod === "نقدي" && (
+                              <div className="space-y-2">
+                                <Label htmlFor="cashReceiverName">اسم مستلم الكاش *</Label>
+                                <Input
+                                  id="cashReceiverName"
+                                  data-testid="input-cash-receiver"
+                                  {...form.register("cashReceiverName")}
+                                />
+                                {form.formState.errors.cashReceiverName && (
+                                  <p className="text-xs text-destructive">
+                                    {form.formState.errors.cashReceiverName.message}
+                                  </p>
+                                )}
+                              </div>
+                            )}
 
-              {paymentMethod && paymentMethod !== "نقدي" && (
-                <div className="space-y-2">
-                  <Label htmlFor="referenceNumber">الرقم المرجعي</Label>
-                  <Input
-                    id="referenceNumber"
-                    name="referenceNumber"
-                    data-testid="input-reference"
-                  />
-                </div>
-              )}
+                            {paymentMethod && paymentMethod !== "نقدي" && (
+                              <div className="space-y-2">
+                                <Label htmlFor="referenceNumber">الرقم المرجعي</Label>
+                                <Input
+                                  id="referenceNumber"
+                                  data-testid="input-reference"
+                                  {...form.register("referenceNumber")}
+                                />
+                              </div>
+                            )}
 
-              <div className="space-y-2">
-                <Label htmlFor="note">ملاحظات</Label>
-                <Textarea
-                  id="note"
-                  name="note"
-                  rows={2}
-                  data-testid="input-note"
-                />
-              </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="note">ملاحظات</Label>
+                              <Textarea
+                                id="note"
+                                rows={2}
+                                data-testid="input-note"
+                                {...form.register("note")}
+                              />
+                            </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="attachment">إرفاق صورة (اختياري)</Label>
-                <Input
-                  key={attachmentInputKey}
-                  id="attachment"
-                  name="attachment"
-                  type="file"
-                  accept="image/*"
-                  onChange={handleAttachmentChange}
-                  data-testid="input-attachment"
-                />
-                <p className="text-xs text-muted-foreground">
-                  يُسمح بالصور فقط بحد أقصى 2MB.
-                </p>
-                {attachmentError && (
-                  <p className="text-xs text-destructive">{attachmentError}</p>
+                            <div className="space-y-2">
+                              <Label htmlFor="attachment">إرفاق صورة (اختياري)</Label>
+                              <Input
+                                key={attachmentInputKey}
+                                id="attachment"
+                                type="file"
+                                accept="image/*"
+                                onChange={handleAttachmentChange}
+                                data-testid="input-attachment"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                يُسمح بالصور فقط بحد أقصى 2MB.
+                              </p>
+                              {attachmentError && (
+                                <p className="text-xs text-destructive">{attachmentError}</p>
+                              )}
+                            </div>
+                          </CardContent>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    </Card>
+                  </div>
                 )}
-              </div>
+              </PaymentWizard>
 
               {clientValidationError && (
                 <div className="text-sm text-destructive" data-testid="validation-error">
                   {clientValidationError}
                 </div>
               )}
-
-              <div className="flex gap-2 pt-4">
-                <Button
-                  type="submit"
-                  className="flex-1"
-                  disabled={createMutation.isPending}
-                  data-testid="button-save-payment"
-                >
-                  {createMutation.isPending ? "جاري الحفظ..." : "حفظ الدفعة"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setIsDialogOpen(false);
-                    resetForm();
-                  }}
-                >
-                  إلغاء
-                </Button>
-              </div>
             </form>
           </DialogContent>
         </Dialog>
@@ -1411,7 +2444,9 @@ export default function Payments() {
                                       size="sm"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setSelectedShipmentId(shipment.id);
+                                        form.setValue("shipmentId", shipment.id.toString(), {
+                                          shouldValidate: true,
+                                        });
                                         setShowInvoiceSummary(true);
                                       }}
                                       data-testid={`button-invoice-summary-${shipment.id}`}
@@ -1424,7 +2459,9 @@ export default function Payments() {
                                       size="sm"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setSelectedShipmentId(shipment.id);
+                                        form.setValue("shipmentId", shipment.id.toString(), {
+                                          shouldValidate: true,
+                                        });
                                         setIsDialogOpen(true);
                                       }}
                                       data-testid={`button-add-payment-${shipment.id}`}
@@ -1852,7 +2889,9 @@ export default function Payments() {
             </div>
           ) : invoiceSummaryError ? (
             <div className="text-center py-4">
-              <div className="text-destructive mb-2">حدث خطأ أثناء تحميل البيانات</div>
+              <div className="text-destructive mb-2">
+                {getErrorMessage(invoiceSummaryError, summaryErrorOverrides)}
+              </div>
               <Button variant="outline" size="sm" onClick={() => setShowInvoiceSummary(false)}>
                 إغلاق
               </Button>
