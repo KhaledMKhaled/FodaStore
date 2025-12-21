@@ -474,6 +474,12 @@ export default function Payments() {
   ]);
 
   useEffect(() => {
+    if (shipmentIdValue) {
+      form.clearErrors("shipmentId");
+    }
+  }, [shipmentIdValue, form]);
+
+  useEffect(() => {
     if (!isDialogOpen || !selectedShipmentId) return;
     const storageKey = `payment-draft-${selectedShipmentId}`;
     const stored = localStorage.getItem(storageKey);
@@ -610,13 +616,13 @@ export default function Payments() {
     401: "انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى.",
     403: "ليست لديك صلاحية لإضافة دفعة.",
     409: "توجد دفعة مشابهة لهذه الشحنة بالفعل.",
-    defaultMessage: "تعذر حفظ الدفعة، يرجى المحاولة مرة أخرى.",
+    defaultMessage: "تعذر حفظ الدفعة. تحقق من البيانات أو أعد المحاولة.",
   } as const;
 
   const summaryErrorOverrides = {
     401: "انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى.",
     403: "ليست لديك صلاحية لعرض الملخص.",
-    defaultMessage: "تعذر تحميل البيانات المطلوبة.",
+    defaultMessage: "تعذر تحميل الملخص. تحقق من الاتصال أو الصلاحيات.",
   } as const;
 
   const validatePartySelection = async (shouldToast = true) => {
@@ -633,7 +639,8 @@ export default function Payments() {
           "items",
         ]);
       } catch (error) {
-        const message = "تعذر التحقق من المورد";
+        console.error("Failed to fetch shipment items for validation", error);
+        const message = "تعذر التحقق من المورد. تحقق من الاتصال أو الصلاحيات.";
         if (shouldToast) {
           toast({ title: message, variant: "destructive" });
         }
@@ -883,6 +890,173 @@ export default function Payments() {
 
   const isSuccessState = currentStep === 2;
 
+  const summaryTotals = useMemo(() => {
+    if (!costComponent) return null;
+    if (costComponent === "تكلفة البضاعة" && showSupplierGoodsSummary && supplierGoodsSummary) {
+      return {
+        total: supplierGoodsSummary.supplierGoodsTotalRmb,
+        paid: supplierGoodsSummary.supplierPaidRmb,
+        remaining: supplierGoodsSummary.supplierRemainingRmb,
+        currencyLabel: rmbLabel,
+      };
+    }
+    if (!invoiceSummary) return null;
+    const paidByComponent = (invoiceSummary as any).paidByComponent ?? {};
+    const remainingByComponent = (invoiceSummary as any).remainingByComponent ?? {};
+    if (costComponent === "تكلفة البضاعة") {
+      return {
+        total: invoiceSummary.rmb.goodsTotal,
+        paid: paidByComponent["تكلفة البضاعة"] || "0",
+        remaining: remainingByComponent["تكلفة البضاعة"] || "0",
+        currencyLabel: rmbLabel,
+      };
+    }
+    if (costComponent === "الشحن") {
+      return {
+        total: invoiceSummary.rmb.shippingTotal,
+        paid: paidByComponent["الشحن"] || "0",
+        remaining: remainingByComponent["الشحن"] || "0",
+        currencyLabel: rmbLabel,
+      };
+    }
+    if (costComponent === "العمولة") {
+      return {
+        total: invoiceSummary.rmb.commissionTotal,
+        paid: paidByComponent["العمولة"] || "0",
+        remaining: remainingByComponent["العمولة"] || "0",
+        currencyLabel: rmbLabel,
+      };
+    }
+    if (costComponent === "الجمرك") {
+      return {
+        total: invoiceSummary.egp.customsTotal,
+        paid: paidByComponent["الجمرك"] || "0",
+        remaining: remainingByComponent["الجمرك"] || "0",
+        currencyLabel: egpLabel,
+      };
+    }
+    if (costComponent === "التخريج") {
+      return {
+        total: invoiceSummary.egp.takhreegTotal,
+        paid: paidByComponent["التخريج"] || "0",
+        remaining: remainingByComponent["التخريج"] || "0",
+        currencyLabel: egpLabel,
+      };
+    }
+    return null;
+  }, [
+    costComponent,
+    egpLabel,
+    invoiceSummary,
+    rmbLabel,
+    showSupplierGoodsSummary,
+    supplierGoodsSummary,
+  ]);
+
+  const summaryRows = useMemo(
+    () => [
+      {
+        label: "الشحنة",
+        value: selectedShipment
+          ? `${selectedShipment.shipmentCode} - ${selectedShipment.shipmentName}`
+          : "—",
+      },
+      { label: "البند", value: costComponent || "—" },
+      {
+        label: "الطرف",
+        value: `${partyType === "supplier" ? "مورد" : "شركة شحن"}${
+          selectedPartyName ? ` - ${selectedPartyName}` : ""
+        }` || "—",
+      },
+      {
+        label: "المبلغ",
+        value: `${amountOriginalValue ? formatCurrency(amountOriginalValue) : "0.00"} ${
+          paymentCurrency === "RMB" ? rmbLabel : egpLabel
+        }`,
+      },
+      { label: "طريقة الدفع", value: paymentMethod || "—" },
+    ],
+    [
+      amountOriginalValue,
+      costComponent,
+      egpLabel,
+      partyType,
+      paymentCurrency,
+      paymentMethod,
+      rmbLabel,
+      selectedPartyName,
+      selectedShipment,
+    ],
+  );
+
+  const isTotalsLoading =
+    !!costComponent &&
+    (loadingInvoiceSummary ||
+      fetchingInvoiceSummary ||
+      (showSupplierGoodsSummary && loadingSupplierGoodsSummary));
+
+  const summaryError = supplierGoodsSummaryError || invoiceSummaryError;
+
+  const renderSummaryCard = (title: string) => (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="space-y-2">
+          {summaryRows.map((row) => (
+            <div key={row.label} className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground">{row.label}</span>
+              <span className="font-medium text-left">{row.value}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-md bg-muted/40 p-3 space-y-2">
+          <div className="text-xs font-semibold text-muted-foreground">الإجماليات</div>
+          {isTotalsLoading && (
+            <div className="space-y-2">
+              <Skeleton className="h-3 w-2/3" />
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="h-3 w-1/2" />
+            </div>
+          )}
+          {!isTotalsLoading && summaryTotals && (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">الإجمالي</span>
+                <span className="font-semibold">
+                  {formatCurrency(summaryTotals.total)} {summaryTotals.currencyLabel}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">المدفوع</span>
+                <span className="font-semibold text-green-600">
+                  {formatCurrency(summaryTotals.paid)} {summaryTotals.currencyLabel}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">المتبقي</span>
+                <span className="font-semibold text-amber-600">
+                  {formatCurrency(summaryTotals.remaining)} {summaryTotals.currencyLabel}
+                </span>
+              </div>
+            </>
+          )}
+          {!isTotalsLoading && !summaryTotals && (
+            <p className="text-xs text-muted-foreground">اختر بند التكلفة لعرض الإجماليات.</p>
+          )}
+        </div>
+
+        {summaryError && (
+          <p className="text-xs text-destructive">
+            {getErrorMessage(summaryError, summaryErrorOverrides)}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+
   const componentBreakdown = costComponent &&
     (invoiceSummary || supplierGoodsSummary || loadingSupplierGoodsSummary) && (
       <div className="mt-2 space-y-2 rounded-md bg-muted/50 p-3 text-sm">
@@ -1093,6 +1267,13 @@ export default function Payments() {
   ];
 
   const handleNextStep = async () => {
+    const shipmentValue = form.getValues("shipmentId");
+    if (!shipmentValue || !shipmentValue.trim()) {
+      form.setError("shipmentId", { message: "يرجى اختيار الشحنة" });
+      return;
+    }
+    form.clearErrors("shipmentId");
+
     const fields = stepFieldGroups[currentStep] ?? [];
     const filteredFields = fields.filter((field) => {
       if (field === "exchangeRateToEgp" && paymentCurrency !== "RMB") return false;
@@ -1295,6 +1476,9 @@ export default function Payments() {
                 >
                   {currentStep === 0 && !isSuccessState && (
                     <div className="space-y-4">
+                      <div className="xl:hidden">{renderSummaryCard("ملخص مباشر")}</div>
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                        <div className="space-y-4">
                       <Card>
                         <CardHeader>
                           <CardTitle className="text-base">الأساسيات</CardTitle>
@@ -1307,7 +1491,15 @@ export default function Payments() {
                                 control={form.control}
                                 name="shipmentId"
                                 render={({ field }) => (
-                                  <Select value={field.value} onValueChange={field.onChange}>
+                                  <Select
+                                    value={field.value ? String(field.value) : ""}
+                                    onValueChange={(value) => {
+                                      field.onChange(value);
+                                      if (value) {
+                                        form.clearErrors("shipmentId");
+                                      }
+                                    }}
+                                  >
                                     <SelectTrigger data-testid="select-shipment" className="flex-1">
                                       <SelectValue placeholder="اختر الشحنة" />
                                     </SelectTrigger>
@@ -1720,6 +1912,9 @@ export default function Payments() {
                           </div>
                         </CardContent>
                       </Card>
+                        </div>
+                        <div className="hidden xl:block">{renderSummaryCard("ملخص مباشر")}</div>
+                      </div>
                     </div>
                   )}
 
@@ -1733,6 +1928,7 @@ export default function Payments() {
                       </CardHeader>
                       <CardContent className="space-y-4">
                         <PaymentSummaryReceipt data={reviewReceiptData} />
+                        {renderSummaryCard("ملخص المراجعة")}
 
                         {invoiceSummary?.paymentAllowance && (
                           <p className="text-xs text-muted-foreground">
