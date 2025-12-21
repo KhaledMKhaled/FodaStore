@@ -1012,42 +1012,6 @@ export default function Payments() {
           ))}
         </div>
 
-        <div className="rounded-md bg-muted/40 p-3 space-y-2">
-          <div className="text-xs font-semibold text-muted-foreground">الإجماليات</div>
-          {isTotalsLoading && (
-            <div className="space-y-2">
-              <Skeleton className="h-3 w-2/3" />
-              <Skeleton className="h-3 w-1/2" />
-              <Skeleton className="h-3 w-1/2" />
-            </div>
-          )}
-          {!isTotalsLoading && summaryTotals && (
-            <>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">الإجمالي</span>
-                <span className="font-semibold">
-                  {formatCurrency(summaryTotals.total)} {summaryTotals.currencyLabel}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">المدفوع</span>
-                <span className="font-semibold text-green-600">
-                  {formatCurrency(summaryTotals.paid)} {summaryTotals.currencyLabel}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">المتبقي</span>
-                <span className="font-semibold text-amber-600">
-                  {formatCurrency(summaryTotals.remaining)} {summaryTotals.currencyLabel}
-                </span>
-              </div>
-            </>
-          )}
-          {!isTotalsLoading && !summaryTotals && (
-            <p className="text-xs text-muted-foreground">اختر بند التكلفة لعرض الإجماليات.</p>
-          )}
-        </div>
-
         {summaryError && (
           <p className="text-xs text-destructive">
             {getErrorMessage(summaryError, summaryErrorOverrides)}
