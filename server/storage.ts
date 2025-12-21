@@ -3397,20 +3397,32 @@ export class DatabaseStorage implements IStorage {
       allPayments = allPayments.filter(p => new Date(p.paymentDate) <= toDate);
     }
 
-    const methodStats = new Map<string, { count: number; total: number }>();
+    const methodStats = new Map<
+      string,
+      { count: number; totalEgp: number; totalRmb: number }
+    >();
 
     for (const p of allPayments) {
       const method = p.paymentMethod || "أخرى";
-      const current = methodStats.get(method) || { count: 0, total: 0 };
+      const current = methodStats.get(method) || {
+        count: 0,
+        totalEgp: 0,
+        totalRmb: 0,
+      };
       current.count += 1;
-      current.total += parseFloat(p.amountEgp || "0");
+      if (p.paymentCurrency === "RMB") {
+        current.totalRmb += parseAmount(p.amountOriginal);
+      } else if (p.paymentCurrency === "EGP") {
+        current.totalEgp += parseAmount(p.amountEgp);
+      }
       methodStats.set(method, current);
     }
 
     return Array.from(methodStats.entries()).map(([method, stats]) => ({
       paymentMethod: method,
       paymentCount: stats.count,
-      totalAmountEgp: stats.total.toFixed(2),
+      totalAmountEgp: stats.totalEgp.toFixed(2),
+      totalAmountRmb: stats.totalRmb.toFixed(2),
     }));
   }
 }

@@ -29,6 +29,7 @@ interface PaymentMethodData {
   paymentMethod: string;
   paymentCount: number;
   totalAmountEgp: string;
+  totalAmountRmb: string;
 }
 
 function formatCurrency(value: string | number) {
@@ -82,11 +83,12 @@ export default function PaymentMethodsReportPage() {
   const exportToCSV = () => {
     if (!report) return;
     
-    const headers = ["طريقة الدفع", "عدد الدفعات", "إجمالي المبلغ"];
+    const headers = ["طريقة الدفع", "عدد الدفعات", "إجمالي المبلغ (جنيه)", "إجمالي المبلغ (يوان)"];
     const rows = report.map(r => [
       r.paymentMethod,
       r.paymentCount.toString(),
-      r.totalAmountEgp
+      r.totalAmountEgp,
+      r.totalAmountRmb,
     ]);
     
     const csvContent = [headers, ...rows].map(row => row.join(",")).join("\n");
@@ -97,13 +99,20 @@ export default function PaymentMethodsReportPage() {
     link.click();
   };
 
-  const chartData = report?.map(r => ({
+  const egpChartData = report?.map(r => ({
     name: r.paymentMethod,
     value: parseFloat(r.totalAmountEgp),
     color: methodColors[r.paymentMethod] || "hsl(var(--chart-1))",
   })) || [];
 
-  const totalAmount = report?.reduce((sum, r) => sum + parseFloat(r.totalAmountEgp), 0) || 0;
+  const rmbChartData = report?.map(r => ({
+    name: r.paymentMethod,
+    value: parseFloat(r.totalAmountRmb),
+    color: methodColors[r.paymentMethod] || "hsl(var(--chart-1))",
+  })) || [];
+
+  const totalAmountEgp = report?.reduce((sum, r) => sum + parseFloat(r.totalAmountEgp), 0) || 0;
+  const totalAmountRmb = report?.reduce((sum, r) => sum + parseFloat(r.totalAmountRmb), 0) || 0;
   const totalCount = report?.reduce((sum, r) => sum + r.paymentCount, 0) || 0;
 
   if (isLoading) {
@@ -185,9 +194,15 @@ export default function PaymentMethodsReportPage() {
               <span className="text-xl font-bold" data-testid="text-total-count">{totalCount}</span>
             </div>
             <div className="flex justify-between items-center p-3 bg-primary/5 rounded-md">
-              <span className="text-muted-foreground">إجمالي المبلغ المدفوع</span>
-              <span className="text-xl font-bold text-primary" data-testid="text-total-amount">
-                {formatCurrency(totalAmount)} جنيه
+              <span className="text-muted-foreground">إجمالي المدفوع بالجنيه</span>
+              <span className="text-xl font-bold text-primary" data-testid="text-total-amount-egp">
+                {formatCurrency(totalAmountEgp)} جنيه
+              </span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-primary/5 rounded-md">
+              <span className="text-muted-foreground">إجمالي المدفوع باليوان</span>
+              <span className="text-xl font-bold text-primary" data-testid="text-total-amount-rmb">
+                {formatCurrency(totalAmountRmb)} يوان
               </span>
             </div>
           </CardContent>
@@ -197,12 +212,12 @@ export default function PaymentMethodsReportPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <HelpCircle className="w-5 h-5" />
-              الرسم البياني
+              الرسم البياني (جنيه)
             </CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={chartData} layout="vertical">
+              <BarChart data={egpChartData} layout="vertical">
                 <XAxis type="number" hide />
                 <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
                 <RechartsTooltip
@@ -210,7 +225,7 @@ export default function PaymentMethodsReportPage() {
                   contentStyle={{ direction: "rtl" }}
                 />
                 <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                  {chartData.map((entry, index) => (
+                  {egpChartData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Bar>
@@ -219,6 +234,32 @@ export default function PaymentMethodsReportPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <HelpCircle className="w-5 h-5" />
+            الرسم البياني (يوان)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={rmbChartData} layout="vertical">
+              <XAxis type="number" hide />
+              <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
+              <RechartsTooltip
+                formatter={(value: number) => [`${formatCurrency(value)} يوان`, "المبلغ"]}
+                contentStyle={{ direction: "rtl" }}
+              />
+              <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                {rmbChartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -233,22 +274,27 @@ export default function PaymentMethodsReportPage() {
               <TableRow>
                 <TableHead className="text-right">طريقة الدفع</TableHead>
                 <TableHead className="text-right">إجمالي عدد الدفعات</TableHead>
-                <TableHead className="text-right">إجمالي المبلغ المدفوع</TableHead>
-                <TableHead className="text-right">نسبة من الإجمالي</TableHead>
+                <TableHead className="text-right">إجمالي المدفوع (جنيه)</TableHead>
+                <TableHead className="text-right">إجمالي المدفوع (يوان)</TableHead>
+                <TableHead className="text-right">نسبة من إجمالي الجنيه</TableHead>
+                <TableHead className="text-right">نسبة من إجمالي اليوان</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {report?.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
                     لا توجد بيانات
                   </TableCell>
                 </TableRow>
               ) : (
                 report?.map((r) => {
                   const Icon = methodIcons[r.paymentMethod] || CircleDollarSign;
-                  const percentage = totalAmount > 0 
-                    ? ((parseFloat(r.totalAmountEgp) / totalAmount) * 100).toFixed(1)
+                  const percentageEgp = totalAmountEgp > 0 
+                    ? ((parseFloat(r.totalAmountEgp) / totalAmountEgp) * 100).toFixed(1)
+                    : "0";
+                  const percentageRmb = totalAmountRmb > 0 
+                    ? ((parseFloat(r.totalAmountRmb) / totalAmountRmb) * 100).toFixed(1)
                     : "0";
                   return (
                     <TableRow key={r.paymentMethod} data-testid={`row-method-${r.paymentMethod}`}>
@@ -262,15 +308,29 @@ export default function PaymentMethodsReportPage() {
                       <TableCell className="text-green-600 font-medium">
                         {formatCurrency(r.totalAmountEgp)} جنيه
                       </TableCell>
+                      <TableCell className="text-blue-600 font-medium">
+                        {formatCurrency(r.totalAmountRmb)} يوان
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
                             <div
                               className="h-full bg-primary rounded-full"
-                              style={{ width: `${percentage}%` }}
+                              style={{ width: `${percentageEgp}%` }}
                             />
                           </div>
-                          <span className="text-sm text-muted-foreground">{percentage}%</span>
+                          <span className="text-sm text-muted-foreground">{percentageEgp}%</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-primary rounded-full"
+                              style={{ width: `${percentageRmb}%` }}
+                            />
+                          </div>
+                          <span className="text-sm text-muted-foreground">{percentageRmb}%</span>
                         </div>
                       </TableCell>
                     </TableRow>
