@@ -83,6 +83,7 @@ import {
   buildPaymentFormData,
   canAutoAllocatePayment,
   shouldShowAutoAllocationSection,
+  shouldUseSupplierGoodsSummary,
 } from "./payments-utils";
 
 const PAYMENT_METHODS = [
@@ -178,6 +179,12 @@ interface AllocationPreview {
   }>;
 }
 
+interface SupplierGoodsSummary {
+  supplierGoodsTotalRmb: string;
+  supplierPaidRmb: string;
+  supplierRemainingRmb: string;
+}
+
 export default function Payments() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -254,6 +261,12 @@ export default function Payments() {
     partyType,
     selectedShipmentId,
   });
+  const showSupplierGoodsSummary = shouldUseSupplierGoodsSummary({
+    costComponent,
+    partyType,
+    shipmentId: selectedShipmentId,
+    partyId,
+  });
   const canAutoAllocate = canAutoAllocatePayment({
     costComponent,
     partyType,
@@ -262,6 +275,21 @@ export default function Payments() {
   });
   const amountOriginalNumber = parseFloat(amountOriginalValue);
   const hasPreviewAmount = Number.isFinite(amountOriginalNumber) && amountOriginalNumber > 0;
+
+  const {
+    data: supplierGoodsSummary,
+    isFetching: loadingSupplierGoodsSummary,
+    isError: supplierGoodsSummaryError,
+  } = useQuery<SupplierGoodsSummary>({
+    queryKey: [
+      "/api/shipments",
+      selectedShipmentId,
+      "suppliers",
+      partyId,
+      "goods-summary",
+    ],
+    enabled: showSupplierGoodsSummary,
+  });
 
   useEffect(() => {
     if (!isDialogOpen) return;
@@ -551,6 +579,9 @@ export default function Payments() {
     return new Date(date).toLocaleDateString("ar-EG");
   };
 
+  const rmbLabel = "رممبي / RMB";
+  const egpLabel = "جنيه / EGP";
+
   const allocationPreviewQueryKey = showAutoAllocationSection && hasPreviewAmount && canAutoAllocate
     ? [
         "/api/shipments",
@@ -825,90 +856,175 @@ export default function Payments() {
               </div>
 
               <div className="space-y-2">
-                {costComponent && invoiceSummary && (
-                  <div className="mt-2 p-3 bg-muted/50 rounded text-sm space-y-2">
-                    {costComponent === "تكلفة البضاعة" && (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(invoiceSummary.rmb.goodsTotal)} ¥</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["تكلفة البضاعة"] || "0")} ¥</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["تكلفة البضاعة"] || "0")} ¥</span>
-                        </div>
-                      </>
-                    )}
-                    {costComponent === "الشحن" && (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(invoiceSummary.rmb.shippingTotal)} ¥</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["الشحن"] || "0")} ¥</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["الشحن"] || "0")} ¥</span>
-                        </div>
-                      </>
-                    )}
-                    {costComponent === "العمولة" && (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(invoiceSummary.rmb.commissionTotal)} ¥</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["العمولة"] || "0")} ¥</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["العمولة"] || "0")} ¥</span>
-                        </div>
-                      </>
-                    )}
-                    {costComponent === "الجمرك" && (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(invoiceSummary.egp.customsTotal)} ج.م</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["الجمرك"] || "0")} ج.م</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["الجمرك"] || "0")} ج.م</span>
-                        </div>
-                      </>
-                    )}
-                    {costComponent === "التخريج" && (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">الإجمالي</span>
-                          <span className="font-semibold">{formatCurrency(invoiceSummary.egp.takhreegTotal)} ج.م</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المدفوع</span>
-                          <span className="font-semibold text-green-600">{formatCurrency((invoiceSummary as any).paidByComponent?.["التخريج"] || "0")} ج.م</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">المتبقي</span>
-                          <span className="font-semibold text-amber-600">{formatCurrency((invoiceSummary as any).remainingByComponent?.["التخريج"] || "0")} ج.م</span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
+                {costComponent &&
+                  (invoiceSummary || supplierGoodsSummary || loadingSupplierGoodsSummary) && (
+                    <div className="mt-2 p-3 bg-muted/50 rounded text-sm space-y-2">
+                      {costComponent === "تكلفة البضاعة" && showSupplierGoodsSummary && (
+                        <>
+                          {loadingSupplierGoodsSummary && (
+                            <p className="text-xs text-muted-foreground">جاري تحميل ملخص المورد...</p>
+                          )}
+                          {supplierGoodsSummaryError && (
+                            <p className="text-xs text-destructive">تعذر تحميل ملخص المورد.</p>
+                          )}
+                          {!loadingSupplierGoodsSummary && supplierGoodsSummary && (
+                            <>
+                              <div className="flex items-center justify-between">
+                                <span className="text-muted-foreground">الإجمالي</span>
+                                <span className="font-semibold">
+                                  {formatCurrency(supplierGoodsSummary.supplierGoodsTotalRmb)} {rmbLabel}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-muted-foreground">المدفوع</span>
+                                <span className="font-semibold text-green-600">
+                                  {formatCurrency(supplierGoodsSummary.supplierPaidRmb)} {rmbLabel}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-muted-foreground">المتبقي</span>
+                                <span className="font-semibold text-amber-600">
+                                  {formatCurrency(supplierGoodsSummary.supplierRemainingRmb)} {rmbLabel}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        </>
+                      )}
+                      {costComponent === "تكلفة البضاعة" && !showSupplierGoodsSummary && invoiceSummary && (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">الإجمالي</span>
+                            <span className="font-semibold">
+                              {formatCurrency(invoiceSummary.rmb.goodsTotal)} {rmbLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المدفوع</span>
+                            <span className="font-semibold text-green-600">
+                              {formatCurrency(
+                                (invoiceSummary as any).paidByComponent?.["تكلفة البضاعة"] || "0",
+                              )}{" "}
+                              {rmbLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المتبقي</span>
+                            <span className="font-semibold text-amber-600">
+                              {formatCurrency(
+                                (invoiceSummary as any).remainingByComponent?.["تكلفة البضاعة"] || "0",
+                              )}{" "}
+                              {rmbLabel}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                      {costComponent === "الشحن" && invoiceSummary && (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">الإجمالي</span>
+                            <span className="font-semibold">
+                              {formatCurrency(invoiceSummary.rmb.shippingTotal)} {rmbLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المدفوع</span>
+                            <span className="font-semibold text-green-600">
+                              {formatCurrency((invoiceSummary as any).paidByComponent?.["الشحن"] || "0")}{" "}
+                              {rmbLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المتبقي</span>
+                            <span className="font-semibold text-amber-600">
+                              {formatCurrency(
+                                (invoiceSummary as any).remainingByComponent?.["الشحن"] || "0",
+                              )}{" "}
+                              {rmbLabel}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                      {costComponent === "العمولة" && invoiceSummary && (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">الإجمالي</span>
+                            <span className="font-semibold">
+                              {formatCurrency(invoiceSummary.rmb.commissionTotal)} {rmbLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المدفوع</span>
+                            <span className="font-semibold text-green-600">
+                              {formatCurrency((invoiceSummary as any).paidByComponent?.["العمولة"] || "0")}{" "}
+                              {rmbLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المتبقي</span>
+                            <span className="font-semibold text-amber-600">
+                              {formatCurrency(
+                                (invoiceSummary as any).remainingByComponent?.["العمولة"] || "0",
+                              )}{" "}
+                              {rmbLabel}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                      {costComponent === "الجمرك" && invoiceSummary && (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">الإجمالي</span>
+                            <span className="font-semibold">
+                              {formatCurrency(invoiceSummary.egp.customsTotal)} {egpLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المدفوع</span>
+                            <span className="font-semibold text-green-600">
+                              {formatCurrency((invoiceSummary as any).paidByComponent?.["الجمرك"] || "0")}{" "}
+                              {egpLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المتبقي</span>
+                            <span className="font-semibold text-amber-600">
+                              {formatCurrency(
+                                (invoiceSummary as any).remainingByComponent?.["الجمرك"] || "0",
+                              )}{" "}
+                              {egpLabel}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                      {costComponent === "التخريج" && invoiceSummary && (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">الإجمالي</span>
+                            <span className="font-semibold">
+                              {formatCurrency(invoiceSummary.egp.takhreegTotal)} {egpLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المدفوع</span>
+                            <span className="font-semibold text-green-600">
+                              {formatCurrency((invoiceSummary as any).paidByComponent?.["التخريج"] || "0")}{" "}
+                              {egpLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">المتبقي</span>
+                            <span className="font-semibold text-amber-600">
+                              {formatCurrency(
+                                (invoiceSummary as any).remainingByComponent?.["التخريج"] || "0",
+                              )}{" "}
+                              {egpLabel}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">

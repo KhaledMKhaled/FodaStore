@@ -991,6 +991,88 @@ export async function registerRoutes(
   });
 
   app.get(
+    "/api/shipments/:shipmentId/suppliers/:supplierId/goods-summary",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const shipmentId = parseInt(req.params.shipmentId);
+        const supplierId = parseInt(req.params.supplierId);
+
+        if (Number.isNaN(shipmentId) || Number.isNaN(supplierId)) {
+          return res.status(400).json({ message: "بيانات غير صالحة" });
+        }
+
+        const [shipment, supplier] = await Promise.all([
+          routeStorage.getShipment(shipmentId),
+          routeStorage.getSupplier(supplierId),
+        ]);
+
+        if (!shipment || !supplier) {
+          return res.status(404).json({ message: "البيانات غير موجودة" });
+        }
+
+        const [items, payments, allocations] = await Promise.all([
+          routeStorage.getShipmentItems(shipmentId),
+          routeStorage.getShipmentPayments(shipmentId),
+          routeStorage.getPaymentAllocationsByShipmentId(shipmentId),
+        ]);
+
+        const supplierGoodsTotalRmb = items.reduce((sum, item) => {
+          if (item.supplierId !== supplierId) return sum;
+          return sum + parseAmountOrZero(item.totalPurchaseCostRmb);
+        }, 0);
+
+        const supplierDirectPaidRmb = payments.reduce((sum, payment) => {
+          if (
+            payment.partyType !== "supplier" ||
+            payment.partyId !== supplierId ||
+            payment.costComponent !== PURCHASE_COST_COMPONENT
+          ) {
+            return sum;
+          }
+
+          if (payment.paymentCurrency === "RMB") {
+            return sum + parseAmountOrZero(payment.amountOriginal);
+          }
+
+          if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
+            const rate = parseAmountOrZero(payment.exchangeRateToEgp);
+            if (rate > 0) {
+              return sum + parseAmountOrZero(payment.amountEgp) / rate;
+            }
+          }
+
+          return sum;
+        }, 0);
+
+        const supplierAllocatedPaidRmb = allocations.reduce((sum, allocation) => {
+          if (
+            allocation.supplierId !== supplierId ||
+            allocation.component !== PURCHASE_COST_COMPONENT ||
+            allocation.currency !== "RMB"
+          ) {
+            return sum;
+          }
+
+          return sum + parseAmountOrZero(allocation.allocatedAmount);
+        }, 0);
+
+        const supplierPaidRmb = supplierDirectPaidRmb + supplierAllocatedPaidRmb;
+        const supplierRemainingRmb = Math.max(0, supplierGoodsTotalRmb - supplierPaidRmb);
+
+        res.json({
+          supplierGoodsTotalRmb: supplierGoodsTotalRmb.toFixed(2),
+          supplierPaidRmb: supplierPaidRmb.toFixed(2),
+          supplierRemainingRmb: supplierRemainingRmb.toFixed(2),
+        });
+      } catch (error) {
+        console.error("Error fetching supplier goods summary:", error);
+        res.status(500).json({ message: "خطأ في جلب ملخص المورد" });
+      }
+    },
+  );
+
+  app.get(
     "/api/shipments/:id/payment-allocation-preview",
     isAuthenticated,
     async (req, res) => {
