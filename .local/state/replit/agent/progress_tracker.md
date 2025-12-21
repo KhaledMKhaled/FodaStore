@@ -74,3 +74,14 @@ ENVIRONMENT MIGRATION - December 21, 2025
 [x] 59. Import complete
 [x] 60. Final environment migration - npm dependencies installed and verified
 [x] 61. Application running successfully on port 5000
+
+════════════════════════════════════════════════════════════════════
+FIX REMAINING AMOUNT CURRENCY DISPLAY - December 21, 2025
+════════════════════════════════════════════════════════════════════
+
+[x] 62. Added exchangeRateValue to useWatch in payments.tsx
+[x] 63. Updated pending summary allowanceLabel to convert EGP to RMB when needed
+[x] 64. Updated review receipt allowanceLabel with proper currency conversion
+[x] 65. Changed label from "الحد المتبقي (ج.م)" to "الحد المتبقي" (without hardcoded currency)
+[x] 66. Applied dynamic currency label based on payment currency (RMB/EGP)
+[x] 67. Workflow running - remaining amount now displays in correct currency

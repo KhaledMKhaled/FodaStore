@@ -299,6 +299,7 @@ export default function Payments() {
   const cashReceiverValue = useWatch({ control: form.control, name: "cashReceiverName" });
   const referenceNumberValue = useWatch({ control: form.control, name: "referenceNumber" });
   const noteValue = useWatch({ control: form.control, name: "note" });
+  const exchangeRateValue = useWatch({ control: form.control, name: "exchangeRateToEgp" });
   const selectedShipmentId = shipmentIdValue ? Number(shipmentIdValue) : null;
   const partyId = partyIdValue ? Number(partyIdValue) : null;
 
@@ -801,6 +802,13 @@ export default function Payments() {
     const pendingPartyLabel = `${partyType === "supplier" ? "مورد" : "شركة شحن"}${
       selectedPartyName ? ` - ${selectedPartyName}` : ""
     }`;
+    const allowanceEgp = parseFloat(invoiceSummary?.paymentAllowance?.remainingAllowedEgp || "0");
+    const allowanceInCurrency =
+      paymentCurrency === "RMB" && exchangeRate
+        ? allowanceEgp / parseFloat(exchangeRate)
+        : allowanceEgp;
+    const allowanceCurrencyLabel = paymentCurrency === "RMB" ? "رممبي" : "جنيه";
+
     pendingSummaryRef.current = {
       receiptData: {
         shipmentLabel: pendingShipmentLabel,
@@ -815,7 +823,7 @@ export default function Payments() {
         note: data.note?.trim() ? data.note : "-",
         attachmentLabel: attachmentFile ? "مرفق صورة" : "لا يوجد مرفق",
         allowanceLabel: invoiceSummary?.paymentAllowance
-          ? `${formatCurrency(invoiceSummary.paymentAllowance.remainingAllowedEgp)} ج.م`
+          ? `${formatCurrency(allowanceInCurrency)} ${allowanceCurrencyLabel}`
           : undefined,
       },
       shipmentCode: selectedShipment?.shipmentCode ?? "-",
@@ -866,6 +874,15 @@ export default function Payments() {
     const partyLabel = `${partyType === "supplier" ? "مورد" : "شركة شحن"}${
       selectedPartyName ? ` - ${selectedPartyName}` : ""
     }`;
+
+    const allowanceEgp = parseFloat(invoiceSummary?.paymentAllowance?.remainingAllowedEgp || "0");
+    const exchangeRateNum = exchangeRateValue ? parseFloat(exchangeRateValue) : undefined;
+    const allowanceInCurrency =
+      paymentCurrency === "RMB" && exchangeRateNum
+        ? allowanceEgp / exchangeRateNum
+        : allowanceEgp;
+    const allowanceCurrencyLabel = paymentCurrency === "RMB" ? "رممبي" : "جنيه";
+
     return {
       shipmentLabel,
       paymentDate: paymentDateValue ? formatDate(paymentDateValue) : "-",
@@ -879,7 +896,7 @@ export default function Payments() {
       note: noteValue?.trim() ? noteValue : "-",
       attachmentLabel: attachmentFile ? "مرفق صورة" : "لا يوجد مرفق",
       allowanceLabel: invoiceSummary?.paymentAllowance
-        ? `${formatCurrency(invoiceSummary.paymentAllowance.remainingAllowedEgp)} ج.م`
+        ? `${formatCurrency(allowanceInCurrency)} ${allowanceCurrencyLabel}`
         : undefined,
     };
   }, [
@@ -897,6 +914,7 @@ export default function Payments() {
     noteValue,
     attachmentFile,
     invoiceSummary?.paymentAllowance,
+    exchangeRateValue,
   ]);
 
   const isSuccessState = currentStep === 2;
