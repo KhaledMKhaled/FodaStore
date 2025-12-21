@@ -503,6 +503,7 @@ export default function Payments() {
       form.reset({
         ...form.getValues(),
         ...parsed,
+        shipmentId: selectedShipmentId.toString(),
       });
       if (typeof parsed.autoAllocate === "boolean") {
         setAutoAllocate(parsed.autoAllocate);
