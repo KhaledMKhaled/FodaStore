@@ -127,7 +127,7 @@ export function PaymentSummaryReceipt({
         <SummaryRow label="المرفق" value={data.attachmentLabel} variant={variant} />
         {data.allowanceLabel && (
           <SummaryRow
-            label="الحد المتبقي"
+            label="المتبقي بعد هذه الدفعة"
             value={data.allowanceLabel}
             variant={variant}
           />
