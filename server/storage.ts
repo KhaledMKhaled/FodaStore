@@ -231,6 +231,13 @@ const getShipmentShippingCompanyCostEgp = (shipment: Shipment): number => {
   );
 };
 
+const getShipmentShippingCompanyCostRmb = (shipment: Shipment): number => {
+  return (
+    parseAmount(shipment.shippingCostRmb) +
+    parseAmount(shipment.commissionCostRmb)
+  );
+};
+
 const buildShipmentSupplierMaps = (
   shipments: Shipment[],
   itemsByShipment: ShipmentItem[][]
@@ -762,7 +769,9 @@ export interface IStorage {
     shippingCompanyName: string;
     totalCostEgp: string;
     totalPaidEgp: string;
+    totalPaidRmb: string;
     balanceEgp: string;
+    balanceRmb: string;
     balanceStatus: 'owing' | 'settled' | 'credit';
   }>>;
 
@@ -777,12 +786,18 @@ export interface IStorage {
       description: string;
       shipmentCode?: string;
       costEgp?: string;
+      costRmb?: string;
       paidEgp?: string;
+      paidRmb?: string;
+      runningBalanceRmb?: string;
+      originalCurrency?: string;
       runningBalance: string;
       paymentId?: number;
       attachmentUrl?: string | null;
       attachmentOriginalName?: string | null;
     }>;
+    totalPaidEgp: string;
+    totalPaidRmb: string;
   }>;
 
   getMovementReport(filters?: {
@@ -2772,7 +2787,9 @@ export class DatabaseStorage implements IStorage {
       shippingCompanyName: string;
       totalCostEgp: string;
       totalPaidEgp: string;
+      totalPaidRmb: string;
       balanceEgp: string;
+      balanceRmb: string;
       balanceStatus: 'owing' | 'settled' | 'credit';
     }> = [];
 
@@ -2807,11 +2824,20 @@ export class DatabaseStorage implements IStorage {
         (sum, s) => sum + getShippingCompanyShipmentCost(s, company.id),
         0,
       );
+      const totalCostRmb = companyShipments.reduce(
+        (sum, s) => sum + getShipmentShippingCompanyCostRmb(s),
+        0,
+      );
       const totalPaid = companyPayments.reduce(
         (sum, p) => sum + parseFloat(p.amountEgp || "0"),
         0,
       );
+      const totalPaidRmb = companyPayments.reduce((sum, p) => {
+        if (p.paymentCurrency !== "RMB") return sum;
+        return sum + parseFloat(p.amountOriginal || "0");
+      }, 0);
       const balance = totalCost - totalPaid;
+      const balanceRmb = totalCostRmb - totalPaidRmb;
 
       let balanceStatus: 'owing' | 'settled' | 'credit' = 'settled';
       if (balance > 0.0001) balanceStatus = 'owing';
@@ -2827,7 +2853,9 @@ export class DatabaseStorage implements IStorage {
         shippingCompanyName: company.name,
         totalCostEgp: totalCost.toFixed(2),
         totalPaidEgp: totalPaid.toFixed(2),
+        totalPaidRmb: totalPaidRmb.toFixed(2),
         balanceEgp: balance.toFixed(2),
+        balanceRmb: balanceRmb.toFixed(2),
         balanceStatus,
       });
     }
@@ -2876,21 +2904,27 @@ export class DatabaseStorage implements IStorage {
       shipmentCode?: string;
       costEgp?: string;
       paidEgp?: string;
+      paidRmb?: string;
       runningBalance: string;
+      runningBalanceRmb?: string;
+      originalCurrency?: string;
       paymentId?: number;
       attachmentUrl?: string | null;
       attachmentOriginalName?: string | null;
     }> = [];
 
     companyShipments.forEach(s => {
-      const cost = getShippingCompanyShipmentCost(s, shippingCompanyId);
-      if (cost <= 0) return;
+      const costEgp = getShippingCompanyShipmentCost(s, shippingCompanyId);
+      const costRmb = getShipmentShippingCompanyCostRmb(s);
+      if (costEgp <= 0 && costRmb <= 0) return;
       movements.push({
         date: s.purchaseDate || s.createdAt || new Date(),
         type: 'shipment',
         description: `شحنة: ${s.shipmentName}`,
         shipmentCode: s.shipmentCode,
-        costEgp: cost.toFixed(2),
+        costEgp: costEgp > 0 ? costEgp.toFixed(2) : undefined,
+        costRmb: costRmb > 0 ? costRmb.toFixed(2) : undefined,
+        originalCurrency: costRmb > 0 ? "RMB" : "EGP",
         runningBalance: "0",
       });
     });
@@ -2903,6 +2937,8 @@ export class DatabaseStorage implements IStorage {
         description: `دفعة - ${p.costComponent}`,
         shipmentCode: shipment?.shipmentCode,
         paidEgp: p.amountEgp || "0",
+        paidRmb: p.paymentCurrency === "RMB" ? p.amountOriginal || "0" : undefined,
+        originalCurrency: p.paymentCurrency,
         runningBalance: "0",
         paymentId: p.id,
         attachmentUrl: p.attachmentUrl ?? null,
@@ -2913,16 +2949,34 @@ export class DatabaseStorage implements IStorage {
     movements.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     let runningBalance = 0;
+    let runningBalanceRmb = 0;
     movements.forEach(m => {
       if (m.type === 'shipment') {
         runningBalance += parseFloat(m.costEgp || "0");
+        runningBalanceRmb += parseFloat(m.costRmb || "0");
       } else {
         runningBalance -= parseFloat(m.paidEgp || "0");
+        runningBalanceRmb -= parseFloat(m.paidRmb || "0");
       }
       m.runningBalance = runningBalance.toFixed(2);
+      m.runningBalanceRmb = runningBalanceRmb.toFixed(2);
     });
 
-    return { shippingCompany, movements };
+    const totalPaidEgp = companyPayments.reduce(
+      (sum, payment) => sum + parseFloat(payment.amountEgp || "0"),
+      0,
+    );
+    const totalPaidRmb = companyPayments.reduce((sum, payment) => {
+      if (payment.paymentCurrency !== "RMB") return sum;
+      return sum + parseFloat(payment.amountOriginal || "0");
+    }, 0);
+
+    return {
+      shippingCompany,
+      movements,
+      totalPaidEgp: totalPaidEgp.toFixed(2),
+      totalPaidRmb: totalPaidRmb.toFixed(2),
+    };
   }
 
   // Movement Report
