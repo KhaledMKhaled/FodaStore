@@ -1582,6 +1582,143 @@ export class DatabaseStorage implements IStorage {
         canonicalUpdates.finalTotalCostEgp = roundAmount(paymentSnapshot.knownTotalCost, 2).toFixed(2);
       }
 
+      // Enforce strict per-party/component remaining rules
+      const componentCurrency =
+        data.costComponent === "الجمرك" || data.costComponent === "التخريج" ? "EGP" : "RMB";
+      const amountInComponentCurrency =
+        componentCurrency === "EGP"
+          ? amountEgp
+          : data.paymentCurrency === "RMB"
+            ? amountOriginal
+            : exchangeRateToEgp
+              ? amountEgp / exchangeRateToEgp
+              : 0;
+
+      let remainingBefore = Infinity;
+
+      if (data.partyType === "supplier") {
+        if (data.costComponent !== PURCHASE_COST_COMPONENT) {
+          throw new ApiError(
+            "PAYMENT_COMPONENT_INVALID",
+            "المكون غير صالح للمورد",
+            400,
+            { component: data.costComponent },
+          );
+        }
+
+        const items = await tx
+          .select()
+          .from(shipmentItems)
+          .where(eq(shipmentItems.shipmentId, data.shipmentId));
+
+        const allocations = await tx
+          .select()
+          .from(paymentAllocations)
+          .where(eq(paymentAllocations.shipmentId, data.shipmentId));
+
+        const supplierGoodsTotalRmb = items.reduce((sum, item) => {
+          if (item.supplierId !== data.partyId) return sum;
+          return sum + parseAmountOrZero(item.totalPurchaseCostRmb);
+        }, 0);
+
+        const supplierDirectPaidRmb = existingPayments.reduce((sum, payment) => {
+          if (
+            payment.partyType !== "supplier" ||
+            payment.partyId !== data.partyId ||
+            payment.costComponent !== PURCHASE_COST_COMPONENT
+          ) {
+            return sum;
+          }
+
+          if (payment.paymentCurrency === "RMB") {
+            return sum + parseAmountOrZero(payment.amountOriginal);
+          }
+
+          if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
+            const rate = parseAmountOrZero(payment.exchangeRateToEgp);
+            if (rate > 0) {
+              return sum + parseAmountOrZero(payment.amountEgp) / rate;
+            }
+          }
+
+          return sum;
+        }, 0);
+
+        const supplierAllocatedPaidRmb = allocations.reduce((sum, allocation) => {
+          if (
+            allocation.supplierId !== data.partyId ||
+            allocation.component !== PURCHASE_COST_COMPONENT ||
+            allocation.currency !== "RMB"
+          ) {
+            return sum;
+          }
+
+          return sum + parseAmountOrZero(allocation.allocatedAmount);
+        }, 0);
+
+        const supplierPaidRmb = supplierDirectPaidRmb + supplierAllocatedPaidRmb;
+        remainingBefore = Math.max(0, supplierGoodsTotalRmb - supplierPaidRmb);
+      }
+
+      if (data.partyType === "shipping_company") {
+        const goodsTotalRmbGross = parseAmountOrZero(shipment.purchaseCostRmb || "0");
+        const partialDiscountRmb = parseAmountOrZero(shipment.partialDiscountRmb || "0");
+        const goodsTotalRmb = Math.max(0, goodsTotalRmbGross - partialDiscountRmb);
+
+        const componentTotals: Record<string, number> = {
+          "تكلفة البضاعة": goodsTotalRmb,
+          "الشحن": parseAmountOrZero(shipment.shippingCostRmb || "0"),
+          "العمولة": parseAmountOrZero(shipment.commissionCostRmb || "0"),
+          "الجمرك": parseAmountOrZero(shipment.customsCostEgp || "0"),
+          "التخريج": parseAmountOrZero(shipment.takhreegCostEgp || "0"),
+        };
+
+        const totalAllowed = componentTotals[data.costComponent] ?? 0;
+
+        const paidSoFar = existingPayments.reduce((sum, payment) => {
+          if (
+            payment.partyType !== "shipping_company" ||
+            payment.partyId !== data.partyId ||
+            payment.costComponent !== data.costComponent
+          ) {
+            return sum;
+          }
+
+          if (componentCurrency === "RMB") {
+            if (payment.paymentCurrency === "RMB") {
+              return sum + parseAmountOrZero(payment.amountOriginal);
+            }
+            if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
+              const rate = parseAmountOrZero(payment.exchangeRateToEgp);
+              if (rate > 0) {
+                return sum + parseAmountOrZero(payment.amountEgp) / rate;
+              }
+            }
+            return sum;
+          }
+
+          return sum + parseAmountOrZero(payment.amountEgp);
+        }, 0);
+
+        remainingBefore = Math.max(0, totalAllowed - paidSoFar);
+      }
+
+      if (Number.isFinite(remainingBefore) && amountInComponentCurrency > remainingBefore + 0.0001) {
+        throw new ApiError(
+          "PAYMENT_OVERPAY",
+          "المبلغ أكبر من المتبقي المسموح",
+          400,
+          {
+            remainingBefore,
+            attempted: amountInComponentCurrency,
+            currency: componentCurrency,
+            partyType: data.partyType,
+            partyId: data.partyId,
+            component: data.costComponent,
+          },
+        );
+      }
+
       // ONLY block if payment exceeds what's currently known/allowed
       if (amountEgp > paymentSnapshot.remainingAllowed + 0.0001) {
         throw new ApiError("PAYMENT_OVERPAY", 

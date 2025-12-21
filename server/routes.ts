@@ -1077,6 +1077,149 @@ export async function registerRoutes(
   );
 
   app.get(
+    "/api/shipments/:shipmentId/party-payment-summary",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const shipmentId = parseInt(req.params.shipmentId);
+        const partyType = req.query.partyType as string | undefined;
+        const partyId = req.query.partyId ? Number(req.query.partyId) : null;
+        const component = req.query.component as string | undefined;
+
+        if (Number.isNaN(shipmentId) || !partyType || !component || !partyId) {
+          return res.status(400).json({
+            message: "بيانات غير صالحة",
+          });
+        }
+
+        const shipment = await routeStorage.getShipment(shipmentId);
+        if (!shipment) {
+          return res.status(404).json({ message: "الشحنة غير موجودة" });
+        }
+
+        const payments = await routeStorage.getShipmentPayments(shipmentId);
+        const componentCurrency =
+          component === "الجمرك" || component === "التخريج" ? "EGP" : "RMB";
+
+        let totalAllowed = 0;
+        let paidSoFar = 0;
+
+        if (partyType === "supplier") {
+          if (component !== PURCHASE_COST_COMPONENT) {
+            return res.status(400).json({
+              message: "المكون غير صالح للمورد",
+            });
+          }
+
+          const [items, allocations] = await Promise.all([
+            routeStorage.getShipmentItems(shipmentId),
+            routeStorage.getPaymentAllocationsByShipmentId(shipmentId),
+          ]);
+
+          totalAllowed = items.reduce((sum, item) => {
+            if (item.supplierId !== partyId) return sum;
+            return sum + parseAmountOrZero(item.totalPurchaseCostRmb);
+          }, 0);
+
+          const supplierDirectPaidRmb = payments.reduce((sum, payment) => {
+            if (
+              payment.partyType !== "supplier" ||
+              payment.partyId !== partyId ||
+              payment.costComponent !== PURCHASE_COST_COMPONENT
+            ) {
+              return sum;
+            }
+
+            if (payment.paymentCurrency === "RMB") {
+              return sum + parseAmountOrZero(payment.amountOriginal);
+            }
+
+            if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
+              const rate = parseAmountOrZero(payment.exchangeRateToEgp);
+              if (rate > 0) {
+                return sum + parseAmountOrZero(payment.amountEgp) / rate;
+              }
+            }
+
+            return sum;
+          }, 0);
+
+          const supplierAllocatedPaidRmb = allocations.reduce((sum, allocation) => {
+            if (
+              allocation.supplierId !== partyId ||
+              allocation.component !== PURCHASE_COST_COMPONENT ||
+              allocation.currency !== "RMB"
+            ) {
+              return sum;
+            }
+
+            return sum + parseAmountOrZero(allocation.allocatedAmount);
+          }, 0);
+
+          paidSoFar = supplierDirectPaidRmb + supplierAllocatedPaidRmb;
+        }
+
+        if (partyType === "shipping_company") {
+          const goodsTotalRmbGross = parseAmountOrZero(shipment.purchaseCostRmb || "0");
+          const partialDiscountRmb = parseAmountOrZero(shipment.partialDiscountRmb || "0");
+          const goodsTotalRmb = Math.max(0, goodsTotalRmbGross - partialDiscountRmb);
+
+          const componentTotals: Record<string, number> = {
+            "تكلفة البضاعة": goodsTotalRmb,
+            "الشحن": parseAmountOrZero(shipment.shippingCostRmb || "0"),
+            "العمولة": parseAmountOrZero(shipment.commissionCostRmb || "0"),
+            "الجمرك": parseAmountOrZero(shipment.customsCostEgp || "0"),
+            "التخريج": parseAmountOrZero(shipment.takhreegCostEgp || "0"),
+          };
+
+          totalAllowed = componentTotals[component] ?? 0;
+
+          paidSoFar = payments.reduce((sum, payment) => {
+            if (
+              payment.partyType !== "shipping_company" ||
+              payment.partyId !== partyId ||
+              payment.costComponent !== component
+            ) {
+              return sum;
+            }
+
+            if (componentCurrency === "RMB") {
+              if (payment.paymentCurrency === "RMB") {
+                return sum + parseAmountOrZero(payment.amountOriginal);
+              }
+              if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
+                const rate = parseAmountOrZero(payment.exchangeRateToEgp);
+                if (rate > 0) {
+                  return sum + parseAmountOrZero(payment.amountEgp) / rate;
+                }
+              }
+              return sum;
+            }
+
+            return sum + parseAmountOrZero(payment.amountEgp);
+          }, 0);
+        }
+
+        const remainingBefore = Math.max(0, totalAllowed - paidSoFar);
+
+        res.json({
+          shipmentId,
+          partyType,
+          partyId,
+          component,
+          currency: componentCurrency,
+          totalAllowed: totalAllowed.toFixed(2),
+          paidSoFar: paidSoFar.toFixed(2),
+          remainingBefore: remainingBefore.toFixed(2),
+        });
+      } catch (error) {
+        console.error("Error fetching party payment summary:", error);
+        res.status(500).json({ message: "خطأ في جلب ملخص الدفعات" });
+      }
+    },
+  );
+
+  app.get(
     "/api/shipments/:id/payment-allocation-preview",
     isAuthenticated,
     async (req, res) => {
