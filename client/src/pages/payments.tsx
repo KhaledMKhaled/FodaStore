@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { toPng } from "html-to-image";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm, useWatch } from "react-hook-form";
@@ -62,11 +63,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
   Command,
   CommandEmpty,
   CommandGroup,
@@ -75,13 +71,6 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerTrigger,
-} from "@/components/ui/drawer";
 import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
@@ -103,6 +92,10 @@ import {
   shouldUseSupplierGoodsSummary,
 } from "./payments-utils";
 import { PaymentWizard } from "@/components/payment-wizard";
+import {
+  PaymentSummaryReceipt,
+  type PaymentSummaryReceiptData,
+} from "@/components/payment-summary-receipt";
 
 const PAYMENT_METHODS = [
   { value: "نقدي", label: "نقدي" },
@@ -245,6 +238,12 @@ interface SupplierGoodsSummary {
   supplierRemainingRmb: string;
 }
 
+interface PaymentSummarySnapshot {
+  receiptData: PaymentSummaryReceiptData;
+  shipmentCode: string;
+  attachmentName: string | null;
+}
+
 export default function Payments() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -263,11 +262,11 @@ export default function Payments() {
   const [autoAllocate, setAutoAllocate] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [completedPaymentRef, setCompletedPaymentRef] = useState<string | null>(null);
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
-  const [isWizardMode, setIsWizardMode] = useState(false);
-  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
-  const [summaryDrawerOpen, setSummaryDrawerOpen] = useState(false);
+  const [completedPaymentSnapshot, setCompletedPaymentSnapshot] =
+    useState<PaymentSummarySnapshot | null>(null);
+  const [isDownloadingSummary, setIsDownloadingSummary] = useState(false);
   const summaryExportRef = useRef<HTMLDivElement | null>(null);
+  const pendingSummaryRef = useRef<PaymentSummarySnapshot | null>(null);
   const { toast } = useToast();
 
   const form = useForm<PaymentFormValues>({
@@ -296,24 +295,16 @@ export default function Payments() {
   const shipmentIdValue = useWatch({ control: form.control, name: "shipmentId" });
   const paymentMethod = useWatch({ control: form.control, name: "paymentMethod" });
   const amountOriginalValue = useWatch({ control: form.control, name: "amountOriginal" });
+  const paymentDateValue = useWatch({ control: form.control, name: "paymentDate" });
+  const cashReceiverValue = useWatch({ control: form.control, name: "cashReceiverName" });
+  const referenceNumberValue = useWatch({ control: form.control, name: "referenceNumber" });
+  const noteValue = useWatch({ control: form.control, name: "note" });
   const selectedShipmentId = shipmentIdValue ? Number(shipmentIdValue) : null;
   const partyId = partyIdValue ? Number(partyIdValue) : null;
 
   const { data: stats, isLoading: loadingStats } = useQuery<PaymentsStats>({
     queryKey: ["/api/payments/stats"],
   });
-
-  useEffect(() => {
-    const updateViewport = () => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      setViewportSize({ width, height });
-      setIsWizardMode(width < 1024 || height < 720);
-    };
-    updateViewport();
-    window.addEventListener("resize", updateViewport);
-    return () => window.removeEventListener("resize", updateViewport);
-  }, []);
 
   const { data: suppliers, isLoading: loadingSuppliers } = useQuery<Supplier[]>({
     queryKey: ["/api/suppliers"],
@@ -393,12 +384,9 @@ export default function Payments() {
         : "";
 
   const wizardSteps = [
-    { id: "basics", title: "الأساسيات" },
-    { id: "details", title: "تفاصيل الدفع" },
-    { id: "advanced", title: "تفاصيل إضافية" },
+    { id: "entry", title: "إدخال البيانات" },
     { id: "review", title: "مراجعة وتأكيد" },
   ];
-  const showSummaryAside = !isWizardMode && viewportSize.width >= 1280 && viewportSize.height >= 720;
 
   const {
     data: supplierGoodsSummary,
@@ -477,23 +465,6 @@ export default function Payments() {
   }, [paymentMethod, form]);
 
   useEffect(() => {
-    if (!isWizardMode) {
-      setCurrentStep(0);
-    }
-  }, [isWizardMode]);
-
-  useEffect(() => {
-    if (
-      form.formState.errors.paymentMethod ||
-      form.formState.errors.cashReceiverName ||
-      form.formState.errors.referenceNumber ||
-      form.formState.errors.note
-    ) {
-      setIsAdvancedOpen(true);
-    }
-  }, [form.formState.errors]);
-
-  useEffect(() => {
     setClientValidationError(null);
   }, [
     selectedShipmentId,
@@ -557,12 +528,21 @@ export default function Payments() {
       const formattedReference = paymentId
         ? `PAY-${String(paymentId).padStart(6, "0")}`
         : null;
-      if (isWizardMode && (apiReference || formattedReference)) {
-        setCompletedPaymentRef(apiReference ?? formattedReference);
-      } else {
-        setIsDialogOpen(false);
-        resetForm();
-      }
+      const resolvedReference =
+        apiReference ?? formattedReference ?? completedPaymentRef ?? "غير متاح";
+      setCompletedPaymentRef(resolvedReference);
+      const pendingSnapshot = pendingSummaryRef.current;
+      const updatedReceiptData = {
+        ...(pendingSnapshot?.receiptData ?? reviewReceiptData),
+        referenceNumber: resolvedReference,
+        createdAt: formatDateTime(new Date()),
+      };
+      setCompletedPaymentSnapshot({
+        receiptData: updatedReceiptData,
+        shipmentCode: pendingSnapshot?.shipmentCode ?? selectedShipment?.shipmentCode ?? "-",
+        attachmentName: pendingSnapshot?.attachmentName ?? attachmentFile?.name ?? null,
+      });
+      setCurrentStep(2);
     },
     onError: (error: Error) => {
       console.error("Payment creation failed", error);
@@ -596,9 +576,8 @@ export default function Payments() {
     setAutoAllocate(false);
     setCurrentStep(0);
     setCompletedPaymentRef(null);
-    setCompletedPaymentId(null);
-    setSummaryDrawerOpen(false);
-    setIsAdvancedOpen(false);
+    setCompletedPaymentSnapshot(null);
+    pendingSummaryRef.current = null;
   };
 
   const handleAttachmentChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -798,6 +777,33 @@ export default function Payments() {
       attachment: attachmentFile,
     });
 
+    const pendingShipmentLabel = selectedShipment
+      ? `${selectedShipment.shipmentCode} - ${selectedShipment.shipmentName}`
+      : "لم يتم اختيار شحنة";
+    const pendingPartyLabel = `${partyType === "supplier" ? "مورد" : "شركة شحن"}${
+      selectedPartyName ? ` - ${selectedPartyName}` : ""
+    }`;
+    pendingSummaryRef.current = {
+      receiptData: {
+        shipmentLabel: pendingShipmentLabel,
+        paymentDate: formatDate(data.paymentDate),
+        currencyLabel: paymentCurrency === "RMB" ? rmbLabel : egpLabel,
+        componentLabel: costComponent || "-",
+        partyLabel: pendingPartyLabel || "-",
+        amountLabel: `${formatCurrency(data.amountOriginal)} ${currencyDisplayLabel}`,
+        paymentMethodLabel: paymentMethod || "-",
+        receiverLabel: data.cashReceiverName?.trim() ? data.cashReceiverName : "-",
+        referenceNumber: data.referenceNumber?.trim() ? data.referenceNumber : "-",
+        note: data.note?.trim() ? data.note : "-",
+        attachmentLabel: attachmentFile ? "مرفق صورة" : "لا يوجد مرفق",
+        allowanceLabel: invoiceSummary?.paymentAllowance
+          ? `${formatCurrency(invoiceSummary.paymentAllowance.remainingAllowedEgp)} ج.م`
+          : undefined,
+      },
+      shipmentCode: selectedShipment?.shipmentCode ?? "-",
+      attachmentName: attachmentFile?.name ?? null,
+    };
+
     createMutation.mutate({ payload, shipmentId: selectedShipmentId });
   });
 
@@ -814,8 +820,68 @@ export default function Payments() {
     return new Date(date).toLocaleDateString("ar-EG");
   };
 
+  const formatDateTime = (date: string | Date | null) => {
+    if (!date) return "-";
+    return new Date(date).toLocaleString("ar-EG");
+  };
+
   const rmbLabel = "رممبي / RMB";
   const egpLabel = "جنيه / EGP";
+  const currencyDisplayLabel = paymentCurrency === "RMB" ? "رممبي" : "جنيه";
+
+  const attachmentPreviewUrl = useMemo(() => {
+    if (!attachmentFile) return null;
+    return URL.createObjectURL(attachmentFile);
+  }, [attachmentFile]);
+
+  useEffect(() => {
+    if (!attachmentPreviewUrl) return;
+    return () => {
+      URL.revokeObjectURL(attachmentPreviewUrl);
+    };
+  }, [attachmentPreviewUrl]);
+
+  const reviewReceiptData = useMemo<PaymentSummaryReceiptData>(() => {
+    const shipmentLabel = selectedShipment
+      ? `${selectedShipment.shipmentCode} - ${selectedShipment.shipmentName}`
+      : "لم يتم اختيار شحنة";
+    const partyLabel = `${partyType === "supplier" ? "مورد" : "شركة شحن"}${
+      selectedPartyName ? ` - ${selectedPartyName}` : ""
+    }`;
+    return {
+      shipmentLabel,
+      paymentDate: paymentDateValue ? formatDate(paymentDateValue) : "-",
+      currencyLabel: paymentCurrency === "RMB" ? rmbLabel : egpLabel,
+      componentLabel: costComponent || "-",
+      partyLabel: partyLabel || "-",
+      amountLabel: `${amountOriginalValue ? formatCurrency(amountOriginalValue) : "0.00"} ${currencyDisplayLabel}`,
+      paymentMethodLabel: paymentMethod || "-",
+      receiverLabel: cashReceiverValue?.trim() ? cashReceiverValue : "-",
+      referenceNumber: referenceNumberValue?.trim() ? referenceNumberValue : "-",
+      note: noteValue?.trim() ? noteValue : "-",
+      attachmentLabel: attachmentFile ? "مرفق صورة" : "لا يوجد مرفق",
+      allowanceLabel: invoiceSummary?.paymentAllowance
+        ? `${formatCurrency(invoiceSummary.paymentAllowance.remainingAllowedEgp)} ج.م`
+        : undefined,
+    };
+  }, [
+    selectedShipment,
+    partyType,
+    selectedPartyName,
+    paymentDateValue,
+    paymentCurrency,
+    costComponent,
+    amountOriginalValue,
+    currencyDisplayLabel,
+    paymentMethod,
+    cashReceiverValue,
+    referenceNumberValue,
+    noteValue,
+    attachmentFile,
+    invoiceSummary?.paymentAllowance,
+  ]);
+
+  const isSuccessState = currentStep === 2;
 
   const componentBreakdown = costComponent &&
     (invoiceSummary || supplierGoodsSummary || loadingSupplierGoodsSummary) && (
@@ -1009,9 +1075,20 @@ export default function Payments() {
   });
 
   const stepFieldGroups: Array<Array<keyof PaymentFormValues>> = [
-    ["shipmentId", "paymentDate", "paymentCurrency"],
-    ["costComponent", "partyType", "partyId", "amountOriginal", "exchangeRateToEgp"],
-    ["paymentMethod", "cashReceiverName", "referenceNumber", "note"],
+    [
+      "shipmentId",
+      "paymentDate",
+      "paymentCurrency",
+      "costComponent",
+      "partyType",
+      "partyId",
+      "amountOriginal",
+      "exchangeRateToEgp",
+      "paymentMethod",
+      "cashReceiverName",
+      "referenceNumber",
+      "note",
+    ],
     [],
   ];
 
@@ -1026,123 +1103,39 @@ export default function Payments() {
     const isValid = await form.trigger(filteredFields, { shouldFocus: true });
     if (!isValid) return;
 
-    if (currentStep === 1) {
-      const partyValidation = await validatePartySelection();
-      if (!partyValidation.ok) return;
-    }
+    const partyValidation = await validatePartySelection();
+    if (!partyValidation.ok) return;
 
-    setCurrentStep((prev) => Math.min(prev + 1, wizardSteps.length - 1));
+    setCurrentStep(1);
   };
 
   const handlePreviousStep = () => {
     setCurrentStep((prev) => Math.max(prev - 1, 0));
   };
 
-  const handleExportSummary = async () => {
+  const handleDownloadSummary = async () => {
     if (!summaryExportRef.current) return;
-    const printWindow = window.open("", "payment-summary", "width=900,height=700");
-    if (!printWindow) {
+    setIsDownloadingSummary(true);
+    try {
+      const dataUrl = await toPng(summaryExportRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: "#ffffff",
+      });
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = `payment-summary-${completedPaymentRef ?? "receipt"}.png`;
+      link.click();
+    } catch (error) {
+      console.error("Failed to export summary image", error);
       toast({
-        title: "تعذر فتح نافذة التصدير.",
+        title: "تعذر تحميل صورة الملخص.",
         variant: "destructive",
       });
-      return;
+    } finally {
+      setIsDownloadingSummary(false);
     }
-
-    const contentHtml = summaryExportRef.current.innerHTML;
-    printWindow.document.write(`
-      <html lang="ar">
-        <head>
-          <title>ملخص الدفعة</title>
-          <style>
-            body { font-family: 'Arial', sans-serif; direction: rtl; padding: 24px; }
-            .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
-            .text-muted-foreground { color: #6b7280; }
-            .font-semibold { font-weight: 600; }
-            .font-medium { font-weight: 500; }
-          </style>
-        </head>
-        <body>
-          <div class="card">${contentHtml}</div>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
   };
-
-  const summaryDetails = (
-    <div className="space-y-3">
-      <div className="space-y-1 text-sm">
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">الشحنة</span>
-          <span className="font-medium">
-            {selectedShipment
-              ? `${selectedShipment.shipmentCode} - ${selectedShipment.shipmentName}`
-              : "لم يتم اختيار شحنة"}
-          </span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">البند</span>
-          <span className="font-medium">{costComponent || "-"}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">الطرف</span>
-          <span className="font-medium">
-            {partyType === "supplier" ? "مورد" : "شركة شحن"} {selectedPartyName ? `- ${selectedPartyName}` : ""}
-          </span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">المبلغ</span>
-          <span className="font-semibold">
-            {amountOriginalValue ? formatCurrency(amountOriginalValue) : "0.00"}{" "}
-            {paymentCurrency === "RMB" ? rmbLabel : egpLabel}
-          </span>
-        </div>
-      </div>
-
-      {(loadingInvoiceSummary || fetchingInvoiceSummary) && (
-        <div className="space-y-2">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-3/4" />
-        </div>
-      )}
-
-      {invoiceSummaryError && (
-        <div className="text-xs text-destructive">
-          {getErrorMessage(invoiceSummaryError, summaryErrorOverrides)}
-        </div>
-      )}
-
-      {componentBreakdown}
-
-      {invoiceSummary?.paymentAllowance && (
-        <div className="rounded-md border border-border bg-muted/30 p-3 text-sm space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">الحد المسموح بالدفع (ج.م)</span>
-            <span className="font-medium">
-              {formatCurrency(invoiceSummary.paymentAllowance.remainingAllowedEgp)} ج.م
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>المصدر: {invoiceSummary.paymentAllowance.source === "declared" ? "معلن" : "مسترجع"}</span>
-            <span>تم التحديث {formatDate(invoiceSummary.computedAt)}</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const summaryCard = (
-    <Card className={cn(showSummaryAside && "sticky top-6")}>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base">ملخص الدفعة</CardTitle>
-      </CardHeader>
-      <CardContent>{summaryDetails}</CardContent>
-    </Card>
-  );
 
   const toggleShipmentExpand = (shipmentId: number) => {
     setExpandedShipments(prev => {
@@ -1242,84 +1235,66 @@ export default function Payments() {
               إضافة دفعة جديدة
             </Button>
           </DialogTrigger>
-          <DialogContent
-            className={cn(
-              "w-full max-h-[90vh] overflow-y-auto",
-              isWizardMode ? "max-w-3xl" : "max-w-6xl",
-            )}
-          >
+          <DialogContent className="w-full max-h-[90vh] overflow-y-auto max-w-4xl">
             <DialogHeader>
               <DialogTitle>تسجيل دفعة جديدة</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <PaymentWizard
-                mode={isWizardMode ? "wizard" : "single"}
-                steps={wizardSteps}
-                currentStep={currentStep}
-                onStepChange={setCurrentStep}
-                summary={summaryCard}
-                summaryPlacement={showSummaryAside ? "sidebar" : "top"}
-                footer={
-                  isWizardMode ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                      <Drawer open={summaryDrawerOpen} onOpenChange={setSummaryDrawerOpen}>
-                        <DrawerTrigger asChild>
-                          <Button type="button" variant="outline">
-                            ملخص
-                          </Button>
-                        </DrawerTrigger>
-                        <DrawerContent className="max-h-[80vh] overflow-y-auto">
-                          <DrawerHeader>
-                            <DrawerTitle>ملخص الدفعة</DrawerTitle>
-                          </DrawerHeader>
-                          <div className="px-4 pb-6">{summaryDetails}</div>
-                        </DrawerContent>
-                      </Drawer>
-                      <div className="flex items-center gap-2">
+              <div className="mx-auto w-full max-w-4xl px-4">
+                <PaymentWizard
+                  mode="wizard"
+                  steps={isSuccessState ? [] : wizardSteps}
+                  currentStep={Math.min(currentStep, wizardSteps.length - 1)}
+                  onStepChange={(index) => {
+                    if (!isSuccessState) {
+                      setCurrentStep(index);
+                    }
+                  }}
+                  footer={
+                    !isSuccessState && (
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                         <Button
                           type="button"
                           variant="outline"
-                          onClick={handlePreviousStep}
-                          disabled={currentStep === 0}
+                          onClick={() => {
+                            setIsDialogOpen(false);
+                            resetForm();
+                          }}
                         >
-                          <ChevronRight className="h-4 w-4 ml-2" />
-                          رجوع
+                          إلغاء
                         </Button>
-                        {currentStep < wizardSteps.length - 1 && (
-                          <Button type="button" onClick={handleNextStep}>
-                            التالي
-                            <ChevronLeft className="h-4 w-4 mr-2" />
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handlePreviousStep}
+                            disabled={currentStep === 0 || createMutation.isPending}
+                          >
+                            <ChevronRight className="h-4 w-4 ml-2" />
+                            رجوع
                           </Button>
-                        )}
+                          {currentStep === 0 && (
+                            <Button type="button" onClick={handleNextStep}>
+                              التالي
+                              <ChevronLeft className="h-4 w-4 mr-2" />
+                            </Button>
+                          )}
+                          {currentStep === 1 && (
+                            <Button
+                              type="submit"
+                              disabled={createMutation.isPending}
+                              data-testid="button-save-payment"
+                            >
+                              {createMutation.isPending ? "جاري الحفظ..." : "حفظ الدفعة"}
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2 pt-2">
-                      <Button
-                        type="submit"
-                        className="flex-1"
-                        disabled={createMutation.isPending}
-                        data-testid="button-save-payment"
-                      >
-                        {createMutation.isPending ? "جاري الحفظ..." : "حفظ الدفعة"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setIsDialogOpen(false);
-                          resetForm();
-                        }}
-                      >
-                        إلغاء
-                      </Button>
-                    </div>
-                  )
-                }
-              >
-                {isWizardMode ? (
-                  <>
-                    {currentStep === 0 && (
+                    )
+                  }
+                >
+                  {currentStep === 0 && !isSuccessState && (
+                    <div className="space-y-4">
                       <Card>
                         <CardHeader>
                           <CardTitle className="text-base">الأساسيات</CardTitle>
@@ -1400,9 +1375,7 @@ export default function Payments() {
                           </div>
                         </CardContent>
                       </Card>
-                    )}
 
-                    {currentStep === 1 && (
                       <Card>
                         <CardHeader>
                           <CardTitle className="text-base">تفاصيل الدفع</CardTitle>
@@ -1471,8 +1444,8 @@ export default function Payments() {
                                         : shippingCompanies?.find((company) => company.id === partyId)
                                             ?.name
                                       : partyType === "supplier"
-                                        ? "اختر المورد…"
-                                        : "اختر شركة الشحن…"}
+                                        ? "اختر المورد..."
+                                        : "اختر شركة الشحن..."}
                                     <ChevronsUpDown className="h-4 w-4 opacity-50" />
                                   </Button>
                                 </PopoverTrigger>
@@ -1658,12 +1631,10 @@ export default function Payments() {
                           )}
                         </CardContent>
                       </Card>
-                    )}
 
-                    {currentStep === 2 && (
                       <Card>
                         <CardHeader>
-                          <CardTitle className="text-base">تفاصيل متقدمة</CardTitle>
+                          <CardTitle className="text-base">تفاصيل إضافية</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
                           <div className="space-y-2">
@@ -1749,525 +1720,105 @@ export default function Payments() {
                           </div>
                         </CardContent>
                       </Card>
-                    )}
+                    </div>
+                  )}
 
-                    {currentStep === 3 && (
-                      <Card>
-                        <CardHeader className="space-y-2">
-                          <CardTitle className="text-base">مراجعة وتأكيد</CardTitle>
-                          <p className="text-sm text-muted-foreground">
-                            راجع تفاصيل الدفعة قبل الحفظ النهائي.
+                  {currentStep === 1 && !isSuccessState && (
+                    <Card>
+                      <CardHeader className="space-y-2">
+                        <CardTitle className="text-base">مراجعة وتأكيد</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          راجع تفاصيل الدفعة قبل الحفظ النهائي.
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <PaymentSummaryReceipt data={reviewReceiptData} />
+
+                        {invoiceSummary?.paymentAllowance && (
+                          <p className="text-xs text-muted-foreground">
+                            المصدر: {invoiceSummary.paymentAllowance.source === "declared" ? "معلن" : "مسترجع"}
+                            {invoiceSummary.computedAt
+                              ? ` • تم التحديث ${formatDate(invoiceSummary.computedAt)}`
+                              : ""}
                           </p>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div ref={summaryExportRef}>{summaryCard}</div>
+                        )}
 
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button type="button" variant="outline" onClick={handleExportSummary}>
-                              <Download className="h-4 w-4 ml-2" />
-                              تصدير الملخص (PDF)
-                            </Button>
-                            <Button
-                              type="submit"
-                              disabled={createMutation.isPending || Boolean(completedPaymentRef)}
-                            >
-                              {createMutation.isPending ? "جاري الحفظ..." : "حفظ الدفعة"}
-                            </Button>
-                          </div>
-
-                          {completedPaymentRef && (
-                            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-                              <div className="flex items-center gap-2 font-semibold">
-                                <CheckCircle2 className="h-5 w-5" />
-                                تم حفظ الدفعة بنجاح
-                              </div>
-                              <div className="mt-2 flex items-center justify-between">
-                                <span>رقم المرجع</span>
-                                <span className="font-mono">{completedPaymentRef}</span>
-                              </div>
-                              <div className="mt-3 flex items-center justify-end">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setIsDialogOpen(false);
-                                    resetForm();
-                                  }}
-                                >
-                                  إغلاق
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="flex flex-wrap gap-2 text-sm">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={() => setCurrentStep(0)}
-                            >
-                              تعديل الأساسيات
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={() => setCurrentStep(1)}
-                            >
-                              تعديل تفاصيل الدفع
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={() => setCurrentStep(2)}
-                            >
-                              تعديل التفاصيل المتقدمة
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </>
-                ) : (
-                  <div className="space-y-4">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-base">الأساسيات</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div className="space-y-2">
-                          <Label>اختر الشحنة *</Label>
-                          <div className="flex gap-2">
-                            <Controller
-                              control={form.control}
-                              name="shipmentId"
-                              render={({ field }) => (
-                                <Select value={field.value} onValueChange={field.onChange}>
-                                  <SelectTrigger data-testid="select-shipment" className="flex-1">
-                                    <SelectValue placeholder="اختر الشحنة" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {activeShipments?.map((s) => (
-                                      <SelectItem key={s.id} value={s.id.toString()}>
-                                        {s.shipmentCode} - {s.shipmentName}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              disabled={!selectedShipmentId}
-                              onClick={() => setShowInvoiceSummary(true)}
-                              data-testid="button-invoice-summary"
-                              title="ملخص الفاتورة"
-                            >
-                              <Receipt className="w-4 h-4" />
-                            </Button>
-                          </div>
-                          {form.formState.errors.shipmentId && (
-                            <p className="text-xs text-destructive">
-                              {form.formState.errors.shipmentId.message}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {(loadingInvoiceSummary || fetchingInvoiceSummary) && (
                           <div className="space-y-2">
-                            <Label htmlFor="paymentDate">تاريخ الدفع *</Label>
-                            <Input
-                              id="paymentDate"
-                              type="date"
-                              data-testid="input-payment-date"
-                              {...form.register("paymentDate")}
-                            />
-                            {form.formState.errors.paymentDate && (
-                              <p className="text-xs text-destructive">
-                                {form.formState.errors.paymentDate.message}
-                              </p>
-                            )}
+                            <Skeleton className="h-4 w-full" />
+                            <Skeleton className="h-4 w-3/4" />
                           </div>
+                        )}
+
+                        {invoiceSummaryError && (
+                          <div className="text-xs text-destructive">
+                            {getErrorMessage(invoiceSummaryError, summaryErrorOverrides)}
+                          </div>
+                        )}
+
+                        {attachmentPreviewUrl && (
                           <div className="space-y-2">
-                            <Label>عملة الدفع *</Label>
-                            <Controller
-                              control={form.control}
-                              name="paymentCurrency"
-                              render={({ field }) => (
-                                <Select value={field.value} onValueChange={field.onChange}>
-                                  <SelectTrigger data-testid="select-currency">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="EGP">جنيه مصري (ج.م)</SelectItem>
-                                    <SelectItem value="RMB">رممبي صيني (¥)</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              )}
+                            <p className="text-xs text-muted-foreground">معاينة المرفق</p>
+                            <img
+                              src={attachmentPreviewUrl}
+                              alt="معاينة المرفق"
+                              className="h-32 w-auto rounded-md border object-contain"
                             />
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-base">تفاصيل الدفع</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div className="space-y-2">
-                          <Label>تحت حساب أي جزء؟ *</Label>
-                          <Controller
-                            control={form.control}
-                            name="costComponent"
-                            render={({ field }) => (
-                              <Select value={field.value} onValueChange={field.onChange}>
-                                <SelectTrigger data-testid="select-cost-component">
-                                  <SelectValue placeholder="اختر البند" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {COST_COMPONENTS.map((option) => (
-                                    <SelectItem key={option.value} value={option.value}>
-                                      {option.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            )}
-                          />
-                          {form.formState.errors.costComponent && (
-                            <p className="text-xs text-destructive">
-                              {form.formState.errors.costComponent.message}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label>نوع الطرف</Label>
-                            <Controller
-                              control={form.control}
-                              name="partyType"
-                              render={({ field }) => (
-                                <Select value={field.value} onValueChange={field.onChange}>
-                                  <SelectTrigger data-testid="select-party-type">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="supplier">مورد</SelectItem>
-                                    <SelectItem value="shipping_company">شركة شحن</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>الطرف</Label>
-                            <Popover open={partyPopoverOpen} onOpenChange={setPartyPopoverOpen}>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  role="combobox"
-                                  aria-expanded={partyPopoverOpen}
-                                  className="w-full justify-between"
-                                  data-testid="select-party"
-                                >
-                                  {partyId
-                                    ? partyType === "supplier"
-                                      ? suppliers?.find((supplier) => supplier.id === partyId)?.name
-                                      : shippingCompanies?.find((company) => company.id === partyId)?.name
-                                    : partyType === "supplier"
-                                      ? "اختر المورد…"
-                                      : "اختر شركة الشحن…"}
-                                  <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-full p-0" align="start">
-                                <Command>
-                                  <CommandInput
-                                    placeholder={
-                                      partyType === "supplier"
-                                        ? "ابحث عن المورد..."
-                                        : "ابحث عن شركة الشحن..."
-                                    }
-                                  />
-                                  <CommandList>
-                                    <CommandEmpty>
-                                      {partyType === "supplier"
-                                        ? loadingSuppliers
-                                          ? "جاري التحميل..."
-                                          : "لا يوجد مورد مطابق"
-                                        : loadingShippingCompanies
-                                          ? "جاري التحميل..."
-                                          : "لا توجد شركة شحن مطابقة"}
-                                    </CommandEmpty>
-                                    <CommandGroup>
-                                      {(partyType === "supplier" ? suppliers : shippingCompanies)?.map(
-                                        (party) => (
-                                          <CommandItem
-                                            key={party.id}
-                                            value={party.name}
-                                            onSelect={() => {
-                                              form.setValue("partyId", String(party.id), {
-                                                shouldValidate: true,
-                                              });
-                                              setPartyPopoverOpen(false);
-                                            }}
-                                          >
-                                            <Check
-                                              className={cn(
-                                                "ml-2 h-4 w-4",
-                                                partyId === party.id ? "opacity-100" : "opacity-0",
-                                              )}
-                                            />
-                                            {party.name}
-                                          </CommandItem>
-                                        ),
-                                      )}
-                                    </CommandGroup>
-                                  </CommandList>
-                                </Command>
-                              </PopoverContent>
-                            </Popover>
-                            {form.formState.errors.partyId && (
-                              <p className="text-xs text-destructive">
-                                {form.formState.errors.partyId.message}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="amountOriginal">المبلغ *</Label>
-                            <Input
-                              id="amountOriginal"
-                              type="number"
-                              step="0.01"
-                              placeholder="0.00"
-                              data-testid="input-amount"
-                              {...form.register("amountOriginal")}
-                            />
-                            {form.formState.errors.amountOriginal && (
-                              <p className="text-xs text-destructive">
-                                {form.formState.errors.amountOriginal.message}
-                              </p>
-                            )}
-                          </div>
-                          {paymentCurrency === "RMB" && (
-                            <div className="space-y-2">
-                              <Label htmlFor="exchangeRateToEgp">سعر الصرف (RMB→EGP) *</Label>
-                              <Input
-                                id="exchangeRateToEgp"
-                                type="number"
-                                step="0.0001"
-                                placeholder="7.00"
-                                data-testid="input-exchange-rate"
-                                {...form.register("exchangeRateToEgp")}
-                              />
-                              {form.formState.errors.exchangeRateToEgp && (
-                                <p className="text-xs text-destructive">
-                                  {form.formState.errors.exchangeRateToEgp.message}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {componentBreakdown}
-
-                        {showAutoAllocationSection && (
-                          <div className="space-y-3 rounded-md border border-border p-3">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-1">
-                                <Label htmlFor="autoAllocate" className="text-sm">
-                                  توزيع التكلفة
-                                </Label>
-                                <p className="text-xs text-muted-foreground">
-                                  توزيع مبلغ دفعة شركة الشحن على الموردين تلقائيًا بحسب إجمالي البضاعة والمتبقي.
-                                </p>
-                                {!canAutoAllocate && (
-                                  <p className="text-xs text-amber-600">
-                                    يتطلب تفعيل التوزيع الدفع بالرنمبي (RMB).
-                                  </p>
-                                )}
-                              </div>
-                              <Switch
-                                id="autoAllocate"
-                                checked={autoAllocate}
-                                onCheckedChange={setAutoAllocate}
-                                disabled={!canAutoAllocate}
-                              />
-                            </div>
-                            {autoAllocate && canAutoAllocate && (
-                              <div className="space-y-2">
-                                {!hasPreviewAmount && (
-                                  <p className="text-xs text-muted-foreground">
-                                    أدخل مبلغًا لعرض توزيع التكلفة المقترح.
-                                  </p>
-                                )}
-                                {hasPreviewAmount && allocationPreviewLoading && (
-                                  <p className="text-xs text-muted-foreground">جاري تحميل معاينة التوزيع...</p>
-                                )}
-                                {hasPreviewAmount && allocationPreviewError && (
-                                  <p className="text-xs text-destructive">
-                                    تعذر تحميل معاينة التوزيع.
-                                  </p>
-                                )}
-                                {hasPreviewAmount &&
-                                  allocationPreview &&
-                                  allocationPreview.suppliers.length > 0 && (
-                                    <div className="overflow-x-auto rounded-md border border-border">
-                                      <Table>
-                                        <TableHeader>
-                                          <TableRow>
-                                            <TableHead className="text-right">المورد</TableHead>
-                                            <TableHead className="text-right">إجمالي البضاعة (¥)</TableHead>
-                                            <TableHead className="text-right">المتبقي (¥)</TableHead>
-                                            <TableHead className="text-right">التوزيع المقترح (¥)</TableHead>
-                                          </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                          {allocationPreview.suppliers.map((supplier) => {
-                                            const supplierName =
-                                              suppliers?.find((entry) => entry.id === supplier.supplierId)
-                                                ?.name || `مورد #${supplier.supplierId}`;
-                                            return (
-                                              <TableRow key={supplier.supplierId}>
-                                                <TableCell className="font-medium">{supplierName}</TableCell>
-                                                <TableCell>{formatCurrency(supplier.goodsTotalRmb)}</TableCell>
-                                                <TableCell>{formatCurrency(supplier.outstandingRmb)}</TableCell>
-                                                <TableCell className="font-semibold text-primary">
-                                                  {formatCurrency(supplier.allocatedRmb)}
-                                                </TableCell>
-                                              </TableRow>
-                                            );
-                                          })}
-                                        </TableBody>
-                                      </Table>
-                                    </div>
-                                  )}
-                                {hasPreviewAmount &&
-                                  allocationPreview &&
-                                  allocationPreview.suppliers.length === 0 && (
-                                    <p className="text-xs text-muted-foreground">
-                                      لا توجد بيانات كافية لعرض التوزيع.
-                                    </p>
-                                  )}
-                              </div>
-                            )}
                           </div>
                         )}
                       </CardContent>
                     </Card>
+                  )}
 
+                  {isSuccessState && completedPaymentSnapshot && (
                     <Card>
-                      <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
-                        <CardHeader className="flex flex-row items-center justify-between">
-                          <CardTitle className="text-base">تفاصيل متقدمة</CardTitle>
-                          <CollapsibleTrigger asChild>
-                            <Button type="button" variant="ghost" size="sm">
-                              {isAdvancedOpen ? "إخفاء" : "عرض"}
-                            </Button>
-                          </CollapsibleTrigger>
-                        </CardHeader>
-                        <CollapsibleContent>
-                          <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                              <Label>طريقة الدفع *</Label>
-                              <Controller
-                                control={form.control}
-                                name="paymentMethod"
-                                render={({ field }) => (
-                                  <Select value={field.value} onValueChange={field.onChange}>
-                                    <SelectTrigger data-testid="select-payment-method">
-                                      <SelectValue placeholder="اختر طريقة الدفع" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {PAYMENT_METHODS.map((m) => (
-                                        <SelectItem key={m.value} value={m.value}>
-                                          {m.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                )}
-                              />
-                              {form.formState.errors.paymentMethod && (
-                                <p className="text-xs text-destructive">
-                                  {form.formState.errors.paymentMethod.message}
-                                </p>
-                              )}
-                            </div>
-
-                            {paymentMethod === "نقدي" && (
-                              <div className="space-y-2">
-                                <Label htmlFor="cashReceiverName">اسم مستلم الكاش *</Label>
-                                <Input
-                                  id="cashReceiverName"
-                                  data-testid="input-cash-receiver"
-                                  {...form.register("cashReceiverName")}
-                                />
-                                {form.formState.errors.cashReceiverName && (
-                                  <p className="text-xs text-destructive">
-                                    {form.formState.errors.cashReceiverName.message}
-                                  </p>
-                                )}
-                              </div>
-                            )}
-
-                            {paymentMethod && paymentMethod !== "نقدي" && (
-                              <div className="space-y-2">
-                                <Label htmlFor="referenceNumber">الرقم المرجعي</Label>
-                                <Input
-                                  id="referenceNumber"
-                                  data-testid="input-reference"
-                                  {...form.register("referenceNumber")}
-                                />
-                              </div>
-                            )}
-
-                            <div className="space-y-2">
-                              <Label htmlFor="note">ملاحظات</Label>
-                              <Textarea
-                                id="note"
-                                rows={2}
-                                data-testid="input-note"
-                                {...form.register("note")}
-                              />
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label htmlFor="attachment">إرفاق صورة (اختياري)</Label>
-                              <Input
-                                key={attachmentInputKey}
-                                id="attachment"
-                                type="file"
-                                accept="image/*"
-                                onChange={handleAttachmentChange}
-                                data-testid="input-attachment"
-                              />
-                              <p className="text-xs text-muted-foreground">
-                                يُسمح بالصور فقط بحد أقصى 2MB.
-                              </p>
-                              {attachmentError && (
-                                <p className="text-xs text-destructive">{attachmentError}</p>
-                              )}
-                            </div>
-                          </CardContent>
-                        </CollapsibleContent>
-                      </Collapsible>
+                      <CardHeader className="space-y-2">
+                        <div className="flex items-center gap-2 text-emerald-600">
+                          <CheckCircle2 className="h-6 w-6" />
+                          <CardTitle className="text-base">تم حفظ الدفعة بنجاح</CardTitle>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          رقم المرجع:{" "}
+                          <span className="font-mono text-foreground">
+                            {completedPaymentSnapshot.receiptData.referenceNumber}
+                          </span>
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <PaymentSummaryReceipt data={completedPaymentSnapshot.receiptData} />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleDownloadSummary}
+                            disabled={isDownloadingSummary}
+                          >
+                            <Download className="h-4 w-4 ml-2" />
+                            {isDownloadingSummary ? "جاري التحميل..." : "تحميل صورة الملخص"}
+                          </Button>
+                          <Button
+                            type="button"
+                            onClick={() => {
+                              setIsDialogOpen(false);
+                              resetForm();
+                            }}
+                          >
+                            العودة للمدفوعات
+                          </Button>
+                        </div>
+                        <div className="absolute left-[-10000px] top-0">
+                          <div ref={summaryExportRef} className="w-[520px]">
+                            <PaymentSummaryReceipt
+                              data={completedPaymentSnapshot.receiptData}
+                              variant="export"
+                            />
+                          </div>
+                        </div>
+                      </CardContent>
                     </Card>
-                  </div>
-                )}
-              </PaymentWizard>
-
-              {clientValidationError && (
-                <div className="text-sm text-destructive" data-testid="validation-error">
-                  {clientValidationError}
-                </div>
-              )}
+                  )}
+                </PaymentWizard>
+              </div>
             </form>
           </DialogContent>
         </Dialog>
