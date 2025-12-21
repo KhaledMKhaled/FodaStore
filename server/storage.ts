@@ -3089,6 +3089,7 @@ export class DatabaseStorage implements IStorage {
       amountRmb?: string;
       amountEgp: string;
       direction: 'cost' | 'payment';
+      isAllocation?: boolean;
       userName?: string;
       paymentId?: number;
       attachmentUrl?: string | null;
@@ -3220,7 +3221,11 @@ export class DatabaseStorage implements IStorage {
       const shipment = allShipments.find(s => s.id === p.shipmentId);
       if (!shipment) continue;
 
-      if (filters?.movementType && filters.movementType !== 'دفعة' && filters.movementType !== 'all') {
+      if (
+        filters?.movementType &&
+        filters.movementType !== "دفعة" &&
+        filters.movementType !== "all"
+      ) {
         continue;
       }
 
@@ -3248,6 +3253,7 @@ export class DatabaseStorage implements IStorage {
           p.paymentCurrency === "RMB" ? parseAmount(p.amountOriginal).toFixed(2) : undefined,
         amountEgp: p.paymentCurrency === "RMB" ? "0" : p.amountEgp || "0",
         direction: 'payment',
+        isAllocation: false,
         userName,
         paymentId: p.id,
         attachmentUrl: p.attachmentUrl ?? null,
@@ -3291,7 +3297,7 @@ export class DatabaseStorage implements IStorage {
 
     if (filters?.costComponent) {
       filteredAllocations = filteredAllocations.filter(
-        () => filters.costComponent === "goods_cost",
+        () => filters.costComponent === PURCHASE_COST_COMPONENT,
       );
     }
 
@@ -3300,12 +3306,10 @@ export class DatabaseStorage implements IStorage {
       const payment = paymentById.get(allocation.paymentId);
       if (!shipment || !payment) continue;
 
-      if (
-        filters?.movementType &&
-        filters.movementType !== "دفعة" &&
-        filters.movementType !== "all"
-      ) {
-        continue;
+      if (filters?.movementType && filters.movementType !== "all") {
+        if (filters.movementType !== "تسوية/توزيع تكلفة") {
+          continue;
+        }
       }
 
       const partyName = supplierMap.get(allocation.supplierId);
@@ -3320,14 +3324,15 @@ export class DatabaseStorage implements IStorage {
         partyName,
         partyId: allocation.supplierId,
         partyType: "supplier",
-        movementType: "دفعة",
-        costComponent: "goods_cost",
+        movementType: "تسوية/توزيع تكلفة",
+        costComponent: PURCHASE_COST_COMPONENT,
         paymentMethod: payment.paymentMethod,
         originalCurrency: "RMB",
         amountOriginal: parseAmount(allocation.allocatedAmount).toFixed(2),
         amountRmb: parseAmount(allocation.allocatedAmount).toFixed(2),
         amountEgp: "0",
         direction: 'payment',
+        isAllocation: true,
         userName,
         paymentId: allocation.paymentId,
         attachmentUrl: payment.attachmentUrl ?? null,
@@ -3341,8 +3346,15 @@ export class DatabaseStorage implements IStorage {
       .filter(m => m.direction === 'cost')
       .reduce((sum, m) => sum + parseFloat(m.amountEgp), 0);
 
+    const includeAllocationsInTotals =
+      filters?.movementType === "تسوية/توزيع تكلفة";
+
     const totalPaidEgp = movements
-      .filter(m => m.direction === 'payment')
+      .filter(
+        (m) =>
+          m.direction === "payment" &&
+          (includeAllocationsInTotals || !m.isAllocation),
+      )
       .reduce((sum, m) => sum + parseFloat(m.amountEgp), 0);
 
     const totalCostRmb = movements
@@ -3350,7 +3362,11 @@ export class DatabaseStorage implements IStorage {
       .reduce((sum, m) => sum + parseFloat(m.amountRmb || "0"), 0);
 
     const totalPaidRmb = movements
-      .filter(m => m.direction === 'payment')
+      .filter(
+        (m) =>
+          m.direction === "payment" &&
+          (includeAllocationsInTotals || !m.isAllocation),
+      )
       .reduce((sum, m) => sum + parseFloat(m.amountRmb || "0"), 0);
 
     return {
