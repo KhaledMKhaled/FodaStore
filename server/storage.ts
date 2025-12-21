@@ -1585,13 +1585,35 @@ export class DatabaseStorage implements IStorage {
       // Enforce strict per-party/component remaining rules
       const componentCurrency =
         data.costComponent === "الجمرك" || data.costComponent === "التخريج" ? "EGP" : "RMB";
+      let validationRateToEgp = exchangeRateToEgp;
+
+      if (componentCurrency === "RMB" && data.paymentCurrency === "EGP") {
+        if (!validationRateToEgp) {
+          const [latestRate] = await tx
+            .select()
+            .from(exchangeRates)
+            .where(
+              and(
+                eq(exchangeRates.fromCurrency, "RMB"),
+                eq(exchangeRates.toCurrency, "EGP"),
+              ),
+            )
+            .orderBy(desc(exchangeRates.rateDate))
+            .limit(1);
+
+          validationRateToEgp = latestRate?.rateValue
+            ? parseAmount(latestRate.rateValue)
+            : RMB_TO_EGP_FALLBACK_RATE;
+        }
+      }
+
       const amountInComponentCurrency =
         componentCurrency === "EGP"
           ? amountEgp
           : data.paymentCurrency === "RMB"
             ? amountOriginal
-            : exchangeRateToEgp
-              ? amountEgp / exchangeRateToEgp
+            : validationRateToEgp
+              ? amountEgp / validationRateToEgp
               : 0;
 
       let remainingBefore = Infinity;

@@ -1092,9 +1092,38 @@ export async function registerRoutes(
           });
         }
 
+        if (partyType !== "supplier" && partyType !== "shipping_company") {
+          return res.status(400).json({ message: "نوع الطرف غير صالح" });
+        }
+
+        if (
+          component !== PURCHASE_COST_COMPONENT &&
+          !SHIPPING_COST_COMPONENTS.has(component)
+        ) {
+          return res.status(400).json({ message: "البند غير صالح" });
+        }
+
         const shipment = await routeStorage.getShipment(shipmentId);
         if (!shipment) {
           return res.status(404).json({ message: "الشحنة غير موجودة" });
+        }
+
+        const { shipmentSuppliers, shippingCompanyId } =
+          await routeStorage.getShipmentSupplierContext(shipmentId);
+
+        if (partyType === "supplier") {
+          if (component !== PURCHASE_COST_COMPONENT) {
+            return res.status(400).json({ message: "المكون غير صالح للمورد" });
+          }
+          if (!shipmentSuppliers.includes(partyId)) {
+            return res.status(400).json({ message: "المورد غير مرتبط بهذه الشحنة" });
+          }
+        }
+
+        if (partyType === "shipping_company") {
+          if (shippingCompanyId !== partyId) {
+            return res.status(400).json({ message: "شركة الشحن غير مرتبطة بهذه الشحنة" });
+          }
         }
 
         const payments = await routeStorage.getShipmentPayments(shipmentId);

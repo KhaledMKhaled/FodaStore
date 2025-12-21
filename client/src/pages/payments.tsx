@@ -89,7 +89,6 @@ import {
   buildPaymentFormData,
   canAutoAllocatePayment,
   shouldShowAutoAllocationSection,
-  shouldUseSupplierGoodsSummary,
 } from "./payments-utils";
 import { PaymentWizard } from "@/components/payment-wizard";
 import {
@@ -232,12 +231,6 @@ interface AllocationPreview {
   }>;
 }
 
-interface SupplierGoodsSummary {
-  supplierGoodsTotalRmb: string;
-  supplierPaidRmb: string;
-  supplierRemainingRmb: string;
-}
-
 interface PartyPaymentSummary {
   shipmentId: number;
   partyType: "supplier" | "shipping_company";
@@ -374,12 +367,6 @@ export default function Payments() {
     selectedShipmentId,
     shippingCompanyId,
   });
-  const showSupplierGoodsSummary = shouldUseSupplierGoodsSummary({
-    costComponent,
-    partyType,
-    shipmentId: selectedShipmentId,
-    partyId,
-  });
   const canAutoAllocate = canAutoAllocatePayment({
     costComponent,
     partyType,
@@ -408,21 +395,6 @@ export default function Payments() {
     { id: "entry", title: "إدخال البيانات" },
     { id: "review", title: "مراجعة وتأكيد" },
   ];
-
-  const {
-    data: supplierGoodsSummary,
-    isFetching: loadingSupplierGoodsSummary,
-    error: supplierGoodsSummaryError,
-  } = useQuery<SupplierGoodsSummary>({
-    queryKey: [
-      "/api/shipments",
-      selectedShipmentId,
-      "suppliers",
-      partyId,
-      "goods-summary",
-    ],
-    enabled: showSupplierGoodsSummary,
-  });
 
   const shouldFetchPartySummary =
     !!selectedShipmentId &&
@@ -1041,14 +1013,7 @@ export default function Payments() {
     ],
   );
 
-  const isTotalsLoading =
-    !!costComponent &&
-    (loadingInvoiceSummary ||
-      fetchingInvoiceSummary ||
-      (showSupplierGoodsSummary && loadingSupplierGoodsSummary));
-
-  const summaryError =
-    partyPaymentSummaryError || supplierGoodsSummaryError || invoiceSummaryError;
+  const summaryError = partyPaymentSummaryError || invoiceSummaryError;
 
   const renderSummaryCard = (title: string) => (
     <Card>
