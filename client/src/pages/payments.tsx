@@ -1839,7 +1839,12 @@ export default function Payments() {
                         </p>
                       </CardHeader>
                       <CardContent className="space-y-4">
-                        <PaymentSummaryReceipt data={completedPaymentSnapshot.receiptData} />
+                        <div
+                          ref={summaryExportRef}
+                          className="w-full max-w-[720px] mx-auto"
+                        >
+                          <PaymentSummaryReceipt data={completedPaymentSnapshot.receiptData} />
+                        </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
                             type="button"
@@ -1859,14 +1864,6 @@ export default function Payments() {
                           >
                             العودة للمدفوعات
                           </Button>
-                        </div>
-                        <div className="absolute left-[-10000px] top-0">
-                          <div ref={summaryExportRef} className="w-[520px]">
-                            <PaymentSummaryReceipt
-                              data={completedPaymentSnapshot.receiptData}
-                              variant="export"
-                            />
-                          </div>
                         </div>
                       </CardContent>
                     </Card>
