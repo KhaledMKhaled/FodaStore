@@ -236,17 +236,18 @@ export default function ShipmentWizard() {
 
     for (let index = 0; index < items.length; index++) {
       const item = items[index];
+      const displayNo = item.lineNo || (index + 1);
       if (!item.productName || !item.productName.trim()) {
-        return `اسم الصنف مطلوب (بند #${index + 1})`;
+        return `اسم الصنف مطلوب (بند #${displayNo})`;
       }
       if (!item.cartonsCtn || item.cartonsCtn <= 0) {
-        return `عدد الكراتين مطلوب (بند #${index + 1})`;
+        return `عدد الكراتين مطلوب (بند #${displayNo})`;
       }
       if (!item.piecesPerCartonPcs || item.piecesPerCartonPcs <= 0) {
-        return `عدد القطع في الكرتونة مطلوب (بند #${index + 1})`;
+        return `عدد القطع في الكرتونة مطلوب (بند #${displayNo})`;
       }
       if (!item.purchasePricePerPiecePriRmb || Number(item.purchasePricePerPiecePriRmb) <= 0) {
-        return `سعر القطعة بالرممبي مطلوب (بند #${index + 1})`;
+        return `سعر القطعة بالرممبي مطلوب (بند #${displayNo})`;
       }
     }
     return null;
@@ -1421,7 +1422,7 @@ function Step3Customs({
                     />
                   )}
                   <div className="flex-1">
-                    <span className="font-medium">{item.productName || `البند ${index + 1}`}</span>
+                    <span className="font-medium">{item.productName || `البند ${item.lineNo || (index + 1)}`}</span>
                     <span className="text-sm text-muted-foreground mr-2">
                       ({ctn} كرتونة - {cou} قطعة)
                     </span>

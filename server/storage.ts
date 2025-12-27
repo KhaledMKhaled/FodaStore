@@ -1,4 +1,4 @@
-import { eq, desc, and, sql, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, sql, inArray } from "drizzle-orm";
 import { db } from "./db";
 import {
   users,
@@ -1050,7 +1050,7 @@ export class DatabaseStorage implements IStorage {
 
   // Shipment Items
   async getShipmentItems(shipmentId: number): Promise<ShipmentItem[]> {
-    return db.select().from(shipmentItems).where(eq(shipmentItems.shipmentId, shipmentId));
+    return db.select().from(shipmentItems).where(eq(shipmentItems.shipmentId, shipmentId)).orderBy(asc(shipmentItems.lineNo));
   }
 
   async getShipmentSupplierContext(shipmentId: number): Promise<{

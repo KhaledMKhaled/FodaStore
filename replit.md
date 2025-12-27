@@ -111,6 +111,14 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **December 27, 2025**: Large Shipment Performance and Stable Line Numbering
+  - Fixed critical bug where large shipments (100+ items) failed to save
+  - Implemented chunked bulk inserts (CHUNK_SIZE = 50) for reliable large data handling
+  - Added stable `lineNo` column to shipment_items with unique constraint per shipment
+  - Line numbers are immutable once assigned - preserved on updates, gaps allowed on deletions
+  - Items now ordered by lineNo when fetched (consistent display order)
+  - Arabic error messages for validation and database failures
+  - Design: shipmentService.ts uses UPDATE for existing items (preserving lineNo), INSERT only for new items
 - **December 17, 2025**: Branding and Landing Page Update
   - Renamed platform from "Replit.AI" to "Tracker" across all pages
   - Redesigned landing page with modern split-screen layout, gradient backgrounds, and backdrop blur
