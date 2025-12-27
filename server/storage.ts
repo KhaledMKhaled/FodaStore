@@ -59,6 +59,18 @@ const parseAmount = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+export function deriveShipmentSupplierIds(
+  rows: Array<{ supplierId: number | null; productDefaultSupplierId: number | null }>,
+): number[] {
+  return Array.from(
+    new Set(
+      rows
+        .map((row) => row.supplierId ?? row.productDefaultSupplierId)
+        .filter((supplierId): supplierId is number => typeof supplierId === "number"),
+    ),
+  );
+}
+
 const PURCHASE_COST_COMPONENT = "تكلفة البضاعة";
 const CUSTOMS_COST_COMPONENTS = new Set(["الجمرك", "التخريج", "الجمرك والتخريج"]);
 
@@ -1074,17 +1086,15 @@ export class DatabaseStorage implements IStorage {
       .where(eq(shipments.id, shipmentId));
 
     const rows = await db
-      .select({ supplierId: shipmentItems.supplierId })
+      .select({
+        supplierId: shipmentItems.supplierId,
+        productDefaultSupplierId: products.defaultSupplierId,
+      })
       .from(shipmentItems)
+      .leftJoin(products, eq(shipmentItems.productId, products.id))
       .where(eq(shipmentItems.shipmentId, shipmentId));
 
-    const itemSuppliers = Array.from(
-      new Set(
-        rows
-          .map((row) => row.supplierId)
-          .filter((supplierId): supplierId is number => typeof supplierId === "number"),
-      ),
-    );
+    const itemSuppliers = deriveShipmentSupplierIds(rows);
 
     const shippingCompanyId = shipment?.shippingCompanyId ?? null;
     const shipmentSuppliers = new Set(itemSuppliers);

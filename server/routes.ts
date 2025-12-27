@@ -919,7 +919,10 @@ export async function registerRoutes(
 
         const shippingCompanies = shippingCompany ? [shippingCompany] : [];
 
-        res.json({ suppliers, shippingCompanies });
+        res.json({
+          suppliers: suppliers.map(({ id, name }) => ({ id, name })),
+          shippingCompanies: shippingCompanies.map(({ id, name }) => ({ id, name })),
+        });
       } catch (error) {
         res.status(500).json({ message: "Error fetching related parties" });
       }
