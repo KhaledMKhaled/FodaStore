@@ -317,6 +317,12 @@ export default function Payments() {
     queryKey: ["/api/shipping-companies"],
   });
 
+  const { data: relatedParties, isLoading: loadingRelatedParties, isFetching: fetchingRelatedParties } =
+    useQuery<{ suppliers: Supplier[]; shippingCompanies: ShippingCompany[] }>({
+      queryKey: ["/api/shipments", selectedShipmentId, "related-parties"],
+      enabled: !!selectedShipmentId,
+    });
+
   const { data: shipments, isLoading: loadingShipments } = useQuery<Shipment[]>({
     queryKey: ["/api/shipments"],
   });
@@ -380,12 +386,44 @@ export default function Payments() {
     () => shipments?.find((shipment) => shipment.id === selectedShipmentId),
     [shipments, selectedShipmentId],
   );
-  const selectedPartyName =
-    partyId && partyType === "supplier"
-      ? suppliers?.find((supplier) => supplier.id === partyId)?.name
-      : partyId && partyType === "shipping_company"
-        ? shippingCompanies?.find((company) => company.id === partyId)?.name
-        : "";
+  const relatedSuppliers = relatedParties?.suppliers ?? [];
+  const relatedShippingCompanies = relatedParties?.shippingCompanies ?? [];
+  const partyOptions = useMemo(
+    () =>
+      selectedShipmentId
+        ? partyType === "supplier"
+          ? relatedSuppliers
+          : relatedShippingCompanies
+        : [],
+    [partyType, selectedShipmentId, relatedShippingCompanies, relatedSuppliers],
+  );
+  const hasPartyOptions = partyOptions.length > 0;
+  const selectedPartyName = partyId
+    ? partyType === "supplier"
+      ? relatedSuppliers.find((supplier) => supplier.id === partyId)?.name ||
+        suppliers?.find((supplier) => supplier.id === partyId)?.name
+      : relatedShippingCompanies.find((company) => company.id === partyId)?.name ||
+        shippingCompanies?.find((company) => company.id === partyId)?.name
+    : "";
+  const partyButtonLabel = selectedPartyName
+    ? selectedPartyName
+    : !selectedShipmentId
+      ? "اختر الشحنة أولاً"
+      : partyType === "supplier"
+        ? "اختر المورد..."
+        : "اختر شركة الشحن...";
+  const isPartyLoading = loadingRelatedParties || fetchingRelatedParties;
+  const partyEmptyMessage = !selectedShipmentId
+    ? "اختر الشحنة أولاً"
+    : isPartyLoading
+      ? "جاري التحميل..."
+      : partyType === "supplier"
+        ? hasPartyOptions
+          ? "لا يوجد مورد مطابق"
+          : "لا يوجد موردين مرتبطين بهذه الشحنة"
+        : hasPartyOptions
+          ? "لا توجد شركة شحن مطابقة"
+          : "لا توجد شركة شحن مرتبطة بهذه الشحنة";
 
   const wizardSteps = [
     { id: "entry", title: "إدخال البيانات" },
@@ -465,6 +503,27 @@ export default function Payments() {
     if (!isDialogOpen) return;
     form.setValue("partyId", "", { shouldValidate: true });
   }, [partyType, isDialogOpen, form]);
+
+  useEffect(() => {
+    if (!isDialogOpen) return;
+    if (!selectedShipmentId) {
+      form.setValue("partyId", "", { shouldValidate: true });
+      return;
+    }
+
+    if (!partyId || isPartyLoading) return;
+
+    if (!partyOptions.some((party) => party.id === partyId)) {
+      form.setValue("partyId", "", { shouldValidate: true });
+    }
+  }, [
+    form,
+    isDialogOpen,
+    isPartyLoading,
+    partyId,
+    partyOptions,
+    selectedShipmentId,
+  ]);
 
   useEffect(() => {
     if (!showAutoAllocationSection || paymentCurrency !== "RMB") {
@@ -1469,15 +1528,9 @@ export default function Payments() {
                                     aria-expanded={partyPopoverOpen}
                                     className="w-full justify-between"
                                     data-testid="select-party"
+                                    disabled={!selectedShipmentId}
                                   >
-                                    {partyId
-                                      ? partyType === "supplier"
-                                        ? suppliers?.find((supplier) => supplier.id === partyId)?.name
-                                        : shippingCompanies?.find((company) => company.id === partyId)
-                                            ?.name
-                                      : partyType === "supplier"
-                                        ? "اختر المورد..."
-                                        : "اختر شركة الشحن..."}
+                                    {partyButtonLabel}
                                     <ChevronsUpDown className="h-4 w-4 opacity-50" />
                                   </Button>
                                 </PopoverTrigger>
@@ -1485,46 +1538,38 @@ export default function Payments() {
                                   <Command>
                                     <CommandInput
                                       placeholder={
-                                        partyType === "supplier"
-                                          ? "ابحث عن المورد..."
-                                          : "ابحث عن شركة الشحن..."
+                                        selectedShipmentId
+                                          ? partyType === "supplier"
+                                            ? "ابحث عن المورد..."
+                                            : "ابحث عن شركة الشحن..."
+                                          : "اختر الشحنة أولاً"
                                       }
                                     />
                                     <CommandList>
-                                      <CommandEmpty>
-                                        {partyType === "supplier"
-                                          ? loadingSuppliers
-                                            ? "جاري التحميل..."
-                                            : "لا يوجد مورد مطابق"
-                                          : loadingShippingCompanies
-                                            ? "جاري التحميل..."
-                                            : "لا توجد شركة شحن مطابقة"}
-                                      </CommandEmpty>
+                                      <CommandEmpty>{partyEmptyMessage}</CommandEmpty>
                                       <CommandGroup>
-                                        {(partyType === "supplier" ? suppliers : shippingCompanies)?.map(
-                                          (party) => (
-                                            <CommandItem
-                                              key={party.id}
-                                              value={party.name}
-                                              onSelect={() => {
-                                                form.setValue("partyId", String(party.id), {
-                                                  shouldValidate: true,
-                                                });
-                                                setPartyPopoverOpen(false);
-                                              }}
-                                            >
-                                              <Check
-                                                className={cn(
-                                                  "ml-2 h-4 w-4",
-                                                  partyId === party.id
-                                                    ? "opacity-100"
-                                                    : "opacity-0",
-                                                )}
-                                              />
-                                              {party.name}
-                                            </CommandItem>
-                                          ),
-                                        )}
+                                        {partyOptions.map((party) => (
+                                          <CommandItem
+                                            key={party.id}
+                                            value={party.name}
+                                            onSelect={() => {
+                                              form.setValue("partyId", String(party.id), {
+                                                shouldValidate: true,
+                                              });
+                                              setPartyPopoverOpen(false);
+                                            }}
+                                          >
+                                            <Check
+                                              className={cn(
+                                                "ml-2 h-4 w-4",
+                                                partyId === party.id
+                                                  ? "opacity-100"
+                                                  : "opacity-0",
+                                              )}
+                                            />
+                                            {party.name}
+                                          </CommandItem>
+                                        ))}
                                       </CommandGroup>
                                     </CommandList>
                                   </Command>

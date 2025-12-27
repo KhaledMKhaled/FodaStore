@@ -375,7 +375,7 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
           return res.status(400).json({
             error: {
               code: "PARTY_MISMATCH",
-              message: "الطرف المحدد لا يطابق أطراف الشحنة.",
+              message: "الطرف المختار غير مرتبط بهذه الشحنة",
               details: {
                 field: "partyId",
                 partyId: resolvedPartyId,
@@ -896,6 +896,35 @@ export async function registerRoutes(
       res.status(500).json({ message: "Error fetching shipment" });
     }
   });
+
+  app.get(
+    "/api/shipments/:id/related-parties",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const shipmentId = parseInt(req.params.id);
+        const shipment = await routeStorage.getShipment(shipmentId);
+
+        if (!shipment) {
+          return res.status(404).json({ message: "الشحنة غير موجودة" });
+        }
+
+        const context = await routeStorage.getShipmentSupplierContext(shipmentId);
+        const [suppliers, shippingCompany] = await Promise.all([
+          routeStorage.getSuppliersByIds(context.itemSuppliers),
+          context.shippingCompanyId
+            ? routeStorage.getShippingCompany(context.shippingCompanyId)
+            : Promise.resolve(null),
+        ]);
+
+        const shippingCompanies = shippingCompany ? [shippingCompany] : [];
+
+        res.json({ suppliers, shippingCompanies });
+      } catch (error) {
+        res.status(500).json({ message: "Error fetching related parties" });
+      }
+    },
+  );
 
   app.post("/api/shipments", requireRole(["مدير", "محاسب"]), async (req, res) => {
     try {
