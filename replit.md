@@ -120,6 +120,7 @@ npm run db:push    # Push database schema changes
   - Arabic error messages for validation and database failures
   - Design: shipmentService.ts uses UPDATE for existing items (preserving lineNo), INSERT only for new items
   - Added autocomplete search for items in shipment wizard (Step 1) - max 5 suggestions, navigates to item page and scrolls
+  - Added duplicate item button (Copy icon) - creates a copy immediately after the original, without the attached image
 - **December 17, 2025**: Branding and Landing Page Update
   - Renamed platform from "Replit.AI" to "Tracker" across all pages
   - Redesigned landing page with modern split-screen layout, gradient backgrounds, and backdrop blur

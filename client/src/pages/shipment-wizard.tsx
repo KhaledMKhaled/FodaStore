@@ -19,6 +19,7 @@ import {
   ChevronRight,
   RefreshCw,
   Search,
+  Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -384,6 +385,31 @@ export default function ShipmentWizard() {
     }
   };
 
+  const duplicateItem = (index: number) => {
+    const originalItem = items[index];
+    const duplicatedItem: Partial<ShipmentItem> = {
+      ...originalItem,
+      id: undefined,
+      lineNo: undefined,
+      imageUrl: undefined,
+    };
+    const newItems = [
+      ...items.slice(0, index + 1),
+      duplicatedItem,
+      ...items.slice(index + 1),
+    ];
+    setItems(newItems);
+    const newTotalPages = Math.ceil(newItems.length / ITEMS_PER_PAGE);
+    const targetPage = Math.floor((index + 1) / ITEMS_PER_PAGE) + 1;
+    setCurrentItemsPage(targetPage);
+    setTimeout(() => {
+      const newItemElement = document.querySelector(`[data-testid="item-row-${index + 1}"]`);
+      if (newItemElement) {
+        newItemElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 100);
+  };
+
   const updateItem = (index: number, field: string, value: string | number) => {
     const newItems = [...items];
     (newItems[index] as Record<string, unknown>)[field] = value;
@@ -507,6 +533,7 @@ export default function ShipmentWizard() {
               updateItem={updateItem}
               addItem={addItem}
               removeItem={removeItem}
+              duplicateItem={duplicateItem}
               suppliers={suppliers || []}
               productTypes={productTypes}
               isNew={isNew}
@@ -689,6 +716,7 @@ function Step1Import({
   updateItem,
   addItem,
   removeItem,
+  duplicateItem,
   suppliers,
   productTypes,
   isNew,
@@ -727,6 +755,7 @@ function Step1Import({
   updateItem: (index: number, field: string, value: string | number) => void;
   addItem: () => void;
   removeItem: (index: number) => void;
+  duplicateItem: (index: number) => void;
   suppliers: Supplier[];
   productTypes: ProductType[] | undefined;
   isNew: boolean;
@@ -986,16 +1015,28 @@ function Step1Import({
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium">البند {actualIndex + 1}</span>
-                  {items.length > 1 && (
+                  <div className="flex items-center gap-1">
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => removeItem(actualIndex)}
-                      className="text-destructive"
+                      onClick={() => duplicateItem(actualIndex)}
+                      title="نسخ البند"
+                      data-testid={`button-duplicate-item-${actualIndex}`}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Copy className="w-4 h-4" />
                     </Button>
-                  )}
+                    {items.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeItem(actualIndex)}
+                        className="text-destructive"
+                        data-testid={`button-remove-item-${actualIndex}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
