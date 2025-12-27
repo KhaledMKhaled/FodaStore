@@ -74,6 +74,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
+import { createRelatedPartiesQuery, getPartyOptions } from "@/lib/relatedParties";
 import { shipmentStatusColors } from "@/lib/colorMaps";
 import { Switch } from "@/components/ui/switch";
 import type {
@@ -317,10 +318,14 @@ export default function Payments() {
     queryKey: ["/api/shipping-companies"],
   });
 
+  const relatedPartiesQuery = createRelatedPartiesQuery(selectedShipmentId);
   const { data: relatedParties, isLoading: loadingRelatedParties, isFetching: fetchingRelatedParties } =
     useQuery<{ suppliers: Supplier[]; shippingCompanies: ShippingCompany[] }>({
-      queryKey: ["/api/shipments", selectedShipmentId, "related-parties"],
-      enabled: !!selectedShipmentId,
+      queryKey: relatedPartiesQuery.queryKey,
+      queryFn:
+        relatedPartiesQuery.queryFn ??
+        (async () => ({ suppliers: [], shippingCompanies: [] } as const)),
+      enabled: relatedPartiesQuery.enabled,
     });
 
   const { data: shipments, isLoading: loadingShipments } = useQuery<Shipment[]>({
@@ -389,13 +394,8 @@ export default function Payments() {
   const relatedSuppliers = relatedParties?.suppliers ?? [];
   const relatedShippingCompanies = relatedParties?.shippingCompanies ?? [];
   const partyOptions = useMemo(
-    () =>
-      selectedShipmentId
-        ? partyType === "supplier"
-          ? relatedSuppliers
-          : relatedShippingCompanies
-        : [],
-    [partyType, selectedShipmentId, relatedShippingCompanies, relatedSuppliers],
+    () => getPartyOptions(relatedParties, partyType, selectedShipmentId),
+    [partyType, relatedParties, selectedShipmentId],
   );
   const hasPartyOptions = partyOptions.length > 0;
   const selectedPartyName = partyId
