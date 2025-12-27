@@ -741,10 +741,34 @@ function Step1Import({
   refreshRates: () => void;
   isRefreshing: boolean;
 }) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  
   const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
   const startIndex = (currentItemsPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const paginatedItems = items.slice(startIndex, endIndex);
+
+  const filteredItems = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => 
+      item.productName && 
+      item.productName.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .slice(0, 5);
+
+  const navigateToItem = (itemIndex: number) => {
+    const targetPage = Math.floor(itemIndex / ITEMS_PER_PAGE) + 1;
+    setCurrentItemsPage(targetPage);
+    setSearchOpen(false);
+    setSearchQuery("");
+    setTimeout(() => {
+      const itemElement = document.querySelector(`[data-testid="item-row-${itemIndex}"]`);
+      if (itemElement) {
+        itemElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 100);
+  };
 
   return (
     <div className="space-y-6">
@@ -767,6 +791,65 @@ function Step1Import({
                 إجمالي القطع: {totalPieces}
               </Badge>
               <div className="flex-1 lg:flex-none" />
+              
+              {/* Item Search Autocomplete */}
+              <Popover open={searchOpen} onOpenChange={setSearchOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    data-testid="button-search-items"
+                  >
+                    <Search className="w-4 h-4" />
+                    بحث في البنود
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-0" align="end">
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      placeholder="ابحث باسم المنتج..."
+                      value={searchQuery}
+                      onValueChange={setSearchQuery}
+                      data-testid="input-search-items"
+                    />
+                    <CommandList>
+                      {searchQuery.length > 0 && filteredItems.length === 0 && (
+                        <CommandEmpty>لا توجد نتائج</CommandEmpty>
+                      )}
+                      {searchQuery.length > 0 && filteredItems.length > 0 && (
+                        <CommandGroup heading="النتائج (أقصى 5)">
+                          {filteredItems.map(({ item, index }) => (
+                            <CommandItem
+                              key={index}
+                              value={`item-${index}`}
+                              onSelect={() => navigateToItem(index)}
+                              className="flex items-center gap-2 cursor-pointer"
+                              data-testid={`search-result-${index}`}
+                            >
+                              <Package className="w-4 h-4 text-muted-foreground shrink-0" />
+                              <div className="flex flex-col min-w-0">
+                                <span className="truncate text-sm">
+                                  {item.productName}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  البند {index + 1}
+                                </span>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      )}
+                      {searchQuery.length === 0 && (
+                        <div className="p-4 text-center text-sm text-muted-foreground">
+                          اكتب للبحث في أسماء المنتجات
+                        </div>
+                      )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              
               <Button
                 variant="outline"
                 size="sm"
