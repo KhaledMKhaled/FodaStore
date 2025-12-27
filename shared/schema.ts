@@ -121,6 +121,7 @@ export const shipments = pgTable("shipments", {
 export const shipmentItems = pgTable("shipment_items", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   shipmentId: integer("shipment_id").references(() => shipments.id).notNull(),
+  lineNo: integer("line_no").notNull().default(1),
   supplierId: integer("supplier_id").references(() => suppliers.id),
   productId: integer("product_id").references(() => products.id),
   productTypeId: integer("product_type_id").references(() => productTypes.id),

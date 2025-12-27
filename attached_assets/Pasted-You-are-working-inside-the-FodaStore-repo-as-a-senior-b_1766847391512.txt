@@ -1,0 +1,204 @@
+You are working inside the FodaStore repo as a senior backend+frontend engineer and QA.
+
+I have TWO production issues:
+
+(1) Large shipments fail to save:
+When I create a large shipment with ~100 products/items and press Save, it often does NOT save. I have no logs and no visible UI error. I suspect the request is too large or the DB operations are too heavy, causing a crash/timeout. You must diagnose and fix this permanently in a way that fits the database and applies across the app (any bulk create/update flows).
+
+(2) Item “line number” must be stable:
+When adding items to a shipment, each item has a visible “item number” (بند رقم 1,2,3...). I want this number to be stable and never change after save and reopen:
+- Item #1 must remain #1 forever for that shipment, etc.
+- Items can be added/edited/deleted later, but existing numbers must not change.
+- If an item is deleted, keep gaps (do NOT renumber) unless the system already has a stronger requirement—default is KEEP GAPS to preserve stability.
+
+You must NOT guess. First discover how it currently works, then implement robust fixes.
+
+============================================================
+PART A — DIAGNOSE THE LARGE SAVE FAILURE (MANDATORY, EVIDENCE-BASED)
+============================================================
+
+A1) Locate the shipment creation flow
+- Find the UI screen/component that creates shipments with many items.
+- Find the API endpoint(s) called on Save.
+- Determine if Save sends:
+  - one big request with all items, OR
+  - many requests, OR
+  - a mixed approach (shipment then items).
+
+A2) Reproduce with evidence
+- Create a shipment with 100 items (use scripts/seed or UI).
+- Capture evidence:
+  - Browser devtools Network: request count, payload size, response status (413/500/504/etc.), response body
+  - Console errors
+  - Server logs / stack trace (enable debug logs temporarily)
+  - DB errors (connection pool, timeouts, transaction aborts)
+
+A3) Identify root cause (choose the true one)
+Common causes to check:
+- Request body too large (413) or reverse proxy limit
+- Server timeout (504) or slow transaction
+- DB connection pool exhaustion
+- Too many sequential inserts causing timeout
+- Transaction too large / locks / statement timeout
+- Frontend sending duplicate/invalid payload causing validation failure but UI swallows it
+- Missing proper error surfacing (“no UI error” means errors might be swallowed)
+
+A4) Fix error visibility (REQUIRED)
+- Remove generic silent failures.
+- Ensure any failure returns a clear Arabic message in UI:
+  - “تعذر حفظ الشحنة بسبب …”
+- Log full details to server logs (no secrets).
+- Make the UI show actionable error messages from API responses.
+
+============================================================
+PART B — PERMANENT FIX FOR SAVING LARGE SHIPMENTS (ROBUST, DB-FRIENDLY)
+============================================================
+
+Goal: Saving 100–300 items must succeed reliably without timeouts, crashes, or DB overload.
+
+Implement ONE of these robust strategies (prefer simplest that matches repo conventions):
+
+OPTION 1 (Preferred): Server-side chunked bulk insert within safe limits
+- Keep UI request format simple (shipments + items).
+- On server:
+  1) Insert shipment record first.
+  2) Insert items in CHUNKS (e.g., 25–50 rows per chunk) using efficient bulk insert.
+  3) Wrap in a transaction but ensure it does not exceed statement timeout; if needed:
+     - transaction per chunk OR
+     - one transaction with chunked inserts (still safer than 100 individual inserts).
+  4) Return success only when all chunks are persisted.
+
+OPTION 2: Two-phase API
+- POST /shipments -> create shipment, returns shipmentId
+- POST /shipments/:id/items/bulk -> add items in chunks (client or server chunking)
+- Show progress in UI (optional but recommended)
+- Must be resilient: if a chunk fails, show which chunk failed and allow retry.
+
+OPTION 3: Background job (only if your repo already supports it)
+- API accepts request, enqueues job, UI polls job status.
+- Only choose if the repo already has jobs/queues; do not add heavy infra.
+
+Regardless of option:
+- Enforce max chunk size and validate payload
+- Reduce DB round-trips
+- Ensure idempotency if possible (avoid duplicates on retry)
+- Ensure the shipment+items remain consistent if a failure occurs (rollback or safe partial + recovery)
+
+Also review and adjust relevant limits if needed (only with evidence):
+- server body size limit
+- request timeout
+- DB statement timeout / pool size
+But do NOT “just increase limits” without chunking; chunking is the real fix.
+
+Apply similar bulk-safety improvements to any other bulk flows in the app (search for bulk inserts/updates), so the fix is systemic, not one-off.
+
+============================================================
+PART C — STABLE ITEM NUMBER (LINE NUMBER) THAT NEVER CHANGES
+============================================================
+
+C1) Discover current behavior
+- Identify how “item number” is currently computed:
+  - Is it just UI index?
+  - Is there a DB column?
+  - Is it derived from ordering each time?
+- Confirm what happens on:
+  - add item
+  - delete item
+  - edit item
+  - reorder UI (if any)
+
+C2) Implement stable item sequence at DB level (REQUIRED)
+Add a persistent column on shipment items table, e.g.:
+- line_no (integer)
+Rules:
+- line_no is assigned ON CREATE and never changes afterward.
+- For a given shipment, line_no must be unique.
+- When adding a new item to an existing shipment:
+  - line_no = (max existing line_no in that shipment) + 1
+- When deleting an item:
+  - DO NOT renumber other items. Gaps are allowed.
+- Ordering in UI and APIs:
+  - Default order by line_no ASC, then created_at as tie-breaker.
+
+C3) Migration for existing data (REQUIRED)
+- Backfill line_no for existing shipment items:
+  - For each shipment, order current items by created_at (or current stable id ordering) and assign 1..N once.
+- Add a unique constraint:
+  - UNIQUE(shipment_id, line_no)
+- Ensure the update shipment endpoint preserves existing line_no, and only assigns for newly inserted items.
+
+C4) Update endpoints and UI
+- Ensure all APIs return line_no.
+- Ensure UI displays the stable line_no as the item number.
+- Ensure edits do not change line_no.
+- Ensure add/remove operations keep existing numbers stable.
+
+============================================================
+PART D — TESTING & VERIFICATION (MANDATORY, REAL DATA)
+============================================================
+
+D1) Data-driven manual verification
+1) Create a shipment with 100 items and save:
+- Must succeed reliably.
+- Must show success message.
+- Shipment must appear in lists and reopen with all items.
+
+2) Reopen shipment:
+- Items must show stable line_no numbers 1..100.
+
+3) Add 5 new items to the same shipment and save:
+- Must succeed.
+- New items must get line_no 101..105 (or next available max+1).
+- Existing items keep their original line_no.
+
+4) Delete item #20, save, reopen:
+- Item #20 removed.
+- Items #21.. remain unchanged (no renumber).
+- UI shows a gap (missing 20) and does NOT shift numbering.
+
+5) Stress test:
+- Try 200+ items (if feasible) to confirm chunking works.
+
+D2) Automated tests (add at least these)
+- Backend integration test:
+  - create shipment with 120 items -> PASS
+  - verify item count in DB
+  - verify line_no uniqueness and correct max+1 behavior
+- Test stable numbering:
+  - create shipment with 10 items -> line_no 1..10
+  - delete item line_no 3
+  - add new item -> line_no 11 (not 3)
+  - verify existing line_no unchanged
+
+If the repo has E2E tests, add a UI test that creates a large shipment and verifies it saves and reopens.
+
+============================================================
+PART E — REGRESSION & “NO NEW ERRORS” GUARANTEE (MANDATORY)
+============================================================
+
+After implementing, you MUST verify:
+- No new errors introduced due to the changes.
+- Add New Shipment flow (create + update) works successfully for small and large shipments.
+- Payments:
+  - first payment saves successfully
+  - multiple consecutive payments for the same shipment save successfully
+  - payments across other shipments save successfully
+- Accounting & reports still work correctly (no breakage).
+- Code is clean, readable, production-ready.
+
+============================================================
+FINAL OUTPUT REQUIRED
+============================================================
+
+Provide:
+1) Understanding Summary
+2) Root cause findings with evidence (network + server + DB)
+3) What fix you implemented (which option and why)
+4) Key files changed + migrations
+5) Test results (manual + automated)
+6) Verification checklist with PASS/FAIL (no “not run”)
+
+BEGIN NOW:
+- First, locate the shipment save flow and reproduce with 100 items while capturing evidence.
+- Then implement the chunked/bulk-safe save + stable line_no changes.
+- Then re-test thoroughly.

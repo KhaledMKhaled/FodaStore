@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { ZodError } from "zod";
 import {
   exchangeRates,
@@ -20,6 +20,8 @@ import {
   roundAmount,
 } from "./services/currency";
 
+const CHUNK_SIZE = 50;
+
 type CreateShipmentPayload = {
   items?: unknown[];
   [key: string]: unknown;
@@ -38,14 +40,12 @@ function calculateItemTotals(items: ShipmentItem[]) {
     0
   );
 
-  // Customs is calculated per piece
   const customsCostEgp = items.reduce((sum, item) => {
     const pieces = item.totalPiecesCou || 0;
     const customsPerPiece = parseFloat(item.customsCostPerCartonEgp || "0");
     return sum + pieces * customsPerPiece;
   }, 0);
 
-  // Takhreeg is calculated per carton
   const takhreegCostEgp = items.reduce((sum, item) => {
     const ctn = item.cartonsCtn || 0;
     const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp || "0");
@@ -76,6 +76,48 @@ async function ensureShippingCompanyExists(
   }
 }
 
+function prepareItemForInsert(item: Omit<InsertShipmentItem, 'shipmentId'>, shipmentId: number, lineNo: number) {
+  const pieces = item.totalPiecesCou || 0;
+  const cartons = item.cartonsCtn || 0;
+  const customsPerPiece = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
+  const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp?.toString() || "0");
+  const totalCustomsCostEgp = (pieces * customsPerPiece).toFixed(2);
+  const totalTakhreegCostEgp = (cartons * takhreegPerCarton).toFixed(2);
+
+  return {
+    ...item,
+    shipmentId,
+    lineNo,
+    totalCustomsCostEgp,
+    totalTakhreegCostEgp,
+  };
+}
+
+async function bulkInsertItems(
+  tx: any,
+  items: Omit<InsertShipmentItem, 'shipmentId'>[],
+  shipmentId: number,
+  startLineNo: number
+): Promise<ShipmentItem[]> {
+  const allInsertedItems: ShipmentItem[] = [];
+  
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    const preparedChunk = chunk.map((item, idx) => 
+      prepareItemForInsert(item, shipmentId, startLineNo + i + idx)
+    );
+    
+    const insertedChunk = await tx
+      .insert(shipmentItems)
+      .values(preparedChunk)
+      .returning();
+    
+    allInsertedItems.push(...insertedChunk);
+  }
+  
+  return allInsertedItems;
+}
+
 export async function createShipmentWithItems(
   payload: CreateShipmentPayload,
   userId?: string
@@ -104,28 +146,7 @@ export async function createShipmentWithItems(
         .values(validatedShipment)
         .returning();
 
-      const insertedItems: ShipmentItem[] = [];
-      for (const item of parsedItems) {
-        // Calculate total customs and takhreeg costs for this item
-        // Customs is calculated per piece, Takhreeg is calculated per carton
-        const pieces = item.totalPiecesCou || 0;
-        const cartons = item.cartonsCtn || 0;
-        const customsPerPiece = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
-        const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp?.toString() || "0");
-        const totalCustomsCostEgp = (pieces * customsPerPiece).toFixed(2);
-        const totalTakhreegCostEgp = (cartons * takhreegPerCarton).toFixed(2);
-
-        const [insertedItem] = await tx
-          .insert(shipmentItems)
-          .values({ 
-            ...item, 
-            shipmentId: createdShipment.id,
-            totalCustomsCostEgp,
-            totalTakhreegCostEgp,
-          })
-          .returning();
-        insertedItems.push(insertedItem);
-      }
+      const insertedItems = await bulkInsertItems(tx, parsedItems, createdShipment.id, 1);
 
       const totals = calculateItemTotals(insertedItems);
 
@@ -138,15 +159,15 @@ export async function createShipmentWithItems(
         .orderBy(desc(exchangeRates.rateDate))
         .limit(1);
 
-    const purchaseRate = purchaseRateFromPayload
-      ? purchaseRateFromPayload
-      : latestRmbRate
-        ? parseFloat(latestRmbRate.rateValue)
-        : 7.15;
-    const purchaseCostEgp = convertRmbToEgp(totals.purchaseCostRmb, purchaseRate);
-    const finalTotalCostEgp = roundAmount(
-      purchaseCostEgp + totals.customsCostEgp + totals.takhreegCostEgp,
-    );
+      const purchaseRate = purchaseRateFromPayload
+        ? purchaseRateFromPayload
+        : latestRmbRate
+          ? parseFloat(latestRmbRate.rateValue)
+          : 7.15;
+      const purchaseCostEgp = convertRmbToEgp(totals.purchaseCostRmb, purchaseRate);
+      const finalTotalCostEgp = roundAmount(
+        purchaseCostEgp + totals.customsCostEgp + totals.takhreegCostEgp,
+      );
 
       const [updatedShipment] = await tx
         .update(shipments)
@@ -174,9 +195,11 @@ export async function createShipmentWithItems(
     return shipment;
   } catch (error) {
     if (error instanceof ZodError) {
-      throw new Error("بيانات الشحنة أو البنود غير صالحة");
+      const fieldErrors = error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+      throw new Error(`بيانات الشحنة أو البنود غير صالحة: ${fieldErrors}`);
     }
-    throw new Error("تعذر إنشاء الشحنة، يرجى المحاولة مرة أخرى");
+    const errorMessage = (error as Error)?.message || "خطأ غير معروف";
+    throw new Error(`تعذر إنشاء الشحنة: ${errorMessage}`);
   }
 }
 
@@ -231,32 +254,69 @@ export async function updateShipmentWithItems(
       }
 
       if (parsedItems) {
-        await tx.delete(shipmentItems).where(eq(shipmentItems.shipmentId, shipmentId));
+        const existingItems = await tx
+          .select()
+          .from(shipmentItems)
+          .where(eq(shipmentItems.shipmentId, shipmentId));
 
-        const insertedItems: ShipmentItem[] = [];
-        for (const item of parsedItems as InsertShipmentItem[]) {
-          // Calculate total customs and takhreeg costs for this item
-          // Customs is calculated per piece, Takhreeg is calculated per carton
-          const pieces = item.totalPiecesCou || 0;
-          const cartons = item.cartonsCtn || 0;
-          const customsPerPiece = parseFloat(item.customsCostPerCartonEgp?.toString() || "0");
-          const takhreegPerCarton = parseFloat(item.takhreegCostPerCartonEgp?.toString() || "0");
-          const totalCustomsCostEgp = (pieces * customsPerPiece).toFixed(2);
-          const totalTakhreegCostEgp = (cartons * takhreegPerCarton).toFixed(2);
+        const existingItemsById = new Map(
+          existingItems.map(item => [item.id, item])
+        );
 
-          const [insertedItem] = await tx
-            .insert(shipmentItems)
-            .values({ 
-              ...item, 
-              shipmentId,
-              totalCustomsCostEgp,
-              totalTakhreegCostEgp,
-            })
-            .returning();
-          insertedItems.push(insertedItem);
+        const incomingItemsWithId = parsedItems.filter((item: any) => item.id && existingItemsById.has(item.id));
+        const newItems = parsedItems.filter((item: any) => !item.id || !existingItemsById.has(item.id));
+
+        const incomingIds = new Set(incomingItemsWithId.map((item: any) => item.id));
+        const itemsToDelete = existingItems.filter(item => !incomingIds.has(item.id));
+
+        if (itemsToDelete.length > 0) {
+          const idsToDelete = itemsToDelete.map(item => item.id);
+          for (let i = 0; i < idsToDelete.length; i += CHUNK_SIZE) {
+            const chunk = idsToDelete.slice(i, i + CHUNK_SIZE);
+            await tx.delete(shipmentItems).where(inArray(shipmentItems.id, chunk));
+          }
         }
 
-        const totals = calculateItemTotals(insertedItems);
+        for (let i = 0; i < incomingItemsWithId.length; i += CHUNK_SIZE) {
+          const chunk = incomingItemsWithId.slice(i, i + CHUNK_SIZE);
+          for (const item of chunk) {
+            const existingItem = existingItemsById.get((item as any).id);
+            if (!existingItem) continue;
+
+            const pieces = (item as InsertShipmentItem).totalPiecesCou || 0;
+            const cartons = (item as InsertShipmentItem).cartonsCtn || 0;
+            const customsPerPiece = parseFloat((item as InsertShipmentItem).customsCostPerCartonEgp?.toString() || "0");
+            const takhreegPerCarton = parseFloat((item as InsertShipmentItem).takhreegCostPerCartonEgp?.toString() || "0");
+
+            await tx
+              .update(shipmentItems)
+              .set({
+                ...item,
+                lineNo: existingItem.lineNo,
+                totalCustomsCostEgp: (pieces * customsPerPiece).toFixed(2),
+                totalTakhreegCostEgp: (cartons * takhreegPerCarton).toFixed(2),
+                updatedAt: new Date(),
+              })
+              .where(eq(shipmentItems.id, (item as any).id));
+          }
+        }
+
+        if (newItems.length > 0) {
+          const [maxLineNoResult] = await tx
+            .select({ maxLineNo: sql<number>`COALESCE(MAX(${shipmentItems.lineNo}), 0)` })
+            .from(shipmentItems)
+            .where(eq(shipmentItems.shipmentId, shipmentId));
+
+          const startLineNo = (maxLineNoResult?.maxLineNo || 0) + 1;
+          await bulkInsertItems(tx, newItems, shipmentId, startLineNo);
+        }
+
+        const updatedItems = await tx
+          .select()
+          .from(shipmentItems)
+          .where(eq(shipmentItems.shipmentId, shipmentId));
+
+        const totals = calculateItemTotals(updatedItems);
 
         const [updatedAfterItems] = await tx
           .update(shipments)
@@ -422,10 +482,10 @@ export async function updateShipmentWithItems(
         const totalTakhreegCost = parseFloat(shipmentForTotals.takhreegCostEgp || "0");
         const totalShippingCost = parseFloat(shipmentForTotals.shippingCostEgp || "0");
         const totalCommissionCost = parseFloat(shipmentForTotals.commissionCostEgp || "0");
-        const totalPurchaseCost = parseFloat(shipmentForTotals.purchaseCostEgp || "0");
 
         const totalPieces = shipmentItemsForInventory.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
 
+        const inventoryBatches = [];
         for (const item of shipmentItemsForInventory) {
           const itemPurchaseCostEgp = parseFloat(item.totalPurchaseCostRmb || "0") * purchaseRate;
           
@@ -436,7 +496,7 @@ export async function updateShipmentWithItems(
           const unitCostEgp = (item.totalPiecesCou || 0) > 0 ? itemTotalCostEgp / (item.totalPiecesCou || 1) : 0;
           const unitCostRmb = purchaseRate > 0 ? unitCostEgp / purchaseRate : 0;
 
-          await tx.insert(inventoryMovements).values({
+          inventoryBatches.push({
             shipmentId,
             shipmentItemId: item.id,
             productId: item.productId,
@@ -447,6 +507,11 @@ export async function updateShipmentWithItems(
             movementDate: new Date().toISOString().split("T")[0],
           });
         }
+
+        for (let i = 0; i < inventoryBatches.length; i += CHUNK_SIZE) {
+          const chunk = inventoryBatches.slice(i, i + CHUNK_SIZE);
+          await tx.insert(inventoryMovements).values(chunk);
+        }
       }
 
       return finalShipment || shipmentForTotals;
@@ -455,8 +520,10 @@ export async function updateShipmentWithItems(
     return shipment;
   } catch (error) {
     if (error instanceof ZodError) {
-      throw new Error("بيانات الشحنة أو البنود غير صالحة");
+      const fieldErrors = error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+      throw new Error(`بيانات الشحنة أو البنود غير صالحة: ${fieldErrors}`);
     }
-    throw new Error((error as Error)?.message || "تعذر تحديث الشحنة");
+    const errorMessage = (error as Error)?.message || "خطأ غير معروف";
+    throw new Error(`تعذر تحديث الشحنة: ${errorMessage}`);
   }
 }
