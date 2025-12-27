@@ -74,7 +74,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
-import { createRelatedPartiesQuery, getPartyOptions } from "@/lib/relatedParties";
+import { createRelatedPartiesQuery, getPartyOptions, type RelatedPartiesResponse } from "@/lib/relatedParties";
 import { shipmentStatusColors } from "@/lib/colorMaps";
 import { Switch } from "@/components/ui/switch";
 import type {
@@ -320,11 +320,9 @@ export default function Payments() {
 
   const relatedPartiesQuery = createRelatedPartiesQuery(selectedShipmentId);
   const { data: relatedParties, isLoading: loadingRelatedParties, isFetching: fetchingRelatedParties } =
-    useQuery<{ suppliers: Supplier[]; shippingCompanies: ShippingCompany[] }>({
+    useQuery<RelatedPartiesResponse>({
       queryKey: relatedPartiesQuery.queryKey,
-      queryFn:
-        relatedPartiesQuery.queryFn ??
-        (async () => ({ suppliers: [], shippingCompanies: [] } as const)),
+      queryFn: relatedPartiesQuery.queryFn ?? (async () => ({ suppliers: [], shippingCompanies: [] })),
       enabled: relatedPartiesQuery.enabled,
     });
 
