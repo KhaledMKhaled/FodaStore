@@ -710,11 +710,9 @@ export default function Payments() {
     let latestShipmentItems = shipmentItems;
     if (!latestShipmentItems && selectedShipmentId) {
       try {
-        latestShipmentItems = await queryClient.ensureQueryData<ShipmentItem[]>([
-          "/api/shipments",
-          selectedShipmentId,
-          "items",
-        ]);
+        latestShipmentItems = await queryClient.ensureQueryData<ShipmentItem[]>({
+          queryKey: ["/api/shipments", selectedShipmentId, "items"],
+        });
       } catch (error) {
         console.error("Failed to fetch shipment items for validation", error);
         const message = "تعذر التحقق من المورد. تحقق من الاتصال أو الصلاحيات.";
@@ -811,11 +809,9 @@ export default function Payments() {
     let latestInvoiceSummary = invoiceSummary;
     if (!latestInvoiceSummary && selectedShipmentId) {
       try {
-        latestInvoiceSummary = await queryClient.ensureQueryData<InvoiceSummary>([
-          "/api/shipments",
-          selectedShipmentId,
-          "invoice-summary",
-        ]);
+        latestInvoiceSummary = await queryClient.ensureQueryData<InvoiceSummary>({
+          queryKey: ["/api/shipments", selectedShipmentId, "invoice-summary"],
+        });
       } catch (error) {
         toast({
           title: "تعذر التحقق من الحد المسموح للدفع",
