@@ -191,7 +191,6 @@ export default function AccountingPage() {
           </div>
         </div>
       </div>
-
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -308,7 +307,6 @@ export default function AccountingPage() {
           </div>
         </CardContent>
       </Card>
-
       <Card className="bg-muted/30">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -374,7 +372,6 @@ export default function AccountingPage() {
           </div>
         </CardContent>
       </Card>
-
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
@@ -459,7 +456,7 @@ export default function AccountingPage() {
             />
             <div className="bg-primary/10 p-4 rounded-md border border-primary/20 mt-4">
               <div className="flex items-center justify-between">
-                <span className="font-bold">إجمالي التكاليف (الجمارك + التخريج)</span>
+                <span className="font-bold">إجمالي التكاليف</span>
                 <span className="text-xl font-bold text-primary" data-testid="text-total-cost-egp">
                   {formatCurrency(
                     (parseFloat(stats?.totalCustomsEgp || "0") + parseFloat(stats?.totalTakhreegEgp || "0")).toFixed(2)
