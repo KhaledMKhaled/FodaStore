@@ -112,6 +112,13 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **January 2026**: PDF Export for Shipment Summary (Phase B Complete)
+  - Added PDF export button to Step 5 (Summary) of shipment wizard
+  - Uses html2canvas for RTL-compatible content capture
+  - Uses jsPDF for PDF generation with multi-page support
+  - Fixed pagination logic to prevent blank trailing pages
+  - PDF filename format: shipment-{code}-{date}.pdf
+  - Includes all summary data: shipment info, items table, costs breakdown, missing pieces deductions
 - **January 2026**: Missing Pieces Tracking Feature (Phase A Complete)
   - Restructured shipment wizard from 4 to 5 steps, adding "النواقص" (Missing Pieces) as step 4
   - Added `missingPieces` and `missingCostEgp` columns to shipment_items schema
