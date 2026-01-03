@@ -456,7 +456,7 @@ export default function AccountingPage() {
             />
             <div className="bg-primary/10 p-4 rounded-md border border-primary/20 mt-4">
               <div className="flex items-center justify-between">
-                <span className="font-bold">إجمالي التكاليف</span>
+                <span className="font-bold">إجمالي التكاليف (EGP)</span>
                 <span className="text-xl font-bold text-primary" data-testid="text-total-cost-egp">
                   {formatCurrency(
                     (parseFloat(stats?.totalCustomsEgp || "0") + parseFloat(stats?.totalTakhreegEgp || "0")).toFixed(2)
