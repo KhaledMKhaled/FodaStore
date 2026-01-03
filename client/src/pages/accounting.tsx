@@ -431,30 +431,6 @@ export default function AccountingPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <CostItemCard
-              title="قيمة الفواتير"
-              icon={Package}
-              value={stats?.totalPurchaseEgp || "0"}
-              currency="EGP"
-              paid={stats?.totalPaidPurchaseEgp || "0"}
-              remaining={stats?.totalBalancePurchaseEgp || "0"}
-            />
-            <CostItemCard
-              title="تكلفة الشحن"
-              icon={Truck}
-              value={stats?.totalShippingEgp || "0"}
-              currency="EGP"
-              paid={stats?.totalPaidShippingEgp || "0"}
-              remaining={stats?.totalBalanceShippingEgp || "0"}
-            />
-            <CostItemCard
-              title="العمولة"
-              icon={DollarSign}
-              value={stats?.totalCommissionEgp || "0"}
-              currency="EGP"
-              paid={stats?.totalPaidCommissionEgp || "0"}
-              remaining={stats?.totalBalanceCommissionEgp || "0"}
-            />
-            <CostItemCard
               title="الجمارك"
               icon={FileText}
               value={stats?.totalCustomsEgp || "0"}
