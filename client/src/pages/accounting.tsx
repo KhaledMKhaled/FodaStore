@@ -459,9 +459,11 @@ export default function AccountingPage() {
             />
             <div className="bg-primary/10 p-4 rounded-md border border-primary/20 mt-4">
               <div className="flex items-center justify-between">
-                <span className="font-bold">إجمالي التكاليف (EGP)</span>
+                <span className="font-bold">إجمالي التكاليف (الجمارك + التخريج)</span>
                 <span className="text-xl font-bold text-primary" data-testid="text-total-cost-egp">
-                  {formatCurrency(stats?.totalCostEgp || "0")}
+                  {formatCurrency(
+                    (parseFloat(stats?.totalCustomsEgp || "0") + parseFloat(stats?.totalTakhreegEgp || "0")).toFixed(2)
+                  )}
                 </span>
               </div>
             </div>
@@ -469,13 +471,17 @@ export default function AccountingPage() {
               <div className="bg-green-50 dark:bg-green-950/20 p-3 rounded-md border border-green-200 dark:border-green-900">
                 <div className="text-xs text-muted-foreground mb-1">إجمالي المدفوع</div>
                 <div className="text-lg font-bold text-green-600" data-testid="text-total-paid-egp">
-                  {formatCurrency(stats?.totalPaidEgp || "0")}
+                  {formatCurrency(
+                    (parseFloat(stats?.totalPaidCustomsEgp || "0") + parseFloat(stats?.totalPaidTakhreegEgp || "0")).toFixed(2)
+                  )}
                 </div>
               </div>
               <div className="bg-amber-50 dark:bg-amber-950/20 p-3 rounded-md border border-amber-200 dark:border-amber-900">
                 <div className="text-xs text-muted-foreground mb-1">إجمالي المتبقي</div>
                 <div className="text-lg font-bold text-amber-600" data-testid="text-total-balance-egp">
-                  {formatCurrency(stats?.totalBalanceEgp || "0")}
+                  {formatCurrency(
+                    (parseFloat(stats?.totalBalanceCustomsEgp || "0") + parseFloat(stats?.totalBalanceTakhreegEgp || "0")).toFixed(2)
+                  )}
                 </div>
               </div>
             </div>
