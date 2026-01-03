@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { ZodError } from "zod";
 import {
+  auditLogs,
   exchangeRates,
   insertShipmentItemSchema,
   insertShipmentSchema,
@@ -440,9 +441,10 @@ export async function updateShipmentWithItems(
       const shippingCostEgp = parseFloat(shipmentForTotals.shippingCostEgp || "0");
       const customsCostEgp = parseFloat(shipmentForTotals.customsCostEgp || "0");
       const takhreegCostEgp = parseFloat(shipmentForTotals.takhreegCostEgp || "0");
+      const totalMissingCostEgp = parseFloat(shipmentForTotals.totalMissingCostEgp || "0");
 
       const finalTotalCostEgp = roundAmount(
-        purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp,
+        purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp - totalMissingCostEgp,
       );
 
       const totalPaidEgp = parseFloat(shipmentForTotals.totalPaidEgp || "0");
@@ -457,6 +459,8 @@ export async function updateShipmentWithItems(
       } else if (step === 3) {
         newStatus = "جاهزة للاستلام";
       } else if (step === 4) {
+        newStatus = "جاهزة للاستلام";
+      } else if (step === 5) {
         newStatus = "مستلمة بنجاح";
       }
 
@@ -471,7 +475,7 @@ export async function updateShipmentWithItems(
         .where(eq(shipments.id, shipmentId))
         .returning();
 
-      if (step === 4 && newStatus === "مستلمة بنجاح" && previousStatus !== "مستلمة بنجاح") {
+      if (step === 5 && newStatus === "مستلمة بنجاح" && previousStatus !== "مستلمة بنجاح") {
         const shipmentItemsForInventory = await tx
           .select()
           .from(shipmentItems)
@@ -496,14 +500,17 @@ export async function updateShipmentWithItems(
           const unitCostEgp = (item.totalPiecesCou || 0) > 0 ? itemTotalCostEgp / (item.totalPiecesCou || 1) : 0;
           const unitCostRmb = purchaseRate > 0 ? unitCostEgp / purchaseRate : 0;
 
+          const actualPiecesReceived = (item.totalPiecesCou || 0) - (item.missingPieces || 0);
+          const actualTotalCostEgp = actualPiecesReceived * unitCostEgp;
+
           inventoryBatches.push({
             shipmentId,
             shipmentItemId: item.id,
             productId: item.productId,
-            totalPiecesIn: item.totalPiecesCou || 0,
+            totalPiecesIn: actualPiecesReceived,
             unitCostRmb: unitCostRmb.toFixed(4),
             unitCostEgp: unitCostEgp.toFixed(4),
-            totalCostEgp: itemTotalCostEgp.toFixed(2),
+            totalCostEgp: actualTotalCostEgp.toFixed(2),
             movementDate: new Date().toISOString().split("T")[0],
           });
         }
@@ -526,4 +533,174 @@ export async function updateShipmentWithItems(
     const errorMessage = (error as Error)?.message || "خطأ غير معروف";
     throw new Error(`تعذر تحديث الشحنة: ${errorMessage}`);
   }
+}
+
+export type MissingPiecesUpdate = {
+  itemId: number;
+  missingPieces: number;
+};
+
+export async function updateMissingPieces(
+  shipmentId: number,
+  updates: MissingPiecesUpdate[],
+  userId?: string
+): Promise<Shipment> {
+  try {
+    const shipment = await db.transaction(async (tx) => {
+      const [existingShipment] = await tx
+        .select()
+        .from(shipments)
+        .where(eq(shipments.id, shipmentId));
+
+      if (!existingShipment) {
+        throw new Error("الشحنة غير موجودة");
+      }
+
+      const existingItems = await tx
+        .select()
+        .from(shipmentItems)
+        .where(eq(shipmentItems.shipmentId, shipmentId));
+
+      const itemsMap = new Map(existingItems.map(item => [item.id, item]));
+
+      for (const update of updates) {
+        const existingItem = itemsMap.get(update.itemId);
+        if (!existingItem) {
+          throw new Error(`البند رقم ${update.itemId} غير موجود في الشحنة`);
+        }
+
+        if (update.missingPieces < 0) {
+          throw new Error("عدد النواقص لا يمكن أن يكون سالباً");
+        }
+
+        if (update.missingPieces > (existingItem.totalPiecesCou || 0)) {
+          throw new Error(`عدد النواقص (${update.missingPieces}) أكبر من إجمالي القطع (${existingItem.totalPiecesCou})`);
+        }
+      }
+
+      const purchaseRate = parseFloat(existingShipment.purchaseRmbToEgpRate || "7");
+      const totalCustomsCost = parseFloat(existingShipment.customsCostEgp || "0");
+      const totalTakhreegCost = parseFloat(existingShipment.takhreegCostEgp || "0");
+      const totalShippingCost = parseFloat(existingShipment.shippingCostEgp || "0");
+      const totalCommissionCost = parseFloat(existingShipment.commissionCostEgp || "0");
+      const totalPieces = existingItems.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
+
+      const auditDetails: any[] = [];
+      let totalMissingCostEgp = 0;
+
+      for (const update of updates) {
+        const item = itemsMap.get(update.itemId)!;
+        const oldMissingPieces = item.missingPieces || 0;
+        const newMissingPieces = update.missingPieces;
+
+        const itemPurchaseCostEgp = parseFloat(item.totalPurchaseCostRmb || "0") * purchaseRate;
+        const pieceRatio = totalPieces > 0 ? (item.totalPiecesCou || 0) / totalPieces : 0;
+        const itemShareOfExtras = pieceRatio * (totalCustomsCost + totalTakhreegCost + totalShippingCost + totalCommissionCost);
+        const itemTotalCostEgp = itemPurchaseCostEgp + itemShareOfExtras;
+        const unitCostEgp = (item.totalPiecesCou || 0) > 0 ? itemTotalCostEgp / (item.totalPiecesCou || 1) : 0;
+
+        const missingCostEgp = roundAmount(newMissingPieces * unitCostEgp);
+        totalMissingCostEgp += missingCostEgp;
+
+        await tx
+          .update(shipmentItems)
+          .set({
+            missingPieces: newMissingPieces,
+            missingCostEgp: missingCostEgp.toFixed(2),
+            updatedAt: new Date(),
+          })
+          .where(eq(shipmentItems.id, update.itemId));
+
+        if (oldMissingPieces !== newMissingPieces) {
+          auditDetails.push({
+            itemId: item.id,
+            productName: item.productName,
+            oldMissingPieces,
+            newMissingPieces,
+            unitCostEgp: unitCostEgp.toFixed(4),
+            missingCostEgp: missingCostEgp.toFixed(2),
+          });
+        }
+      }
+
+      for (const item of existingItems) {
+        if (!updates.some(u => u.itemId === item.id)) {
+          totalMissingCostEgp += parseFloat(item.missingCostEgp || "0");
+        }
+      }
+
+      const purchaseCostEgp = parseFloat(existingShipment.purchaseCostEgp || "0");
+      const commissionCostEgp = parseFloat(existingShipment.commissionCostEgp || "0");
+      const shippingCostEgp = parseFloat(existingShipment.shippingCostEgp || "0");
+      const customsCostEgp = parseFloat(existingShipment.customsCostEgp || "0");
+      const takhreegCostEgp = parseFloat(existingShipment.takhreegCostEgp || "0");
+
+      const finalTotalCostEgp = roundAmount(
+        purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp - totalMissingCostEgp
+      );
+
+      const totalPaidEgp = parseFloat(existingShipment.totalPaidEgp || "0");
+      const balanceEgp = roundAmount(Math.max(0, finalTotalCostEgp - totalPaidEgp));
+
+      const [updatedShipment] = await tx
+        .update(shipments)
+        .set({
+          totalMissingCostEgp: totalMissingCostEgp.toFixed(2),
+          finalTotalCostEgp: finalTotalCostEgp.toFixed(2),
+          balanceEgp: balanceEgp.toFixed(2),
+          updatedAt: new Date(),
+        })
+        .where(eq(shipments.id, shipmentId))
+        .returning();
+
+      if (auditDetails.length > 0) {
+        await tx.insert(auditLogs).values({
+          userId: userId || null,
+          entityType: "shipment",
+          entityId: shipmentId.toString(),
+          actionType: "missing_pieces_updated",
+          details: {
+            shipmentCode: existingShipment.shipmentCode,
+            updates: auditDetails,
+            oldTotalMissingCost: existingShipment.totalMissingCostEgp,
+            newTotalMissingCost: totalMissingCostEgp.toFixed(2),
+          },
+        });
+      }
+
+      return updatedShipment;
+    });
+
+    return shipment;
+  } catch (error) {
+    const errorMessage = (error as Error)?.message || "خطأ غير معروف";
+    throw new Error(`تعذر تحديث النواقص: ${errorMessage}`);
+  }
+}
+
+export function calculateUnitLandedCost(
+  item: ShipmentItem,
+  shipmentData: {
+    purchaseRmbToEgpRate: string;
+    commissionCostEgp: string;
+    shippingCostEgp: string;
+    customsCostEgp: string;
+    takhreegCostEgp: string;
+  },
+  totalShipmentPieces: number
+): { unitCostEgp: number; unitCostRmb: number } {
+  const purchaseRate = parseFloat(shipmentData.purchaseRmbToEgpRate || "7");
+  const totalCommissionCost = parseFloat(shipmentData.commissionCostEgp || "0");
+  const totalShippingCost = parseFloat(shipmentData.shippingCostEgp || "0");
+  const totalCustomsCost = parseFloat(shipmentData.customsCostEgp || "0");
+  const totalTakhreegCost = parseFloat(shipmentData.takhreegCostEgp || "0");
+
+  const itemPurchaseCostEgp = parseFloat(item.totalPurchaseCostRmb || "0") * purchaseRate;
+  const pieceRatio = totalShipmentPieces > 0 ? (item.totalPiecesCou || 0) / totalShipmentPieces : 0;
+  const itemShareOfExtras = pieceRatio * (totalCustomsCost + totalTakhreegCost + totalShippingCost + totalCommissionCost);
+  const itemTotalCostEgp = itemPurchaseCostEgp + itemShareOfExtras;
+  const unitCostEgp = (item.totalPiecesCou || 0) > 0 ? itemTotalCostEgp / (item.totalPiecesCou || 1) : 0;
+  const unitCostRmb = purchaseRate > 0 ? unitCostEgp / purchaseRate : 0;
+
+  return { unitCostEgp, unitCostRmb };
 }

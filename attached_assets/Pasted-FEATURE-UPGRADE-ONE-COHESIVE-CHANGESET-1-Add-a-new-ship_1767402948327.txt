@@ -1,0 +1,262 @@
+FEATURE UPGRADE (ONE COHESIVE CHANGESET):
+1) Add a new shipment wizard step named "النواقص" (Missing Pieces) AFTER Customs & Takhreeg.
+2) Show missing pieces impact inside Shipment Summary.
+3) Add a "Download PDF" button in the final summary/review that exports a detailed per-item report including missing pieces and per-cost shares.
+
+IMPORTANT: Implement this in two phases inside one PR:
+- Phase A: Missing Pieces step + costing + inventory + summary display + tests
+- Phase B: PDF export button + PDF content generation + tests
+Do NOT start Phase B until Phase A is complete and verified.
+
+============================================================
+PHASE A — "النواقص" STEP (MISSING PIECES) + COSTING + INVENTORY
+============================================================
+
+Business Problem:
+When a shipment is received, some pieces may be missing (lost during shipping/customs/etc).
+Those missing pieces must:
+- Reduce shipment final total cost (they should not be counted in landed totals).
+- Reduce inventory quantities to match actual received pieces.
+- Be visible and auditable.
+
+------------------------------------------------------------
+A1) Wizard Step Placement
+------------------------------------------------------------
+Add a new wizard step label (Arabic RTL): "النواقص"
+Step order becomes:
+- Import
+- Shipping Details
+- Customs & Takhreeg
+- النواقص (NEW)
+- Summary / Inventory / Final
+
+This step must only be accessible after Customs & Takhreeg has been completed (shipment effectively received).
+
+------------------------------------------------------------
+A2) UI Requirements (Arabic RTL)
+------------------------------------------------------------
+In "النواقص" step, show a table of shipment items with:
+- item image thumbnail (if exists)
+- item name
+- CTN (cartons)
+- total pieces (original, before missing)
+- missing pieces input (عدد النواقص)
+- actual pieces (final received = original - missing)
+- unit landed cost display (broken down by components if available)
+- missing cost subtotal display
+
+Live totals at bottom:
+- إجمالي القطع الناقصة
+- إجمالي تكلفة النواقص (جنيه) [and RMB if your system tracks RMB totals]
+- صافي إجمالي تكلفة الشحنة بعد خصم النواقص (جنيه)
+
+Validation:
+- missingPieces integer >= 0
+- missingPieces <= originalPieces
+- show clear Arabic inline errors
+
+------------------------------------------------------------
+A3) Data Model (Required)
+------------------------------------------------------------
+Persist missing pieces per shipment item.
+
+Either:
+- Add shipment_items.missing_pieces INT DEFAULT 0
+OR
+- Create a dedicated table (shipment_item_missing)
+
+Source of truth must be item-level.
+
+Add audit logging for missing updates:
+- entity_type: shipment / shipment_item
+- action_type: missing_pieces_updated
+- include full details (old/new missing, user, timestamp)
+
+------------------------------------------------------------
+A4) Calculation Rules (Must Match Existing Allocation Logic)
+------------------------------------------------------------
+Missing cost must be based on FULL LANDED UNIT COST (same basis used for inventory posting):
+For each item:
+missingCostItem = missingPieces * unitLandedCost(item)
+
+unitLandedCost must include the item’s allocated shares of:
+- purchase cost (RMB -> EGP if needed)
+- commission share
+- shipping share
+- customs share
+- takhreeg share
+
+Then:
+shipment.final_total_cost_egp must decrease by totalMissingCostEGP.
+
+If your system tracks RMB totals separately, apply consistent logic but do NOT mix currencies.
+
+------------------------------------------------------------
+A5) Inventory Impact (Mandatory)
+------------------------------------------------------------
+Inventory must reflect actual received pieces after missing.
+
+Preferred auditable approach:
+- Keep original inventory stock-in movement as-is OR adjust carefully based on repo conventions.
+- Create an additional inventory movement of type "missing_adjustment" (or similar) for each affected item:
+  - pieces_out = missingPiecesDelta
+  - cost_out_egp = missingPiecesDelta * unitLandedCost
+This preserves auditability and avoids rewriting history.
+
+Idempotency and updates:
+- If user edits missingPieces later, apply deltaMissing = new - old.
+- If deltaMissing > 0: add more pieces_out
+- If deltaMissing < 0: reverse via pieces_in adjustment movement (or repo-approved reversal pattern)
+Do not duplicate movements.
+
+------------------------------------------------------------
+A6) Shipment Summary Display (Required)
+------------------------------------------------------------
+Update "ملخص الشحنة" to include a dedicated section:
+- النواقص:
+  - إجمالي القطع الناقصة
+  - إجمالي تكلفة النواقص (جنيه)
+- Show final total AFTER missing:
+  - صافي إجمالي تكلفة الشحنة بعد خصم النواقص (جنيه)
+
+Make it clear and RTL-correct.
+
+------------------------------------------------------------
+A7) Phase A Testing (Mandatory, Data-Driven)
+------------------------------------------------------------
+Create a demo shipment with:
+- multiple items (with images if available)
+- shipping + commission + customs + takhreeg filled
+- shipment received so inventory posting exists
+
+Test:
+1) Set missingPieces for one item and save:
+- totals decrease correctly
+- inventory reflects correct final quantity
+- audit log created
+- summary shows missing section and new final totals
+
+2) Set missingPieces for multiple items and save:
+- totals match sum of per-item missing costs
+
+3) Update missingPieces up/down and save:
+- delta-based adjustments correct
+- no duplicated movements
+
+4) Validation:
+- missing > original blocked
+- negative blocked
+
+Regression:
+- shipments create/update still works
+- payments still work (first + multiple consecutive)
+- accounting & reports still work
+
+STOP Phase A only when all tests pass.
+
+============================================================
+PHASE B — FINAL SUMMARY PDF EXPORT (Download PDF Button)
+============================================================
+
+Goal:
+In the final summary/review screen, add a "Download PDF" button that generates a PDF report containing per-item details including missing pieces.
+
+------------------------------------------------------------
+B1) UI Requirements
+------------------------------------------------------------
+Add a button in the final summary screen:
+- Label: "تحميل PDF"
+- Must not break layout (responsive + RTL)
+
+------------------------------------------------------------
+B2) PDF Content Requirements (MANDATORY FIELDS)
+------------------------------------------------------------
+The PDF must include a table/list of shipment items with these columns (RTL-friendly):
+
+- صورة البند (item image)
+- اسم البند
+- تكلفة الشراء بالرممبي
+- نصيبه من العمولة بالرممبي
+- نصيبه من الشحن بالرممبي
+- نصيبه من الجمرك بالمصري
+- نصيبه من التخريج بالمصري
+- عدد الكراتين (CTN)
+- عدد القطع (original pieces)
+- عدد النواقص (missing pieces)
+- العدد الفعلي للقطع (actual pieces after missing)
+
+Also include shipment header info:
+- shipment code/name
+- dates
+- totals summary:
+  - إجمالي تكلفة الشحنة قبل النواقص
+  - إجمالي تكلفة النواقص
+  - صافي إجمالي تكلفة الشحنة بعد النواقص
+
+Currency correctness:
+- RMB values labeled "رممبي"
+- EGP values labeled "جنيه"
+- Never mix currencies in one number.
+
+------------------------------------------------------------
+B3) PDF Implementation Constraints
+------------------------------------------------------------
+First, search the repo for existing PDF/print/export utilities.
+- If PDF generation already exists, reuse it.
+- If not, add ONE minimal dependency suitable for React:
+  Prefer a stable approach:
+  - Use a client-side PDF library that can embed images and render tables reliably,
+    OR generate HTML and print-to-PDF if repo already supports it.
+Keep dependencies minimal and consistent with repo patterns.
+
+Image handling:
+- Use the item image URLs already stored in the system.
+- Ensure images render correctly or gracefully fallback to a placeholder if missing.
+
+------------------------------------------------------------
+B4) Phase B Testing (Mandatory)
+------------------------------------------------------------
+After Phase A is passing:
+1) Generate PDF for a shipment with:
+- items with images
+- missing pieces
+- mixed currency components
+
+Verify:
+- PDF downloads successfully
+- Table contains all required columns
+- Values match the UI calculations exactly
+- RTL layout is readable
+- No duplicated pages or broken widths
+- Works on small laptop screens
+
+Regression:
+- does not break shipment wizard
+- does not break payments
+- does not break reports
+
+============================================================
+GLOBAL NON-NEGOTIABLE REGRESSION REQUIREMENTS
+============================================================
+After implementing both phases:
+- No new errors introduced.
+- Add New Shipment flow (create + update) works successfully.
+- Payments:
+  - first payment saves
+  - multiple consecutive payments for same shipment save
+  - payments across other shipments save
+- All accounting/report screens still show correct updated results.
+- Code is clean, readable, production-ready.
+
+============================================================
+FINAL OUTPUT REQUIRED
+============================================================
+Provide:
+1) Understanding Summary
+2) Files changed + migrations
+3) How missing is stored and how inventory is adjusted (audit-safe)
+4) How PDF is generated and dependency used
+5) How to test (commands + manual steps)
+6) Verification checklist PASS/FAIL (no “not run”)
+
+BEGIN NOW by implementing Phase A first, fully verifying it, then proceed to Phase B.\n

@@ -107,6 +107,7 @@ export const shipments = pgTable("shipments", {
   shippingCostEgp: decimal("shipping_cost_egp", { precision: 15, scale: 2 }).default("0"),
   customsCostEgp: decimal("customs_cost_egp", { precision: 15, scale: 2 }).default("0"),
   takhreegCostEgp: decimal("takhreeg_cost_egp", { precision: 15, scale: 2 }).default("0"),
+  totalMissingCostEgp: decimal("total_missing_cost_egp", { precision: 15, scale: 2 }).default("0"),
   finalTotalCostEgp: decimal("final_total_cost_egp", { precision: 15, scale: 2 }).default("0"),
   totalPaidEgp: decimal("total_paid_egp", { precision: 15, scale: 2 }).default("0"),
   balanceEgp: decimal("balance_egp", { precision: 15, scale: 2 }).default("0"),
@@ -138,6 +139,8 @@ export const shipmentItems = pgTable("shipment_items", {
   totalCustomsCostEgp: decimal("total_customs_cost_egp", { precision: 15, scale: 2 }),
   takhreegCostPerCartonEgp: decimal("takhreeg_cost_per_carton_egp", { precision: 10, scale: 2 }),
   totalTakhreegCostEgp: decimal("total_takhreeg_cost_egp", { precision: 15, scale: 2 }),
+  missingPieces: integer("missing_pieces").default(0).notNull(),
+  missingCostEgp: decimal("missing_cost_egp", { precision: 15, scale: 2 }).default("0"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

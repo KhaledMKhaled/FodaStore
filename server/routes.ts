@@ -5,7 +5,7 @@ import { setupAuth, isAuthenticated, requireRole } from "./auth";
 import { normalizePaymentAmounts } from "./services/currency";
 import { logAuditEvent } from "./audit";
 import { getPaymentsWithShipments } from "./payments";
-import { createShipmentWithItems, updateShipmentWithItems } from "./shipmentService";
+import { createShipmentWithItems, updateShipmentWithItems, updateMissingPieces } from "./shipmentService";
 import { ApiError, formatError, success } from "./errors";
 import type { User } from "@shared/schema";
 import {
@@ -1000,6 +1000,26 @@ export async function registerRoutes(
       console.error("Error updating shipment:", error);
       const message = (error as Error)?.message || "حدث خطأ أثناء حفظ بيانات الشحنة";
       const status = message === "الشحنة غير موجودة" ? 404 : 400;
+      res.status(status).json({ message });
+    }
+  });
+
+  app.patch("/api/shipments/:id/missing-pieces", requireRole(["مدير", "محاسب"]), async (req, res) => {
+    try {
+      const shipmentId = parseInt(req.params.id);
+      const userId = (req.user as any)?.id;
+      const { updates } = req.body;
+
+      if (!Array.isArray(updates)) {
+        return res.status(400).json({ message: "يجب إرسال قائمة تحديثات النواقص" });
+      }
+
+      const updatedShipment = await updateMissingPieces(shipmentId, updates, userId);
+      res.json(updatedShipment);
+    } catch (error) {
+      console.error("Error updating missing pieces:", error);
+      const message = (error as Error)?.message || "حدث خطأ أثناء تحديث النواقص";
+      const status = message.includes("غير موجود") ? 404 : 400;
       res.status(status).json({ message });
     }
   });
