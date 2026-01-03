@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Search,
   Copy,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,7 +64,8 @@ const STEPS = [
   { id: 1, title: "الاستيراد", icon: Package, description: "بيانات الأصناف" },
   { id: 2, title: "بيانات الشحن", icon: Truck, description: "العمولة والشحن" },
   { id: 3, title: "الجمارك والتخريج", icon: FileCheck, description: "تكاليف التخليص" },
-  { id: 4, title: "ملخص الشحنة", icon: ClipboardCheck, description: "مراجعة نهائية" },
+  { id: 4, title: "النواقص", icon: AlertTriangle, description: "القطع الناقصة" },
+  { id: 5, title: "ملخص الشحنة", icon: ClipboardCheck, description: "مراجعة نهائية" },
 ];
 
 const ITEMS_PER_PAGE = 10;
@@ -268,6 +270,35 @@ export default function ShipmentWizard() {
     return null;
   };
 
+  const saveMissingPiecesMutation = useMutation({
+    mutationFn: async (): Promise<void> => {
+      if (!id || isNew) return;
+      
+      const updates = items
+        .filter(item => item.id !== undefined)
+        .map(item => ({
+          itemId: item.id as number,
+          missingPieces: item.missingPieces || 0,
+        }));
+      
+      if (updates.length > 0) {
+        await apiRequest("PATCH", `/api/shipments/${id}/missing-pieces`, { updates });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/shipments", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipments", id, "items"] });
+    },
+    onError: (error) => {
+      let message = "حدث خطأ أثناء حفظ النواقص";
+      if (error instanceof Error && error.message) {
+        const [, serverMessage] = error.message.split(":");
+        message = (serverMessage || error.message).trim();
+      }
+      toast({ title: message || "حدث خطأ", variant: "destructive" });
+    },
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (data: { step: number }): Promise<{ id?: number } | undefined> => {
       const validationError = validateStep();
@@ -282,8 +313,22 @@ export default function ShipmentWizard() {
           items,
         });
         return response.json();
+      } else if (data.step === 4 && id) {
+        // For step 4 (missing pieces), ONLY save missing pieces
+        // Don't call the generic update which would overwrite missing pieces data
+        const updates = items
+          .filter(item => item.id !== undefined)
+          .map(item => ({
+            itemId: item.id as number,
+            missingPieces: item.missingPieces || 0,
+          }));
+        
+        if (updates.length > 0) {
+          await apiRequest("PATCH", `/api/shipments/${id}/missing-pieces`, { updates });
+        }
+        return undefined;
       } else {
-        // Update existing
+        // Update existing for steps 1, 2, 3, and 5
         await apiRequest("PATCH", `/api/shipments/${id}`, {
           step: data.step,
           shipmentData,
@@ -305,7 +350,7 @@ export default function ShipmentWizard() {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       if (isNew && result?.id) {
         navigate(`/shipments/${result.id}/edit`);
-      } else if (variables.step === 4) {
+      } else if (variables.step === 5) {
         navigate("/shipments");
       }
     },
@@ -464,8 +509,12 @@ export default function ShipmentWizard() {
     return sum + ctn * takhreegPerCarton;
   }, 0);
 
+  const totalMissingCostEgp = items.reduce((sum, item) => {
+    return sum + parseFloat(item.missingCostEgp || "0");
+  }, 0);
+
   const finalTotalCostEgp =
-    discountedPurchaseCostEgp + commissionEgp + shippingCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp;
+    discountedPurchaseCostEgp + commissionEgp + shippingCostEgp + totalCustomsCostEgp + totalTakhreegCostEgp - totalMissingCostEgp;
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("ar-EG", {
@@ -578,7 +627,21 @@ export default function ShipmentWizard() {
           )}
 
           {currentStep === 4 && (
-            <Step4Summary
+            <Step4MissingPieces
+              shipmentId={id}
+              items={items}
+              setItems={setItems}
+              purchaseRate={purchaseRate}
+              totalShipmentPieces={totalPieces}
+              commissionEgp={commissionEgp}
+              shippingCostEgp={shippingCostEgp}
+              totalCustomsCostEgp={totalCustomsCostEgp}
+              totalTakhreegCostEgp={totalTakhreegCostEgp}
+            />
+          )}
+
+          {currentStep === 5 && (
+            <Step5Summary
               shipmentData={shipmentData}
               shippingCompanyName={
                 shippingCompanies?.find(
@@ -654,6 +717,16 @@ export default function ShipmentWizard() {
               label="التخريج (ج.م)"
               value={`${formatCurrency(totalTakhreegCostEgp)} ج.م`}
             />
+            {totalMissingCostEgp > 0 && (
+              <>
+                <hr className="border-border" />
+                <SummaryRow
+                  label="النواقص (ج.م)"
+                  value={`- ${formatCurrency(totalMissingCostEgp)} ج.م`}
+                  className="text-destructive"
+                />
+              </>
+            )}
             <hr className="border-border" />
             <div className="flex justify-between items-center font-bold text-lg">
               <span>الإجمالي النهائي</span>
@@ -684,18 +757,24 @@ export default function ShipmentWizard() {
             <Save className="w-4 h-4 ml-2" />
             {saveMutation.isPending ? "جاري الحفظ..." : "حفظ"}
           </Button>
-          {currentStep < 4 ? (
+          {currentStep < 5 ? (
             <Button
-              onClick={() => setCurrentStep(currentStep + 1)}
+              onClick={async () => {
+                if (currentStep === 4 && id && !isNew) {
+                  await saveMissingPiecesMutation.mutateAsync();
+                }
+                setCurrentStep(currentStep + 1);
+              }}
+              disabled={saveMissingPiecesMutation.isPending}
               data-testid="button-next"
             >
-              التالي
+              {saveMissingPiecesMutation.isPending ? "جاري الحفظ..." : "التالي"}
               <ArrowLeft className="w-4 h-4 mr-2" />
             </Button>
           ) : (
             <Button
               onClick={() => {
-                saveMutation.mutate({ step: 4 });
+                saveMutation.mutate({ step: 5 });
               }}
               data-testid="button-finish"
             >
@@ -1636,8 +1715,152 @@ function Step3Customs({
   );
 }
 
-// Step 4: Summary
-function Step4Summary({
+// Step 4: Missing Pieces
+function Step4MissingPieces({
+  shipmentId,
+  items,
+  setItems,
+  purchaseRate,
+  totalShipmentPieces,
+  commissionEgp,
+  shippingCostEgp,
+  totalCustomsCostEgp,
+  totalTakhreegCostEgp,
+}: {
+  shipmentId?: string;
+  items: Partial<ShipmentItem>[];
+  setItems: (items: Partial<ShipmentItem>[]) => void;
+  purchaseRate: number;
+  totalShipmentPieces: number;
+  commissionEgp: number;
+  shippingCostEgp: number;
+  totalCustomsCostEgp: number;
+  totalTakhreegCostEgp: number;
+}) {
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat("ar-EG", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+
+  const calculateUnitCost = (item: Partial<ShipmentItem>) => {
+    const itemPurchaseCostEgp = parseFloat(item.totalPurchaseCostRmb || "0") * purchaseRate;
+    const pieceRatio = totalShipmentPieces > 0 ? (item.totalPiecesCou || 0) / totalShipmentPieces : 0;
+    const itemShareOfExtras = pieceRatio * (totalCustomsCostEgp + totalTakhreegCostEgp + shippingCostEgp + commissionEgp);
+    const itemTotalCostEgp = itemPurchaseCostEgp + itemShareOfExtras;
+    const unitCostEgp = (item.totalPiecesCou || 0) > 0 ? itemTotalCostEgp / (item.totalPiecesCou || 1) : 0;
+    return unitCostEgp;
+  };
+
+  const updateMissingPieces = (index: number, value: number) => {
+    const item = items[index];
+    const maxPieces = item.totalPiecesCou || 0;
+    const safeValue = Math.max(0, Math.min(value, maxPieces));
+    const unitCost = calculateUnitCost(item);
+    const missingCost = safeValue * unitCost;
+    
+    const newItems = [...items];
+    newItems[index] = {
+      ...newItems[index],
+      missingPieces: safeValue,
+      missingCostEgp: missingCost.toFixed(2),
+    };
+    setItems(newItems);
+  };
+
+  const totalMissingPieces = items.reduce((sum, item) => sum + (item.missingPieces || 0), 0);
+  const totalMissingCostEgp = items.reduce((sum, item) => sum + parseFloat(item.missingCostEgp || "0"), 0);
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-500" />
+            القطع الناقصة
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            حدد عدد القطع الناقصة أو التالفة لكل صنف. سيتم خصم قيمتها من إجمالي تكلفة الشحنة.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-right py-3 px-2 font-medium">#</th>
+                  <th className="text-right py-3 px-2 font-medium">اسم الصنف</th>
+                  <th className="text-right py-3 px-2 font-medium">إجمالي القطع</th>
+                  <th className="text-right py-3 px-2 font-medium">تكلفة القطعة</th>
+                  <th className="text-right py-3 px-2 font-medium min-w-[120px]">النواقص</th>
+                  <th className="text-right py-3 px-2 font-medium">تكلفة النواقص</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, index) => {
+                  const unitCost = calculateUnitCost(item);
+                  const missingPieces = item.missingPieces || 0;
+                  const missingCost = parseFloat(item.missingCostEgp || "0");
+
+                  return (
+                    <tr key={item.id || index} className="border-b hover-elevate" data-testid={`missing-row-${index}`}>
+                      <td className="py-3 px-2 text-muted-foreground">{item.lineNo || index + 1}</td>
+                      <td className="py-3 px-2 font-medium">{item.productName || "بدون اسم"}</td>
+                      <td className="py-3 px-2">{item.totalPiecesCou || 0}</td>
+                      <td className="py-3 px-2">{formatCurrency(unitCost)} ج.م</td>
+                      <td className="py-3 px-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={item.totalPiecesCou || 0}
+                          value={missingPieces}
+                          onChange={(e) => updateMissingPieces(index, parseInt(e.target.value) || 0)}
+                          className="w-24"
+                          data-testid={`input-missing-${index}`}
+                        />
+                      </td>
+                      <td className="py-3 px-2">
+                        {missingPieces > 0 ? (
+                          <span className="text-destructive font-medium">
+                            - {formatCurrency(missingCost)} ج.م
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 mt-4 border-t">
+            <div className="bg-amber-100 dark:bg-amber-900/30 p-4 rounded-md">
+              <p className="text-sm text-amber-800 dark:text-amber-300">
+                إجمالي القطع الناقصة
+              </p>
+              <p className="text-2xl font-bold text-amber-900 dark:text-amber-200">
+                {totalMissingPieces} قطعة
+              </p>
+            </div>
+            <div className="bg-destructive/10 p-4 rounded-md">
+              <p className="text-sm text-destructive">
+                إجمالي تكلفة النواقص
+              </p>
+              <p className="text-2xl font-bold text-destructive">
+                - {formatCurrency(totalMissingCostEgp)} ج.م
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Step 5: Summary
+function Step5Summary({
   shipmentData,
   shippingCompanyName,
   items,
@@ -1787,6 +2010,16 @@ function Step4Summary({
             rmbValue="-"
             egpValue={`${formatCurrency(totalTakhreegCostEgp)} ج.م`}
           />
+          {/* Missing pieces deduction - calculated from items */}
+          {items.some(item => (item.missingPieces || 0) > 0) && (
+            <>
+              <CostRow
+                label="النواقص"
+                rmbValue="-"
+                egpValue={`- ${formatCurrency(items.reduce((sum, item) => sum + parseFloat(item.missingCostEgp || "0"), 0))} ج.م`}
+              />
+            </>
+          )}
           <hr className="border-border my-4" />
           
           {/* RMB Total */}
@@ -1841,9 +2074,9 @@ function CostRow({
   );
 }
 
-function SummaryRow({ label, value }: { label: string; value: string }) {
+function SummaryRow({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className="flex justify-between items-center">
+    <div className={`flex justify-between items-center ${className || ""}`}>
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="font-medium">{value}</span>
     </div>
@@ -1855,7 +2088,7 @@ function WizardSkeleton() {
     <div className="p-6 space-y-6">
       <Skeleton className="h-10 w-64" />
       <div className="flex gap-2 justify-center">
-        {[1, 2, 3, 4].map((i) => (
+        {[1, 2, 3, 4, 5].map((i) => (
           <Skeleton key={i} className="h-10 w-32" />
         ))}
       </div>

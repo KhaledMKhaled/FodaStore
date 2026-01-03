@@ -296,6 +296,8 @@ export async function updateShipmentWithItems(
                 lineNo: existingItem.lineNo,
                 totalCustomsCostEgp: (pieces * customsPerPiece).toFixed(2),
                 totalTakhreegCostEgp: (cartons * takhreegPerCarton).toFixed(2),
+                missingPieces: existingItem.missingPieces,
+                missingCostEgp: existingItem.missingCostEgp,
                 updatedAt: new Date(),
               })
               .where(eq(shipmentItems.id, (item as any).id));

@@ -1,7 +1,7 @@
 # Tracker - نظام إدارة الشحنات والتكاليف والمدفوعات
 
 ## Overview
-A comprehensive multi-user Arabic RTL web application for shipment costing, inventory, and payments settlement. The system manages shipments through a 4-step workflow (Import → Shipping → Customs & Takhreej → Summary) with dual-currency support (RMB/EGP), multiple payment methods including overpayment tracking, supplier management, exchange rate management, and role-based access control.
+A comprehensive multi-user Arabic RTL web application for shipment costing, inventory, and payments settlement. The system manages shipments through a 5-step workflow (Import → Shipping → Customs & Takhreej → Missing Pieces → Summary) with dual-currency support (RMB/EGP), multiple payment methods including overpayment tracking, supplier management, exchange rate management, role-based access control, and missing pieces tracking.
 
 **Platform Name**: Tracker (formerly Replit.AI)
 
@@ -31,7 +31,7 @@ client/src/
 │   ├── landing.tsx     # Public landing page
 │   ├── dashboard.tsx   # Main dashboard with stats
 │   ├── shipments.tsx   # Shipments list
-│   ├── shipment-wizard.tsx # 4-step shipment creation/edit
+│   ├── shipment-wizard.tsx # 5-step shipment creation/edit
 │   ├── suppliers.tsx   # Supplier management
 │   ├── exchange-rates.tsx # Currency exchange rates
 │   ├── payments.tsx    # Payment tracking
@@ -83,7 +83,8 @@ shared/
 1. **الاستيراد (Import)**: Enter shipment details and items
 2. **بيانات الشحن (Shipping)**: Commission and shipping costs
 3. **الجمارك والتخريج (Customs)**: Customs and clearance fees
-4. **ملخص الشحنة (Summary)**: Final review and totals
+4. **النواقص (Missing Pieces)**: Track damaged/lost items and calculate deductions
+5. **ملخص الشحنة (Summary)**: Final review and totals
 
 ## Development
 
@@ -111,6 +112,16 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **January 2026**: Missing Pieces Tracking Feature (Phase A)
+  - Restructured shipment wizard from 4 to 5 steps, adding "النواقص" (Missing Pieces) as step 4
+  - Added `missingPieces` and `missingCostEgp` columns to shipment_items schema
+  - Added `totalMissingCostEgp` column to shipments schema
+  - Backend service `updateMissingPieces` with unit landed cost calculation
+  - API endpoint PATCH `/api/shipments/:id/missing-pieces` with audit logging
+  - Missing cost formula: missingPieces × unitLandedCostEgp, where unitLandedCostEgp includes proportional share of all costs
+  - Inventory movements now subtract missing pieces from received quantities
+  - Final cost formula: sum of all costs - totalMissingCostEgp
+  - Step 5 (formerly step 4) triggers "مستلمة بنجاح" status and inventory creation
 - **December 27, 2025**: Large Shipment Performance, Line Numbering, and Item Search
   - Fixed critical bug where large shipments (100+ items) failed to save
   - Implemented chunked bulk inserts (CHUNK_SIZE = 50) for reliable large data handling
@@ -153,7 +164,7 @@ npm run db:push    # Push database schema changes
   - Shipments created without completing all wizard steps now show accurate interim totals
 - Initial implementation of complete shipment management system
 - RTL Arabic UI with proper fonts and layout
-- 4-step shipment wizard with cost calculations
+- 5-step shipment wizard with cost calculations
 - Payment tracking with multiple methods
 - Supplier and exchange rate management
 - Inventory movement tracking
