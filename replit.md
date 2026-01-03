@@ -112,7 +112,7 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
-- **January 2026**: Missing Pieces Tracking Feature (Phase A)
+- **January 2026**: Missing Pieces Tracking Feature (Phase A Complete)
   - Restructured shipment wizard from 4 to 5 steps, adding "النواقص" (Missing Pieces) as step 4
   - Added `missingPieces` and `missingCostEgp` columns to shipment_items schema
   - Added `totalMissingCostEgp` column to shipments schema
@@ -122,6 +122,8 @@ npm run db:push    # Push database schema changes
   - Inventory movements now subtract missing pieces from received quantities
   - Final cost formula: sum of all costs - totalMissingCostEgp
   - Step 5 (formerly step 4) triggers "مستلمة بنجاح" status and inventory creation
+  - Persistence fix: Step 4 save only calls /missing-pieces endpoint (not generic PATCH)
+  - Backend fix: updateShipmentWithItems preserves existing missingPieces/missingCostEgp during item updates
 - **December 27, 2025**: Large Shipment Performance, Line Numbering, and Item Search
   - Fixed critical bug where large shipments (100+ items) failed to save
   - Implemented chunked bulk inserts (CHUNK_SIZE = 50) for reliable large data handling
