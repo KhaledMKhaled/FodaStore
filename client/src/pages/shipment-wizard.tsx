@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import {
@@ -21,7 +21,10 @@ import {
   Search,
   Copy,
   AlertTriangle,
+  FileDown,
 } from "lucide-react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1895,6 +1898,9 @@ function Step5Summary({
   finalTotalCostEgp: number;
   purchaseRate: number;
 }) {
+  const [isExporting, setIsExporting] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("ar-EG", {
       minimumFractionDigits: 2,
@@ -1904,8 +1910,65 @@ function Step5Summary({
   const totalCartons = items.reduce((sum, item) => sum + (item.cartonsCtn || 0), 0);
   const totalPieces = items.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
 
+  const exportToPDF = useCallback(async () => {
+    if (!contentRef.current) return;
+    
+    setIsExporting(true);
+    try {
+      const element = contentRef.current;
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      
+      // Add image to first page
+      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+      
+      // Add additional pages if content is too long
+      let heightLeft = pdfHeight - pageHeight;
+      let yOffset = -pageHeight;
+
+      while (heightLeft > 0) {
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, yOffset, pdfWidth, pdfHeight);
+        heightLeft -= pageHeight;
+        yOffset -= pageHeight;
+      }
+
+      const fileName = `shipment-${shipmentData.shipmentCode}-${new Date().toISOString().split("T")[0]}.pdf`;
+      pdf.save(fileName);
+    } catch (error) {
+      console.error("Error exporting PDF:", error);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [shipmentData.shipmentCode]);
+
   return (
     <div className="space-y-6">
+      {/* Export Button */}
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          onClick={exportToPDF}
+          disabled={isExporting}
+          data-testid="button-export-pdf"
+        >
+          <FileDown className="w-4 h-4 ml-2" />
+          {isExporting ? "جاري التصدير..." : "تصدير PDF"}
+        </Button>
+      </div>
+      
+      {/* Content to export */}
+      <div ref={contentRef} className="space-y-6 bg-background p-4">
       {/* Shipment Info */}
       <Card>
         <CardHeader className="pb-4">
@@ -2050,6 +2113,7 @@ function Step5Summary({
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }
