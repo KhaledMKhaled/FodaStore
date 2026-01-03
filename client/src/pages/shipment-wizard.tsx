@@ -1740,6 +1740,9 @@ function Step4MissingPieces({
   totalCustomsCostEgp: number;
   totalTakhreegCostEgp: number;
 }) {
+  const ITEMS_PER_PAGE = 10;
+  const [currentPage, setCurrentPage] = useState(1);
+
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("ar-EG", {
       minimumFractionDigits: 2,
@@ -1755,16 +1758,16 @@ function Step4MissingPieces({
     return unitCostEgp;
   };
 
-  const updateMissingPieces = (index: number, value: number) => {
-    const item = items[index];
+  const updateMissingPieces = (globalIndex: number, value: number) => {
+    const item = items[globalIndex];
     const maxPieces = item.totalPiecesCou || 0;
     const safeValue = Math.max(0, Math.min(value, maxPieces));
     const unitCost = calculateUnitCost(item);
     const missingCost = safeValue * unitCost;
     
     const newItems = [...items];
-    newItems[index] = {
-      ...newItems[index],
+    newItems[globalIndex] = {
+      ...newItems[globalIndex],
       missingPieces: safeValue,
       missingCostEgp: missingCost.toFixed(2),
     };
@@ -1773,6 +1776,11 @@ function Step4MissingPieces({
 
   const totalMissingPieces = items.reduce((sum, item) => sum + (item.missingPieces || 0), 0);
   const totalMissingCostEgp = items.reduce((sum, item) => sum + parseFloat(item.missingCostEgp || "0"), 0);
+
+  const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const currentItems = items.slice(startIndex, endIndex);
 
   return (
     <div className="space-y-6">
@@ -1792,6 +1800,7 @@ function Step4MissingPieces({
               <thead>
                 <tr className="border-b">
                   <th className="text-right py-3 px-2 font-medium">#</th>
+                  <th className="text-right py-3 px-2 font-medium">الصورة</th>
                   <th className="text-right py-3 px-2 font-medium">اسم الصنف</th>
                   <th className="text-right py-3 px-2 font-medium">إجمالي القطع</th>
                   <th className="text-right py-3 px-2 font-medium">تكلفة القطعة</th>
@@ -1800,14 +1809,28 @@ function Step4MissingPieces({
                 </tr>
               </thead>
               <tbody>
-                {items.map((item, index) => {
+                {currentItems.map((item, pageIndex) => {
+                  const globalIndex = startIndex + pageIndex;
                   const unitCost = calculateUnitCost(item);
                   const missingPieces = item.missingPieces || 0;
                   const missingCost = parseFloat(item.missingCostEgp || "0");
 
                   return (
-                    <tr key={item.id || index} className="border-b hover-elevate" data-testid={`missing-row-${index}`}>
-                      <td className="py-3 px-2 text-muted-foreground">{item.lineNo || index + 1}</td>
+                    <tr key={item.id || globalIndex} className="border-b hover-elevate" data-testid={`missing-row-${globalIndex}`}>
+                      <td className="py-3 px-2 text-muted-foreground">{item.lineNo || globalIndex + 1}</td>
+                      <td className="py-3 px-2">
+                        {item.imageUrl ? (
+                          <img
+                            src={item.imageUrl}
+                            alt={item.productName || "صورة الصنف"}
+                            className="w-12 h-12 object-cover rounded-md border"
+                          />
+                        ) : (
+                          <div className="w-12 h-12 bg-muted rounded-md flex items-center justify-center">
+                            <Package className="w-6 h-6 text-muted-foreground" />
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 px-2 font-medium">{item.productName || "بدون اسم"}</td>
                       <td className="py-3 px-2">{item.totalPiecesCou || 0}</td>
                       <td className="py-3 px-2">{formatCurrency(unitCost)} ج.م</td>
@@ -1817,9 +1840,9 @@ function Step4MissingPieces({
                           min={0}
                           max={item.totalPiecesCou || 0}
                           value={missingPieces}
-                          onChange={(e) => updateMissingPieces(index, parseInt(e.target.value) || 0)}
+                          onChange={(e) => updateMissingPieces(globalIndex, parseInt(e.target.value) || 0)}
                           className="w-24"
-                          data-testid={`input-missing-${index}`}
+                          data-testid={`input-missing-${globalIndex}`}
                         />
                       </td>
                       <td className="py-3 px-2">
@@ -1837,6 +1860,34 @@ function Step4MissingPieces({
               </tbody>
             </table>
           </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 mt-4 pt-4 border-t">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                data-testid="button-missing-prev"
+              >
+                <ChevronRight className="w-4 h-4" />
+                السابق
+              </Button>
+              <span className="text-sm text-muted-foreground px-4">
+                صفحة {currentPage} من {totalPages} ({items.length} صنف)
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                data-testid="button-missing-next"
+              >
+                التالي
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 mt-4 border-t">
             <div className="bg-amber-100 dark:bg-amber-900/30 p-4 rounded-md">
