@@ -62,6 +62,7 @@ import type {
   ProductType,
   ExchangeRate,
 } from "@shared/schema";
+import { ItemImage } from "@/components/item-image";
 
 const STEPS = [
   { id: 1, title: "الاستيراد", icon: Package, description: "بيانات الأصناف" },
@@ -386,23 +387,52 @@ export default function ShipmentWizard() {
   const handleImageUpload = async (index: number, file: File) => {
     setUploadingImage(index);
     try {
-      const formData = new FormData();
-      formData.append("image", file);
-      
-      const response = await fetch("/api/upload/item-image", {
+      // Step 1: Request presigned URL from backend
+      const urlResponse = await fetch("/api/upload/item-image/request-url", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
+        body: JSON.stringify({
+          name: file.name,
+          size: file.size,
+          contentType: file.type || "image/jpeg",
+        }),
       });
       
-      if (!response.ok) {
+      if (!urlResponse.ok) {
+        throw new Error("فشل الحصول على رابط الرفع");
+      }
+      
+      const { uploadURL, objectPath } = await urlResponse.json();
+      
+      // Step 2: Upload file directly to Google Cloud Storage
+      const uploadResponse = await fetch(uploadURL, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type || "image/jpeg" },
+      });
+      
+      if (!uploadResponse.ok) {
         throw new Error("فشل رفع الصورة");
       }
       
-      const data = await response.json();
-      updateItem(index, "imageUrl", data.imageUrl);
+      // Step 3: Finalize upload (set ACL and get final path)
+      const finalizeResponse = await fetch("/api/upload/item-image/finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ objectPath }),
+      });
+      
+      if (!finalizeResponse.ok) {
+        throw new Error("فشل حفظ الصورة");
+      }
+      
+      const { imageUrl } = await finalizeResponse.json();
+      updateItem(index, "imageUrl", imageUrl);
       toast({ title: "تم رفع الصورة بنجاح" });
     } catch (error) {
+      console.error("Image upload error:", error);
       toast({ title: "خطأ في رفع الصورة", variant: "destructive" });
     } finally {
       setUploadingImage(null);
@@ -1227,11 +1257,7 @@ function Step1Import({
                     <Label className="whitespace-nowrap">صورة البند:</Label>
                     {item.imageUrl ? (
                       <div className="relative group">
-                        <img
-                          src={item.imageUrl}
-                          alt={item.productName || "صورة البند"}
-                          className="w-16 h-16 object-cover rounded-md border"
-                        />
+                        <ItemImage src={item.imageUrl} alt={item.productName || "صورة البند"} size="lg" />
                         <button
                           type="button"
                           onClick={() => removeItemImage(actualIndex)}
@@ -1634,13 +1660,7 @@ function Step3Customs({
                 data-testid={`customs-item-${index}`}
               >
                 <div className="flex items-center gap-4 mb-4">
-                  {item.imageUrl && (
-                    <img
-                      src={item.imageUrl}
-                      alt={item.productName || "صورة البند"}
-                      className="w-16 h-16 object-cover rounded-md border flex-shrink-0"
-                    />
-                  )}
+                  <ItemImage src={item.imageUrl} alt={item.productName || "صورة البند"} size="lg" />
                   <div className="flex-1">
                     <span className="font-medium">{item.productName || `البند ${item.lineNo || (index + 1)}`}</span>
                     <span className="text-sm text-muted-foreground mr-2">
@@ -1819,17 +1839,7 @@ function Step4MissingPieces({
                     <tr key={item.id || globalIndex} className="border-b hover-elevate" data-testid={`missing-row-${globalIndex}`}>
                       <td className="py-3 px-2 text-muted-foreground">{item.lineNo || globalIndex + 1}</td>
                       <td className="py-3 px-2">
-                        {item.imageUrl ? (
-                          <img
-                            src={item.imageUrl}
-                            alt={item.productName || "صورة الصنف"}
-                            className="w-12 h-12 object-cover rounded-md border"
-                          />
-                        ) : (
-                          <div className="w-12 h-12 bg-muted rounded-md flex items-center justify-center">
-                            <Package className="w-6 h-6 text-muted-foreground" />
-                          </div>
-                        )}
+                        <ItemImage src={item.imageUrl} alt={item.productName || "صورة الصنف"} size="md" />
                       </td>
                       <td className="py-3 px-2 font-medium">{item.productName || "بدون اسم"}</td>
                       <td className="py-3 px-2">{item.totalPiecesCou || 0}</td>

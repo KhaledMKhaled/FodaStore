@@ -20,6 +20,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { ZodError } from "zod";
+import { ObjectStorageService } from "./replit_integrations/object_storage";
 
 // Configure multer for item image uploads
 const itemImageStorage = multer.diskStorage({
@@ -583,7 +584,69 @@ export async function registerRoutes(
     res.status(401).json({ message: "Unauthorized" });
   });
 
-  // Image upload for items
+  // Object Storage service for persistent file storage
+  const objectStorageService = new ObjectStorageService();
+
+  // Request presigned URL for item image upload (Object Storage)
+  app.post("/api/upload/item-image/request-url", isAuthenticated, async (req, res) => {
+    try {
+      const { name, size, contentType } = req.body;
+      
+      if (!name) {
+        return res.status(400).json({ message: "اسم الملف مطلوب" });
+      }
+
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+
+      res.json({
+        uploadURL,
+        objectPath,
+        metadata: { name, size, contentType },
+      });
+    } catch (error) {
+      console.error("Error generating upload URL:", error);
+      res.status(500).json({ message: "خطأ في إنشاء رابط الرفع" });
+    }
+  });
+
+  // Finalize item image upload - set ACL and return final path
+  app.post("/api/upload/item-image/finalize", isAuthenticated, async (req, res) => {
+    try {
+      const { objectPath } = req.body;
+      
+      if (!objectPath) {
+        return res.status(400).json({ message: "مسار الملف مطلوب" });
+      }
+
+      // Set public visibility for item images
+      const normalizedPath = await objectStorageService.trySetObjectEntityAclPolicy(
+        objectPath,
+        { owner: "system", visibility: "public" }
+      );
+
+      res.json({ imageUrl: normalizedPath });
+    } catch (error) {
+      console.error("Error finalizing upload:", error);
+      res.status(500).json({ message: "خطأ في حفظ الصورة" });
+    }
+  });
+
+  // Serve objects from Object Storage
+  app.get("/objects/:objectPath(*)", async (req, res) => {
+    try {
+      const objectFile = await objectStorageService.getObjectEntityFile(req.path);
+      await objectStorageService.downloadObject(objectFile, res);
+    } catch (error: any) {
+      console.error("Error serving object:", error);
+      if (error?.name === "ObjectNotFoundError") {
+        return res.status(404).json({ error: "Object not found" });
+      }
+      return res.status(500).json({ error: "Failed to serve object" });
+    }
+  });
+
+  // Legacy image upload for items (fallback - still works but uses local storage)
   app.post("/api/upload/item-image", isAuthenticated, uploadItemImage.single("image"), (req, res) => {
     try {
       if (!req.file) {
