@@ -272,6 +272,14 @@ export async function updateShipmentWithItems(
 
         if (itemsToDelete.length > 0) {
           const idsToDelete = itemsToDelete.map(item => item.id);
+          
+          // First delete related inventory movements (for completed shipments)
+          for (let i = 0; i < idsToDelete.length; i += CHUNK_SIZE) {
+            const chunk = idsToDelete.slice(i, i + CHUNK_SIZE);
+            await tx.delete(inventoryMovements).where(inArray(inventoryMovements.shipmentItemId, chunk));
+          }
+          
+          // Then delete the items
           for (let i = 0; i < idsToDelete.length; i += CHUNK_SIZE) {
             const chunk = idsToDelete.slice(i, i + CHUNK_SIZE);
             await tx.delete(shipmentItems).where(inArray(shipmentItems.id, chunk));
