@@ -23,6 +23,7 @@ import {
   Download,
   ChevronLeft,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 import { toPng } from "html-to-image";
 import { z } from "zod";
@@ -51,6 +52,17 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -73,6 +85,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PaymentAttachmentIcon } from "@/components/payment-attachment-icon";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, getErrorMessage, queryClient } from "@/lib/queryClient";
 import { createRelatedPartiesQuery, getPartyOptions, type RelatedPartiesResponse } from "@/lib/relatedParties";
 import { shipmentStatusColors } from "@/lib/colorMaps";
@@ -272,6 +285,9 @@ export default function Payments() {
   const summaryExportRef = useRef<HTMLDivElement | null>(null);
   const pendingSummaryRef = useRef<PaymentSummarySnapshot | null>(null);
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "مدير";
+  const [paymentToDelete, setPaymentToDelete] = useState<number | null>(null);
 
   const form = useForm<PaymentFormValues>({
     resolver: zodResolver(paymentFormSchema),
@@ -633,6 +649,27 @@ export default function Payments() {
     },
     onError: (error: Error) => {
       console.error("Payment creation failed", error);
+      toast({
+        title: getErrorMessage(error, paymentErrorOverrides),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (paymentId: number) => {
+      const response = await apiRequest("DELETE", `/api/payments/${paymentId}`);
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "تم حذف الدفعة بنجاح" });
+      queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/payments/stats"] });
+      setPaymentToDelete(null);
+    },
+    onError: (error: Error) => {
+      console.error("Payment deletion failed", error);
       toast({
         title: getErrorMessage(error, paymentErrorOverrides),
         variant: "destructive",
@@ -2390,6 +2427,7 @@ export default function Payments() {
                           <TableHead className="text-right">المستلم/المرجع</TableHead>
                           <TableHead className="text-right">ملاحظات</TableHead>
                           <TableHead className="text-right">مرفق</TableHead>
+                          {isAdmin && <TableHead className="text-right">إجراءات</TableHead>}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2455,6 +2493,40 @@ export default function Payments() {
                               attachmentOriginalName={payment.attachmentOriginalName}
                             />
                           </TableCell>
+                          {isAdmin && (
+                            <TableCell>
+                              <AlertDialog open={paymentToDelete === payment.id} onOpenChange={(open) => !open && setPaymentToDelete(null)}>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setPaymentToDelete(payment.id)}
+                                    disabled={deleteMutation.isPending}
+                                    data-testid={`button-delete-payment-${payment.id}`}
+                                  >
+                                    <Trash2 className="w-4 h-4 text-destructive" />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>حذف الدفعة</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      هل أنت متأكد من حذف هذه الدفعة؟ سيتم إلغاء جميع التخصيصات المرتبطة بها وتحديث أرصدة الشحنة. هذا الإجراء لا يمكن التراجع عنه.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter className="gap-2">
+                                    <AlertDialogCancel>إلغاء</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      onClick={() => deleteMutation.mutate(payment.id)}
+                                      className="bg-destructive text-destructive-foreground"
+                                    >
+                                      {deleteMutation.isPending ? "جاري الحذف..." : "حذف"}
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))}
                       </TableBody>

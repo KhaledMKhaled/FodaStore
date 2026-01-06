@@ -1745,6 +1745,72 @@ export async function registerRoutes(
     createPaymentHandler({ storage: routeStorage, logAuditEvent: auditLogger }),
   );
 
+  app.delete(
+    "/api/payments/:id",
+    requireRole(["مدير"]),
+    async (req, res) => {
+      try {
+        const paymentId = parseInt(req.params.id);
+        if (Number.isNaN(paymentId)) {
+          return res.status(400).json({
+            error: {
+              code: "PAYMENT_INVALID_ID",
+              message: "معرّف الدفعة غير صالح.",
+            },
+          });
+        }
+
+        const payment = await routeStorage.getPaymentById(paymentId);
+        if (!payment) {
+          return res.status(404).json({
+            error: {
+              code: "PAYMENT_NOT_FOUND",
+              message: "الدفعة غير موجودة.",
+            },
+          });
+        }
+
+        const result = await routeStorage.deletePayment(paymentId);
+
+        if (result.deleted) {
+          auditLogger({
+            userId: (req.user as any)?.id,
+            entityType: "PAYMENT",
+            entityId: String(paymentId),
+            actionType: "DELETE",
+            details: {
+              shipmentId: payment.shipmentId,
+              amountEgp: payment.amountEgp,
+              paymentMethod: payment.paymentMethod,
+              allocationsDeleted: result.allocationsDeleted,
+            },
+          });
+
+          res.json({
+            success: true,
+            message: "تم حذف الدفعة بنجاح.",
+            allocationsDeleted: result.allocationsDeleted,
+          });
+        } else {
+          res.status(404).json({
+            error: {
+              code: "PAYMENT_DELETE_FAILED",
+              message: "تعذر حذف الدفعة.",
+            },
+          });
+        }
+      } catch (error) {
+        console.error("Error deleting payment:", error);
+        const { status, body } = formatError(error, {
+          code: "PAYMENT_DELETE_FAILED",
+          status: 500,
+          message: "حدث خطأ أثناء حذف الدفعة.",
+        });
+        res.status(status).json(body);
+      }
+    },
+  );
+
   const sendPaymentAttachment = async (
     req: Parameters<RequestHandler>[0],
     res: Parameters<RequestHandler>[1],

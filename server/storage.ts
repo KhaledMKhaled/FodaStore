@@ -683,6 +683,7 @@ export interface IStorage {
     remainingAllowed: number;
     recoveredFromItems: boolean;
   }>;
+  deletePayment(paymentId: number): Promise<{ deleted: boolean; allocationsDeleted: number }>;
 
   // Inventory
   getAllInventoryMovements(): Promise<InventoryMovement[]>;
@@ -2014,6 +2015,69 @@ export class DatabaseStorage implements IStorage {
     const remainingAllowed = Math.max(0, knownTotal - alreadyPaid);
 
     return { knownTotal, alreadyPaid, remainingAllowed, recoveredFromItems };
+  }
+
+  async deletePayment(paymentId: number): Promise<{ deleted: boolean; allocationsDeleted: number }> {
+    return db.transaction(async (tx) => {
+      const [payment] = await tx
+        .select()
+        .from(shipmentPayments)
+        .where(eq(shipmentPayments.id, paymentId));
+
+      if (!payment) {
+        return { deleted: false, allocationsDeleted: 0 };
+      }
+
+      const shipmentId = payment.shipmentId;
+      const paymentAmountEgp = parseAmount(payment.amountEgp);
+
+      const allocationsResult = await tx
+        .delete(paymentAllocations)
+        .where(eq(paymentAllocations.paymentId, paymentId))
+        .returning();
+      const allocationsDeleted = allocationsResult.length;
+
+      await tx.delete(shipmentPayments).where(eq(shipmentPayments.id, paymentId));
+
+      const remainingPayments = await tx
+        .select()
+        .from(shipmentPayments)
+        .where(eq(shipmentPayments.shipmentId, shipmentId));
+
+      const newTotalPaid = remainingPayments.reduce(
+        (sum, p) => sum + parseAmount(p.amountEgp),
+        0
+      );
+
+      const latestPaymentDate = remainingPayments.length > 0
+        ? remainingPayments.reduce((latest, p) => {
+            const pDate = p.paymentDate instanceof Date ? p.paymentDate : new Date(p.paymentDate);
+            return pDate > latest ? pDate : latest;
+          }, new Date(0))
+        : null;
+
+      const [currentShipment] = await tx
+        .select()
+        .from(shipments)
+        .where(eq(shipments.id, shipmentId));
+
+      if (currentShipment) {
+        const finalTotal = parseAmount(currentShipment.finalTotalCostEgp);
+        const newBalance = Math.max(0, finalTotal - newTotalPaid);
+
+        await tx
+          .update(shipments)
+          .set({
+            totalPaidEgp: newTotalPaid.toFixed(2),
+            balanceEgp: newBalance.toFixed(2),
+            lastPaymentDate: latestPaymentDate,
+            updatedAt: new Date(),
+          })
+          .where(eq(shipments.id, shipmentId));
+      }
+
+      return { deleted: true, allocationsDeleted };
+    });
   }
 
   // Inventory
