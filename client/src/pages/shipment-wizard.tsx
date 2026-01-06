@@ -1727,7 +1727,6 @@ function Step3Customs({
                             : updateItem(index, "customsCostPerCartonEgp", e.target.value)
                         }
                         min="0"
-                        disabled={!isFirstItem && applyCustomsToAll}
                       />
                     </div>
                     <div className="space-y-2">
@@ -1750,7 +1749,6 @@ function Step3Customs({
                             : updateItem(index, "takhreegCostPerCartonEgp", e.target.value)
                         }
                         min="0"
-                        disabled={!isFirstItem && applyTakhreegToAll}
                       />
                     </div>
                     <div className="space-y-2">

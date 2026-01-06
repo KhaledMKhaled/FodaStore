@@ -117,7 +117,7 @@ npm run db:push    # Push database schema changes
   - Two separate checkboxes: one for customs, one for takhreeg (clearance)
   - When checked, copies item #1's value to all other items
   - Real-time sync: editing item #1 while checkbox is checked updates all items
-  - Disabled input fields for items 2+ when respective checkbox is checked
+  - All input fields remain editable for manual overrides
 - **January 2026**: Automatic Missing Cost Recalculation
   - Missing pieces cost (missingCostEgp) now automatically recalculates when shipment costs change
   - Recalculation happens in updateShipmentWithItems when any cost component is updated
