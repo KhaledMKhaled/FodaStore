@@ -29,6 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { InventoryMovement, ShipmentItem, Shipment, ShipmentShippingDetails } from "@shared/schema";
+import { ItemImage } from "@/components/item-image";
 
 interface InventoryStats {
   totalPieces: number;
@@ -353,6 +354,7 @@ export default function Inventory() {
                     <TableRow>
                       <TableHead className="text-right">التاريخ</TableHead>
                       <TableHead className="text-right">الشحنة</TableHead>
+                      <TableHead className="text-right">الصورة</TableHead>
                       <TableHead className="text-right">المنتج</TableHead>
                       <TableHead className="text-right">عدد القطع</TableHead>
                       <TableHead className="text-right">الشراء (RMB)</TableHead>
@@ -381,6 +383,13 @@ export default function Inventory() {
                             <Badge variant="outline">
                               {movement.shipment?.shipmentCode || "-"}
                             </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <ItemImage
+                              src={movement.shipmentItem?.imageUrl}
+                              alt={movement.shipmentItem?.productName || "صورة المنتج"}
+                              size="sm"
+                            />
                           </TableCell>
                           <TableCell className="font-medium">
                             {movement.shipmentItem?.productName || "-"}
