@@ -2235,7 +2235,7 @@ export default function Payments() {
                                               </div>
 
                                               {/* Actions column (aligns with إجراءات) */}
-                                              <div className="w-16 px-2 flex items-center justify-end gap-2">
+                                              <div className="w-20 px-2 flex items-center justify-end gap-1">
                                                 {payment.attachmentUrl && (
                                                   <PaymentAttachmentIcon
                                                     paymentId={payment.id}
@@ -2243,6 +2243,39 @@ export default function Payments() {
                                                     attachmentOriginalName={payment.attachmentOriginalName}
                                                     className="text-primary hover:text-primary/80 transition-colors"
                                                   />
+                                                )}
+                                                {isAdmin && (
+                                                  <AlertDialog open={paymentToDelete === payment.id} onOpenChange={(open) => !open && setPaymentToDelete(null)}>
+                                                    <AlertDialogTrigger asChild>
+                                                      <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-7 w-7"
+                                                        onClick={() => setPaymentToDelete(payment.id)}
+                                                        disabled={deleteMutation.isPending}
+                                                        data-testid={`button-delete-expanded-payment-${payment.id}`}
+                                                      >
+                                                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                                                      </Button>
+                                                    </AlertDialogTrigger>
+                                                    <AlertDialogContent>
+                                                      <AlertDialogHeader>
+                                                        <AlertDialogTitle>حذف الدفعة</AlertDialogTitle>
+                                                        <AlertDialogDescription>
+                                                          هل أنت متأكد من حذف هذه الدفعة؟ سيتم إلغاء جميع التخصيصات المرتبطة بها وتحديث أرصدة الشحنة. هذا الإجراء لا يمكن التراجع عنه.
+                                                        </AlertDialogDescription>
+                                                      </AlertDialogHeader>
+                                                      <AlertDialogFooter className="gap-2">
+                                                        <AlertDialogCancel>إلغاء</AlertDialogCancel>
+                                                        <AlertDialogAction
+                                                          onClick={() => deleteMutation.mutate(payment.id)}
+                                                          className="bg-destructive text-destructive-foreground"
+                                                        >
+                                                          {deleteMutation.isPending ? "جاري الحذف..." : "حذف"}
+                                                        </AlertDialogAction>
+                                                      </AlertDialogFooter>
+                                                    </AlertDialogContent>
+                                                  </AlertDialog>
                                                 )}
                                               </div>
                                             </div>
