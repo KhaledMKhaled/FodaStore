@@ -14,6 +14,7 @@ export type ErrorCode =
   | "CONFLICT_RETRY"
   | "PAYMENT_DB_ERROR"
   | "PAYMENT_FETCH_FAILED"
+  | "PAYMENT_DELETE_FAILED"
   | "UNKNOWN_ERROR";
 
 export interface ApiErrorShape {
@@ -41,6 +42,7 @@ const defaultMessages: Record<ErrorCode, string> = {
   CONFLICT_RETRY: "حدث تعارض بسبب عملية أخرى على نفس الشحنة. أعد المحاولة بعد لحظات.",
   PAYMENT_DB_ERROR: "تعذر حفظ الدفعة بسبب خطأ في قاعدة البيانات.",
   PAYMENT_FETCH_FAILED: "تعذر جلب بيانات المدفوعات حالياً.",
+  PAYMENT_DELETE_FAILED: "تعذر حذف الدفعة.",
   UNKNOWN_ERROR: "حدث خطأ غير متوقع أثناء حفظ الدفعة.",
 };
 

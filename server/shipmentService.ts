@@ -500,16 +500,23 @@ export async function updateShipmentWithItems(
 
       let newStatus = shipmentForTotals.status;
       const previousStatus = shipmentForTotals.status;
-      if (step === 1) {
-        newStatus = "في انتظار الشحن";
-      } else if (step === 2 && shippingData) {
-        newStatus = "في انتظار الشحن";
-      } else if (step === 3) {
-        newStatus = "جاهزة للاستلام";
-      } else if (step === 4) {
-        newStatus = "جاهزة للاستلام";
-      } else if (step === 5) {
-        newStatus = "مستلمة بنجاح";
+      
+      // Don't downgrade status if shipment is already completed or archived
+      const isCompletedOrArchived = previousStatus === "مستلمة بنجاح" || previousStatus === "مؤرشفة";
+      
+      if (!isCompletedOrArchived) {
+        // Only update status for shipments that are still in progress
+        if (step === 1) {
+          newStatus = "في انتظار الشحن";
+        } else if (step === 2 && shippingData) {
+          newStatus = "في انتظار الشحن";
+        } else if (step === 3) {
+          newStatus = "جاهزة للاستلام";
+        } else if (step === 4) {
+          newStatus = "جاهزة للاستلام";
+        } else if (step === 5) {
+          newStatus = "مستلمة بنجاح";
+        }
       }
 
       const [finalShipment] = await tx
