@@ -443,10 +443,56 @@ export async function updateShipmentWithItems(
       const shippingCostEgp = parseFloat(shipmentForTotals.shippingCostEgp || "0");
       const customsCostEgp = parseFloat(shipmentForTotals.customsCostEgp || "0");
       const takhreegCostEgp = parseFloat(shipmentForTotals.takhreegCostEgp || "0");
-      const totalMissingCostEgp = parseFloat(shipmentForTotals.totalMissingCostEgp || "0");
+
+      // Recalculate missing costs for items with missingPieces > 0
+      const allItems = await tx
+        .select()
+        .from(shipmentItems)
+        .where(eq(shipmentItems.shipmentId, shipmentId));
+
+      const totalPiecesForMissing = allItems.reduce((sum, item) => sum + (item.totalPiecesCou || 0), 0);
+      const purchaseRateForMissing = parseFloat(shipmentForTotals.purchaseRmbToEgpRate || "7");
+      
+      let recalculatedTotalMissingCostEgp = 0;
+      
+      for (const item of allItems) {
+        if ((item.missingPieces || 0) > 0) {
+          // Calculate unit landed cost
+          const itemPurchaseCostEgp = parseFloat(item.totalPurchaseCostRmb || "0") * purchaseRateForMissing;
+          const pieceRatio = totalPiecesForMissing > 0 ? (item.totalPiecesCou || 0) / totalPiecesForMissing : 0;
+          const itemShareOfExtras = pieceRatio * (customsCostEgp + takhreegCostEgp + shippingCostEgp + commissionCostEgp);
+          const itemTotalCostEgp = itemPurchaseCostEgp + itemShareOfExtras;
+          const unitCostEgp = (item.totalPiecesCou || 0) > 0 ? itemTotalCostEgp / (item.totalPiecesCou || 1) : 0;
+          
+          const newMissingCostEgp = roundAmount(item.missingPieces * unitCostEgp);
+          recalculatedTotalMissingCostEgp += newMissingCostEgp;
+          
+          // Update item's missing cost if it changed
+          if (parseFloat(item.missingCostEgp || "0") !== newMissingCostEgp) {
+            await tx
+              .update(shipmentItems)
+              .set({
+                missingCostEgp: newMissingCostEgp.toFixed(2),
+                updatedAt: new Date(),
+              })
+              .where(eq(shipmentItems.id, item.id));
+          }
+        }
+      }
+
+      // Update shipment's total missing cost
+      if (parseFloat(shipmentForTotals.totalMissingCostEgp || "0") !== recalculatedTotalMissingCostEgp) {
+        await tx
+          .update(shipments)
+          .set({
+            totalMissingCostEgp: recalculatedTotalMissingCostEgp.toFixed(2),
+            updatedAt: new Date(),
+          })
+          .where(eq(shipments.id, shipmentId));
+      }
 
       const finalTotalCostEgp = roundAmount(
-        purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp - totalMissingCostEgp,
+        purchaseCostEgp + commissionCostEgp + shippingCostEgp + customsCostEgp + takhreegCostEgp - recalculatedTotalMissingCostEgp,
       );
 
       const totalPaidEgp = parseFloat(shipmentForTotals.totalPaidEgp || "0");
