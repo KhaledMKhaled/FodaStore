@@ -122,11 +122,13 @@ npm run db:push    # Push database schema changes
   - Missing pieces cost (missingCostEgp) now automatically recalculates when shipment costs change
   - Recalculation happens in updateShipmentWithItems when any cost component is updated
   - Ensures accurate missing deductions even if costs are modified after entering missing pieces
-- **January 2026**: Persistent Item Image Storage
+- **January 2026**: Persistent Item Image Storage (Verified Working)
   - Fixed critical bug where item images were lost after server restart
   - Implemented Replit Object Storage for persistent image uploads
   - New 3-step presigned URL upload flow: request URL → direct upload → finalize
   - Created reusable ItemImage component with loading states and fallback UI
+  - Image paths: New uploads use `/objects/uploads/{uuid}` (persistent), old uploads used `/uploads/items/` (ephemeral)
+  - Added upload logging for debugging: `[Upload] Request URL`, `[Upload] Generated`, `[Upload] Finalize`, `[Upload] Finalized`
 - **January 2026**: PDF Export for Shipment Summary (Phase B Complete)
   - Added PDF export button to Step 5 (Summary) of shipment wizard
   - Uses html2canvas for RTL-compatible content capture
