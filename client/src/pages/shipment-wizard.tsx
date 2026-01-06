@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -1625,11 +1626,54 @@ function Step3Customs({
   totalCustomsCostEgp: number;
   totalTakhreegCostEgp: number;
 }) {
+  const [applyCustomsToAll, setApplyCustomsToAll] = useState(false);
+  const [applyTakhreegToAll, setApplyTakhreegToAll] = useState(false);
+
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat("ar-EG", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(value);
+
+  const handleApplyCustomsToAll = (checked: boolean | "indeterminate") => {
+    const isChecked = checked === true;
+    setApplyCustomsToAll(isChecked);
+    if (isChecked && items.length > 1) {
+      const firstItemCustoms = items[0]?.customsCostPerCartonEgp || "";
+      for (let i = 1; i < items.length; i++) {
+        updateItem(i, "customsCostPerCartonEgp", firstItemCustoms);
+      }
+    }
+  };
+
+  const handleApplyTakhreegToAll = (checked: boolean | "indeterminate") => {
+    const isChecked = checked === true;
+    setApplyTakhreegToAll(isChecked);
+    if (isChecked && items.length > 1) {
+      const firstItemTakhreeg = items[0]?.takhreegCostPerCartonEgp || "";
+      for (let i = 1; i < items.length; i++) {
+        updateItem(i, "takhreegCostPerCartonEgp", firstItemTakhreeg);
+      }
+    }
+  };
+
+  const handleFirstItemCustomsChange = (value: string) => {
+    updateItem(0, "customsCostPerCartonEgp", value);
+    if (applyCustomsToAll && items.length > 1) {
+      for (let i = 1; i < items.length; i++) {
+        updateItem(i, "customsCostPerCartonEgp", value);
+      }
+    }
+  };
+
+  const handleFirstItemTakhreegChange = (value: string) => {
+    updateItem(0, "takhreegCostPerCartonEgp", value);
+    if (applyTakhreegToAll && items.length > 1) {
+      for (let i = 1; i < items.length; i++) {
+        updateItem(i, "takhreegCostPerCartonEgp", value);
+      }
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1653,63 +1697,99 @@ function Step3Customs({
             const totalCustoms = cou * customsPerPiece;
             const totalTakhreeg = ctn * takhreegPerCarton;
 
+            const isFirstItem = index === 0;
+
             return (
-              <div
-                key={index}
-                className="p-4 border rounded-md bg-card"
-                data-testid={`customs-item-${index}`}
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <ItemImage src={item.imageUrl} alt={item.productName || "صورة البند"} size="lg" />
-                  <div className="flex-1">
-                    <span className="font-medium">{item.productName || `البند ${item.lineNo || (index + 1)}`}</span>
-                    <span className="text-sm text-muted-foreground mr-2">
-                      ({ctn} كرتونة - {cou} قطعة)
-                    </span>
+              <div key={index}>
+                <div
+                  className="p-4 border rounded-md bg-card"
+                  data-testid={`customs-item-${index}`}
+                >
+                  <div className="flex items-center gap-4 mb-4">
+                    <ItemImage src={item.imageUrl} alt={item.productName || "صورة البند"} size="lg" />
+                    <div className="flex-1">
+                      <span className="font-medium">{item.productName || `البند ${item.lineNo || (index + 1)}`}</span>
+                      <span className="text-sm text-muted-foreground mr-2">
+                        ({ctn} كرتونة - {cou} قطعة)
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="space-y-2">
+                      <Label>جمرك/قطعة (ج.م)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={item.customsCostPerCartonEgp || ""}
+                        onChange={(e) =>
+                          isFirstItem
+                            ? handleFirstItemCustomsChange(e.target.value)
+                            : updateItem(index, "customsCostPerCartonEgp", e.target.value)
+                        }
+                        min="0"
+                        disabled={!isFirstItem && applyCustomsToAll}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>إجمالي الجمرك (ج.م)</Label>
+                      <Input
+                        value={formatCurrency(totalCustoms)}
+                        readOnly
+                        className="bg-muted"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>تخريج/كرتونة (ج.م)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={item.takhreegCostPerCartonEgp || ""}
+                        onChange={(e) =>
+                          isFirstItem
+                            ? handleFirstItemTakhreegChange(e.target.value)
+                            : updateItem(index, "takhreegCostPerCartonEgp", e.target.value)
+                        }
+                        min="0"
+                        disabled={!isFirstItem && applyTakhreegToAll}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>إجمالي التخريج (ج.م)</Label>
+                      <Input
+                        value={formatCurrency(totalTakhreeg)}
+                        readOnly
+                        className="bg-muted"
+                      />
+                    </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="space-y-2">
-                    <Label>جمرك/قطعة (ج.م)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={item.customsCostPerCartonEgp || ""}
-                      onChange={(e) =>
-                        updateItem(index, "customsCostPerCartonEgp", e.target.value)
-                      }
-                      min="0"
-                    />
+                
+                {isFirstItem && items.length > 1 && (
+                  <div className="flex flex-wrap gap-6 mt-3 p-3 bg-muted/50 rounded-md border border-dashed">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="apply-customs-all"
+                        checked={applyCustomsToAll}
+                        onCheckedChange={handleApplyCustomsToAll}
+                        data-testid="checkbox-apply-customs-all"
+                      />
+                      <Label htmlFor="apply-customs-all" className="text-sm cursor-pointer">
+                        تطبيق الجمرك على الكل
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="apply-takhreeg-all"
+                        checked={applyTakhreegToAll}
+                        onCheckedChange={handleApplyTakhreegToAll}
+                        data-testid="checkbox-apply-takhreeg-all"
+                      />
+                      <Label htmlFor="apply-takhreeg-all" className="text-sm cursor-pointer">
+                        تطبيق التخريج على الكل
+                      </Label>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>إجمالي الجمرك (ج.م)</Label>
-                    <Input
-                      value={formatCurrency(totalCustoms)}
-                      readOnly
-                      className="bg-muted"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>تخريج/كرتونة (ج.م)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={item.takhreegCostPerCartonEgp || ""}
-                      onChange={(e) =>
-                        updateItem(index, "takhreegCostPerCartonEgp", e.target.value)
-                      }
-                      min="0"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>إجمالي التخريج (ج.م)</Label>
-                    <Input
-                      value={formatCurrency(totalTakhreeg)}
-                      readOnly
-                      className="bg-muted"
-                    />
-                  </div>
-                </div>
+                )}
               </div>
             );
           })}
