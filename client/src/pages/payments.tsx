@@ -90,6 +90,7 @@ import {
   buildPaymentFormData,
   canAutoAllocatePayment,
   shouldShowAutoAllocationSection,
+  uploadPaymentAttachment,
 } from "./payments-utils";
 import { PaymentWizard } from "@/components/payment-wizard";
 import {
@@ -258,6 +259,8 @@ export default function Payments() {
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentInputKey, setAttachmentInputKey] = useState(0);
+  const [uploadedAttachment, setUploadedAttachment] = useState<{ attachmentUrl: string; attachmentOriginalName: string; attachmentMimeType: string; attachmentSize: number } | null>(null);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [currentPageShipments, setCurrentPageShipments] = useState(1);
   const [currentPagePayments, setCurrentPagePayments] = useState(1);
   const [autoAllocate, setAutoAllocate] = useState(false);
@@ -656,6 +659,7 @@ export default function Payments() {
     setClientValidationError(null);
     setAttachmentFile(null);
     setAttachmentError(null);
+    setUploadedAttachment(null);
     setAttachmentInputKey((prev) => prev + 1);
     setAutoAllocate(false);
     setCurrentStep(0);
@@ -669,12 +673,14 @@ export default function Payments() {
     if (!file) {
       setAttachmentFile(null);
       setAttachmentError(null);
+      setUploadedAttachment(null);
       return;
     }
 
     if (!file.type.startsWith("image/")) {
       setAttachmentFile(null);
       setAttachmentError("يرجى اختيار ملف صورة فقط.");
+      setUploadedAttachment(null);
       event.target.value = "";
       return;
     }
@@ -682,12 +688,14 @@ export default function Payments() {
     if (file.size > MAX_ATTACHMENT_SIZE) {
       setAttachmentFile(null);
       setAttachmentError("يجب ألا يزيد حجم الصورة عن 2MB.");
+      setUploadedAttachment(null);
       event.target.value = "";
       return;
     }
 
     setAttachmentFile(file);
     setAttachmentError(null);
+    setUploadedAttachment(null); // Reset uploaded URL when new file is selected
   };
 
   const paymentErrorOverrides = {
@@ -846,6 +854,23 @@ export default function Payments() {
       return;
     }
 
+    // Upload attachment to Object Storage if present
+    let attachmentInfo: { attachmentUrl: string; attachmentOriginalName: string; attachmentMimeType: string; attachmentSize: number } | null = uploadedAttachment;
+    if (attachmentFile && !uploadedAttachment) {
+      try {
+        setIsUploadingAttachment(true);
+        attachmentInfo = await uploadPaymentAttachment(attachmentFile);
+        setUploadedAttachment(attachmentInfo);
+      } catch (error) {
+        console.error("Attachment upload error:", error);
+        toast({ title: "خطأ في رفع المرفق", variant: "destructive" });
+        setIsUploadingAttachment(false);
+        return;
+      } finally {
+        setIsUploadingAttachment(false);
+      }
+    }
+
     const payload = buildPaymentFormData({
       selectedShipmentId,
       partyType,
@@ -861,7 +886,10 @@ export default function Payments() {
       referenceNumber: data.referenceNumber || "",
       note: data.note || "",
       autoAllocate,
-      attachment: attachmentFile,
+      attachmentUrl: attachmentInfo?.attachmentUrl || null,
+      attachmentOriginalName: attachmentInfo?.attachmentOriginalName || null,
+      attachmentMimeType: attachmentInfo?.attachmentMimeType || null,
+      attachmentSize: attachmentInfo?.attachmentSize || null,
     });
 
     const pendingShipmentLabel = selectedShipment
@@ -1356,10 +1384,10 @@ export default function Payments() {
                           {currentStep === 1 && (
                             <Button
                               type="submit"
-                              disabled={createMutation.isPending || isOverpayment}
+                              disabled={createMutation.isPending || isUploadingAttachment || isOverpayment}
                               data-testid="button-save-payment"
                             >
-                              {createMutation.isPending ? "جاري الحفظ..." : "حفظ الدفعة"}
+                              {isUploadingAttachment ? "جاري رفع المرفق..." : createMutation.isPending ? "جاري الحفظ..." : "حفظ الدفعة"}
                             </Button>
                           )}
                         </div>

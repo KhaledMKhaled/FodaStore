@@ -57,6 +57,10 @@ export type PaymentPayloadInput = {
   note?: string;
   autoAllocate?: boolean;
   attachment?: File | null;
+  attachmentUrl?: string | null;
+  attachmentOriginalName?: string | null;
+  attachmentMimeType?: string | null;
+  attachmentSize?: number | null;
 };
 
 export const buildPaymentFormData = (input: PaymentPayloadInput): FormData => {
@@ -81,8 +85,78 @@ export const buildPaymentFormData = (input: PaymentPayloadInput): FormData => {
   if (input.autoAllocate) {
     payload.append("autoAllocate", "true");
   }
-  if (input.attachment) {
+  // Use Object Storage URL if available, otherwise fallback to file upload
+  if (input.attachmentUrl) {
+    payload.append("attachmentUrl", input.attachmentUrl);
+    if (input.attachmentOriginalName) {
+      payload.append("attachmentOriginalName", input.attachmentOriginalName);
+    }
+    if (input.attachmentMimeType) {
+      payload.append("attachmentMimeType", input.attachmentMimeType);
+    }
+    if (input.attachmentSize) {
+      payload.append("attachmentSize", String(input.attachmentSize));
+    }
+  } else if (input.attachment) {
     payload.append("attachment", input.attachment);
   }
   return payload;
 };
+
+// Upload attachment to Object Storage and return the URL and metadata
+export async function uploadPaymentAttachment(file: File): Promise<{ attachmentUrl: string; attachmentOriginalName: string; attachmentMimeType: string; attachmentSize: number }> {
+  // Step 1: Request presigned URL from backend
+  const urlResponse = await fetch("/api/upload/payment-attachment/request-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      name: file.name,
+      size: file.size,
+      contentType: file.type || "image/jpeg",
+    }),
+  });
+
+  if (!urlResponse.ok) {
+    const error = await urlResponse.json().catch(() => ({}));
+    throw new Error(error.message || "فشل الحصول على رابط الرفع");
+  }
+
+  const { uploadURL, objectPath } = await urlResponse.json();
+
+  // Step 2: Upload file directly to Google Cloud Storage
+  const uploadResponse = await fetch(uploadURL, {
+    method: "PUT",
+    body: file,
+    headers: { "Content-Type": file.type || "image/jpeg" },
+  });
+
+  if (!uploadResponse.ok) {
+    throw new Error("فشل رفع المرفق");
+  }
+
+  // Step 3: Finalize upload (set ACL and get final path)
+  const finalizeResponse = await fetch("/api/upload/payment-attachment/finalize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      objectPath,
+      originalName: file.name,
+      mimeType: file.type || "image/jpeg",
+      size: file.size,
+    }),
+  });
+
+  if (!finalizeResponse.ok) {
+    throw new Error("فشل حفظ المرفق");
+  }
+
+  const result = await finalizeResponse.json();
+  return {
+    attachmentUrl: result.attachmentUrl,
+    attachmentOriginalName: result.attachmentOriginalName || file.name,
+    attachmentMimeType: file.type || "image/jpeg",
+    attachmentSize: file.size,
+  };
+}

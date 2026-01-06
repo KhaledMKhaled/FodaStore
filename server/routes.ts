@@ -302,6 +302,10 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
         note,
         notes,
         autoAllocate,
+        attachmentUrl: bodyAttachmentUrl,
+        attachmentOriginalName: bodyAttachmentOriginalName,
+        attachmentMimeType: bodyAttachmentMimeType,
+        attachmentSize: bodyAttachmentSize,
       } = req.body;
       const actorId = (req.user as any)?.id;
       const attachment = req.file;
@@ -503,6 +507,13 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
       const shouldAutoAllocate =
         autoAllocate === true || autoAllocate === "true" || autoAllocate === "1";
 
+      // Determine attachment info: prefer Object Storage URL from body, fallback to multer file
+      const finalAttachmentUrl = bodyAttachmentUrl || (attachment ? `/uploads/payments/${attachment.filename}` : null);
+      const finalAttachmentOriginalName = bodyAttachmentOriginalName || attachment?.originalname || null;
+      const finalAttachmentMimeType = bodyAttachmentMimeType || attachment?.mimetype || null;
+      const finalAttachmentSize = bodyAttachmentSize ? Number(bodyAttachmentSize) : (attachment?.size || null);
+      const hasAttachment = Boolean(finalAttachmentUrl);
+
       const payment = await deps.storage.createPayment(
         {
           shipmentId: parsedShipmentId,
@@ -518,11 +529,11 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
           cashReceiverName: cashReceiverName || null,
           referenceNumber: referenceNumber || null,
           note: note || notes || null,
-          attachmentUrl: attachment ? `/uploads/payments/${attachment.filename}` : null,
-          attachmentMimeType: attachment?.mimetype ?? null,
-          attachmentSize: attachment?.size ?? null,
-          attachmentOriginalName: attachment?.originalname ?? null,
-          attachmentUploadedAt: attachment ? new Date() : null,
+          attachmentUrl: finalAttachmentUrl,
+          attachmentMimeType: finalAttachmentMimeType,
+          attachmentSize: finalAttachmentSize,
+          attachmentOriginalName: finalAttachmentOriginalName,
+          attachmentUploadedAt: hasAttachment ? new Date() : null,
           createdByUserId: actorId,
         },
         { autoAllocate: shouldAutoAllocate },
@@ -545,7 +556,7 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
           amount: normalizedAmounts.amountEgp.toString(),
           currency: paymentCurrency,
           method: paymentMethod,
-          hasAttachment: Boolean(attachment),
+          hasAttachment,
         },
       });
 
@@ -661,6 +672,68 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error uploading image:", error);
       res.status(500).json({ message: "خطأ في رفع الصورة" });
+    }
+  });
+
+  // Request presigned URL for payment attachment upload (Object Storage)
+  app.post("/api/upload/payment-attachment/request-url", isAuthenticated, async (req, res) => {
+    try {
+      const { name, size, contentType } = req.body;
+      console.log("[Upload] Payment Attachment Request URL - File:", name, "Size:", size, "Type:", contentType);
+      
+      if (!name) {
+        return res.status(400).json({ message: "اسم الملف مطلوب" });
+      }
+
+      // Validate file type
+      if (!contentType?.startsWith("image/")) {
+        return res.status(400).json({ message: "يسمح فقط بملفات الصور" });
+      }
+
+      // Validate file size (2MB limit)
+      if (size && size > MAX_PAYMENT_ATTACHMENT_SIZE) {
+        return res.status(400).json({ message: "يجب ألا يزيد حجم الصورة عن 2MB" });
+      }
+
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+      console.log("[Upload] Payment Attachment Generated - objectPath:", objectPath);
+
+      res.json({
+        uploadURL,
+        objectPath,
+        metadata: { name, size, contentType },
+      });
+    } catch (error) {
+      console.error("[Upload] Error generating payment attachment URL:", error);
+      res.status(500).json({ message: "خطأ في إنشاء رابط الرفع" });
+    }
+  });
+
+  // Finalize payment attachment upload - set ACL and return final path
+  app.post("/api/upload/payment-attachment/finalize", isAuthenticated, async (req, res) => {
+    try {
+      const { objectPath, originalName } = req.body;
+      console.log("[Upload] Payment Attachment Finalize - objectPath:", objectPath, "originalName:", originalName);
+      
+      if (!objectPath) {
+        return res.status(400).json({ message: "مسار الملف مطلوب" });
+      }
+
+      // Set public visibility for payment attachments
+      const normalizedPath = await objectStorageService.trySetObjectEntityAclPolicy(
+        objectPath,
+        { owner: "system", visibility: "public" }
+      );
+      console.log("[Upload] Payment Attachment Finalized - normalizedPath:", normalizedPath);
+
+      res.json({ 
+        attachmentUrl: normalizedPath,
+        attachmentOriginalName: originalName || null
+      });
+    } catch (error) {
+      console.error("[Upload] Error finalizing payment attachment:", error);
+      res.status(500).json({ message: "خطأ في حفظ المرفق" });
     }
   });
 

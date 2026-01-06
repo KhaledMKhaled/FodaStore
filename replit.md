@@ -112,6 +112,14 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **January 2026**: Persistent Payment Attachment Storage
+  - Extended Object Storage implementation to payment attachments
+  - New 3-step presigned URL upload flow: request URL → direct upload → finalize
+  - Backend endpoints: `POST /api/upload/payment-attachment/request-url` and `POST /api/upload/payment-attachment/finalize`
+  - Payment attachments now use `/objects/uploads/{uuid}` paths (persistent)
+  - Backend supports both Object Storage URLs (new) and multer file uploads (legacy fallback)
+  - Frontend uploads attachment to Object Storage before submitting payment form
+  - Upload progress indicated with "جاري رفع المرفق..." button text
 - **January 2026**: Apply to All Feature in Customs Step
   - Added "تطبيق على الكل" (Apply to All) checkboxes in Step 3 (Customs & Clearance)
   - Two separate checkboxes: one for customs, one for takhreeg (clearance)
