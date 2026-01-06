@@ -112,6 +112,12 @@ npm run db:push    # Push database schema changes
 - Overpayment tracking with negative balance display
 
 ## Recent Changes
+- **January 2026**: Payment Deletion Feature
+  - Admin-only feature to delete payment records
+  - DELETE `/api/payments/:id` endpoint with role-based access control (مدير only)
+  - Transactional deletion: removes payment, deletes related allocations, recalculates shipment totals
+  - Frontend: delete button with confirmation dialog in payments ledger table (admin only)
+  - Audit logging for all payment deletions
 - **January 2026**: Persistent Payment Attachment Storage
   - Extended Object Storage implementation to payment attachments
   - New 3-step presigned URL upload flow: request URL → direct upload → finalize
