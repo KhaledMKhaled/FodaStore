@@ -591,6 +591,7 @@ export async function registerRoutes(
   app.post("/api/upload/item-image/request-url", isAuthenticated, async (req, res) => {
     try {
       const { name, size, contentType } = req.body;
+      console.log("[Upload] Request URL - File:", name, "Size:", size, "Type:", contentType);
       
       if (!name) {
         return res.status(400).json({ message: "اسم الملف مطلوب" });
@@ -598,6 +599,7 @@ export async function registerRoutes(
 
       const uploadURL = await objectStorageService.getObjectEntityUploadURL();
       const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+      console.log("[Upload] Generated - uploadURL:", uploadURL?.substring(0, 100) + "...", "objectPath:", objectPath);
 
       res.json({
         uploadURL,
@@ -605,7 +607,7 @@ export async function registerRoutes(
         metadata: { name, size, contentType },
       });
     } catch (error) {
-      console.error("Error generating upload URL:", error);
+      console.error("[Upload] Error generating upload URL:", error);
       res.status(500).json({ message: "خطأ في إنشاء رابط الرفع" });
     }
   });
@@ -614,6 +616,7 @@ export async function registerRoutes(
   app.post("/api/upload/item-image/finalize", isAuthenticated, async (req, res) => {
     try {
       const { objectPath } = req.body;
+      console.log("[Upload] Finalize - objectPath:", objectPath);
       
       if (!objectPath) {
         return res.status(400).json({ message: "مسار الملف مطلوب" });
@@ -624,10 +627,11 @@ export async function registerRoutes(
         objectPath,
         { owner: "system", visibility: "public" }
       );
+      console.log("[Upload] Finalized - normalizedPath:", normalizedPath);
 
       res.json({ imageUrl: normalizedPath });
     } catch (error) {
-      console.error("Error finalizing upload:", error);
+      console.error("[Upload] Error finalizing upload:", error);
       res.status(500).json({ message: "خطأ في حفظ الصورة" });
     }
   });
