@@ -1,0 +1,186 @@
+You are working inside the FodaStore repo.
+
+CRITICAL BUG: Item images uploaded during shipment creation appear to upload successfully, but after I leave the site and come back (fresh session / restart), the images are missing, broken, or unreadable. I need a ROOT-CAUSE FIX so item images persist permanently and always load correctly when reopening shipments.
+
+This must be solved with evidence-based diagnosis, not guessing.
+
+============================================================
+GOAL
+============================================================
+1) Uploaded item images must be persisted permanently (not temporary storage).
+2) The correct image URL must be stored in the database per shipment item.
+3) When reopening a shipment later, images must render reliably.
+4) The solution must work in both development and production hosting (Render/Replit/etc.).
+5) Add verification steps and at least one automated test to prevent regressions.
+
+============================================================
+STEP 1 — FIND THE CURRENT UPLOAD IMPLEMENTATION (MANDATORY)
+============================================================
+
+1) Locate:
+- Multer (or any upload middleware) configuration
+- The upload route(s) used by shipment item images
+- Where files are stored on disk (e.g. /uploads/items)
+- How the URL is returned to the frontend
+- Where and how the image URL/path is stored in DB for shipment items
+
+Search for keywords:
+- "multer"
+- "uploads/items"
+- "item image"
+- "imageUrl", "image_url", "imagePath", "photo"
+- "express.static", "serveStatic"
+- "/uploads"
+
+2) Identify:
+- The exact DB column holding image reference (string)
+- Whether it stores:
+  - absolute URL (https://...)
+  - relative path (/uploads/items/xyz.png)
+  - filename only (xyz.png)
+
+============================================================
+STEP 2 — REPRODUCE + CAPTURE EVIDENCE (MANDATORY)
+============================================================
+
+Perform this reproducible test:
+
+A) Upload a product image on a shipment item and save shipment.
+B) Confirm image displays immediately (in the UI).
+C) Capture:
+- Network request details for upload call:
+  - request URL
+  - response payload (returned URL/path)
+- DB record for that item (image column value)
+- The file exists on disk (path + filename)
+
+D) Restart the app / refresh with a clean session and reopen the shipment.
+E) When image fails:
+- Capture Network request for the image:
+  - status code (404/403/500)
+  - requested URL
+  - response headers
+- Check whether the file is still present on disk
+- Confirm DB value did not change
+
+DO NOT proceed to fixes until you know which of these is true:
+1) File was never actually persisted
+2) File exists but server does not serve it after restart
+3) File exists and is served but the URL stored in DB is wrong
+4) File exists but hosting environment wipes it (ephemeral filesystem)
+5) Auth/static middleware blocks access
+
+============================================================
+STEP 3 — ROOT CAUSE FIX (CHOOSE THE CORRECT ONE)
+============================================================
+
+Implement the correct fix based on evidence:
+
+CASE A: Filesystem is EPHEMERAL in production (common on many hosts)
+- Fix by using a persistent storage strategy.
+Options:
+1) Store images in a persistent object store (S3-compatible) if the repo already supports it.
+2) If not, implement minimal persistent approach appropriate to current hosting.
+3) If absolutely required to stay local: configure persistent disk/volume supported by host and ensure /uploads is mounted there.
+
+If you choose object storage, do it minimally:
+- Upload API stores file to object store
+- DB stores the public URL (or signed URL strategy)
+- UI uses that URL
+
+CASE B: Files exist but Express is NOT serving /uploads correctly
+- Ensure server serves static files from the uploads directory:
+  - app.use("/uploads", express.static(pathToUploads))
+- Ensure correct absolute path resolution (use process.cwd() or __dirname properly)
+- Ensure this works in both dev + production build output paths.
+
+CASE C: Wrong URL stored in DB (relative/absolute mismatch)
+- Standardize:
+  - Store a RELATIVE path in DB, e.g. "/uploads/items/<filename>"
+  - At runtime, UI builds full URL using the API base origin OR use absolute URL returned by server.
+- Ensure the frontend uses the correct base URL (especially in production).
+- Fix any code that prepends incorrect prefixes (e.g. /dist/public).
+
+CASE D: Upload appears to work but file is not written or path is wrong
+- Fix Multer destination creation and permission:
+  - ensure uploads/items exists and is created on demand
+  - ensure file naming avoids collisions
+- Ensure errors are not swallowed; return clear errors.
+
+CASE E: Auth blocks images
+- Images should be served safely:
+  - Either public read for authenticated UI via cookie session
+  - Or require a protected image endpoint:
+    GET /api/items/:id/image -> streams image after auth check
+Choose simplest consistent with existing security.
+
+============================================================
+STEP 4 — DATA MIGRATION / REPAIR (IF NEEDED)
+============================================================
+
+If DB contains broken paths for existing items:
+- Write a migration/script to normalize stored paths
+- Or detect missing leading "/uploads/items" and fix.
+
+If files are missing due to old ephemeral storage:
+- You cannot recover past images; but ensure future uploads persist.
+- Add UI messaging if an old image is missing: "الصورة غير متاحة".
+
+============================================================
+STEP 5 — UI RELIABILITY IMPROVEMENTS
+============================================================
+
+- Ensure image rendering uses:
+  - correct URL
+  - proper fallback placeholder if 404
+- Add cache-busting only if needed (avoid stale caching bugs).
+- Ensure shipment details page always re-renders image URLs after fetch.
+
+============================================================
+STEP 6 — TESTING (MANDATORY)
+============================================================
+
+Add at least:
+
+A) Backend test:
+- Upload an image via the upload endpoint
+- Verify:
+  - response returns URL/path
+  - file exists (or object store mock)
+  - DB stored value matches expected format
+- Then simulate “restart” by re-initializing server in test and request the image URL:
+  - must return 200 and correct content-type
+
+B) Manual verification checklist (must run):
+1) Upload image on item -> save shipment -> reopen immediately -> image shows
+2) Restart app -> reopen shipment -> image shows
+3) Open image URL directly in browser -> returns 200
+4) Create multiple items with images -> all persist
+
+============================================================
+REGRESSION REQUIREMENTS (MANDATORY)
+============================================================
+
+After implementing fix:
+- No errors introduced.
+- Shipment creation and update still works.
+- Payments still work.
+- Reports still work.
+- Security: do not expose secrets; do not allow arbitrary file read; validate MIME types and size limits.
+
+============================================================
+DELIVERABLES
+============================================================
+
+When finished, provide:
+1) Root cause explanation with evidence (what was failing and why)
+2) Files changed (server + UI + migrations)
+3) How to run and test locally and in production
+4) Automated test(s) added and results
+5) Final PASS/FAIL checklist:
+   - image upload works
+   - image persists after restart
+   - image loads when reopening shipment
+   - no regressions
+
+BEGIN NOW by locating the upload route, confirming DB storage format, reproducing the failure, and then applying the correct fix.
