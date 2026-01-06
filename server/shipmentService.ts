@@ -538,7 +538,16 @@ export async function updateShipmentWithItems(
         .where(eq(shipments.id, shipmentId))
         .returning();
 
-      if (step === 5 && newStatus === "مستلمة بنجاح" && previousStatus !== "مستلمة بنجاح") {
+      // Create inventory if step 5 and status is "مستلمة بنجاح" 
+      // Check if inventory already exists - if not, create it (handles re-completion after edits)
+      const existingInventory = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(inventoryMovements)
+        .where(eq(inventoryMovements.shipmentId, shipmentId));
+      
+      const hasExistingInventory = (existingInventory[0]?.count || 0) > 0;
+      
+      if (step === 5 && newStatus === "مستلمة بنجاح" && !hasExistingInventory) {
         const shipmentItemsForInventory = await tx
           .select()
           .from(shipmentItems)
