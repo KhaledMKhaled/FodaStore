@@ -41,6 +41,13 @@ The application is built as a full-stack web application with a clear separation
 - Transactional deletion for payments, ensuring data integrity.
 - Apply to All feature in Customs step for quick data entry.
 
+## Recent Changes
+- **January 2026**: Added three new payment methods: نواقص (Shortages), AliPay, WeChat
+  - Updated payments page, movement report, and payment methods report
+  - AliPay and WeChat use reference number field (like other non-cash methods)
+  - نواقص shows in red/destructive color in reports for visibility
+- **January 2026**: System Backup and Restore Feature with progress tracking
+
 ## External Dependencies
 - **Replit Auth**: For user authentication and session management (OpenID Connect).
 - **Neon**: Managed PostgreSQL database service.

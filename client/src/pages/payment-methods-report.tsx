@@ -38,6 +38,9 @@ const methodIcons: Record<string, React.ComponentType<{ className?: string }>> =
   "فودافون كاش": Smartphone,
   "إنستاباي": Smartphone,
   "تحويل بنكي": Building2,
+  "نواقص": CircleDollarSign,
+  "AliPay": Smartphone,
+  "WeChat": Smartphone,
   "أخرى": CircleDollarSign,
 };
 
@@ -46,6 +49,9 @@ const methodColors: Record<string, string> = {
   "فودافون كاش": "hsl(var(--chart-2))",
   "إنستاباي": "hsl(var(--chart-3))",
   "تحويل بنكي": "hsl(var(--chart-4))",
+  "نواقص": "hsl(var(--destructive))",
+  "AliPay": "hsl(210 100% 50%)",
+  "WeChat": "hsl(120 50% 45%)",
   "أخرى": "hsl(var(--chart-5))",
 };
 

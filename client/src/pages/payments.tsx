@@ -116,6 +116,9 @@ const PAYMENT_METHODS = [
   { value: "فودافون كاش", label: "فودافون كاش" },
   { value: "إنستاباي", label: "إنستاباي" },
   { value: "تحويل بنكي", label: "تحويل بنكي" },
+  { value: "نواقص", label: "نواقص" },
+  { value: "AliPay", label: "AliPay" },
+  { value: "WeChat", label: "WeChat" },
   { value: "أخرى", label: "أخرى" },
 ];
 
