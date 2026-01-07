@@ -1836,7 +1836,38 @@ export async function registerRoutes(
       });
     }
 
-    const relativePath = payment.attachmentUrl.replace(/^\/+/, "");
+    const attachmentUrl = payment.attachmentUrl;
+    const disposition = options.inline ? "inline" : "attachment";
+    const filename = payment.attachmentOriginalName || "attachment";
+
+    // Check if attachment is in Object Storage (persistent)
+    if (attachmentUrl.startsWith("/objects/")) {
+      try {
+        const objectFile = await objectStorageService.getObjectEntityFile(attachmentUrl);
+        res.setHeader("Content-Type", payment.attachmentMimeType || "application/octet-stream");
+        res.setHeader("Content-Disposition", `${disposition}; filename="${filename}"`);
+        return await objectStorageService.downloadObject(objectFile, res);
+      } catch (error: any) {
+        console.error("Error serving payment attachment from Object Storage:", error);
+        if (error?.name === "ObjectNotFoundError") {
+          return res.status(404).json({
+            error: {
+              code: "PAYMENT_ATTACHMENT_MISSING",
+              message: "الملف غير موجود في التخزين.",
+            },
+          });
+        }
+        return res.status(500).json({
+          error: {
+            code: "PAYMENT_ATTACHMENT_ERROR",
+            message: "خطأ في قراءة المرفق.",
+          },
+        });
+      }
+    }
+
+    // Fallback to local file system (legacy uploads)
+    const relativePath = attachmentUrl.replace(/^\/+/, "");
     const absolutePath = path.resolve(process.cwd(), relativePath);
     const uploadsRoot = path.resolve(process.cwd(), "uploads");
     if (!absolutePath.startsWith(uploadsRoot)) {
@@ -1857,8 +1888,6 @@ export async function registerRoutes(
       });
     }
 
-    const disposition = options.inline ? "inline" : "attachment";
-    const filename = payment.attachmentOriginalName || path.basename(absolutePath);
     res.setHeader("Content-Type", payment.attachmentMimeType || "application/octet-stream");
     res.setHeader("Content-Disposition", `${disposition}; filename="${filename}"`);
     return res.sendFile(absolutePath);
