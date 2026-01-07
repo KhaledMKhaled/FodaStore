@@ -8,8 +8,8 @@ packages = ["postgresql_16"]
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["npm", "run", "build"]
-run = ["node", "./dist/index.cjs"]
+build = ["bash", "-c", "npm run db:push && npm run build"]
+run = ["npm", "run", "start"]
 
 [[ports]]
 localPort = 5000
