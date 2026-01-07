@@ -6,6 +6,7 @@ import { normalizePaymentAmounts } from "./services/currency";
 import { logAuditEvent } from "./audit";
 import { getPaymentsWithShipments } from "./payments";
 import { createShipmentWithItems, updateShipmentWithItems, updateMissingPieces } from "./shipmentService";
+import { startBackup, startRestore, getBackupJobs, getBackupJob } from "./backupService";
 import { ApiError, formatError, success } from "./errors";
 import type { User } from "@shared/schema";
 import {
@@ -2268,6 +2269,111 @@ export async function registerRoutes(
       res.json({ success: true, message: "تم تغيير كلمة المرور بنجاح" });
     } catch (error) {
       res.status(500).json({ message: "Error changing password" });
+    }
+  });
+
+  // Backup/Restore Routes (Admin only)
+  app.get("/api/backup/jobs", requireRole(["مدير"]), async (_req, res) => {
+    try {
+      const jobs = await getBackupJobs();
+      res.json(jobs);
+    } catch (error) {
+      console.error("Error fetching backup jobs:", error);
+      res.status(500).json({ message: "فشل في جلب قائمة النسخ الاحتياطية" });
+    }
+  });
+
+  app.get("/api/backup/jobs/:id", requireRole(["مدير"]), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "معرف غير صالح" });
+      }
+      const job = await getBackupJob(id);
+      if (!job) {
+        return res.status(404).json({ message: "لم يتم العثور على الوظيفة" });
+      }
+      res.json(job);
+    } catch (error) {
+      console.error("Error fetching backup job:", error);
+      res.status(500).json({ message: "فشل في جلب تفاصيل الوظيفة" });
+    }
+  });
+
+  app.post("/api/backup/start", requireRole(["مدير"]), async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const job = await startBackup(userId);
+      
+      auditLogger({
+        userId,
+        entityType: "BACKUP",
+        entityId: job.id.toString(),
+        actionType: "CREATE",
+        details: { action: "START_BACKUP" },
+      });
+      
+      res.json(job);
+    } catch (error) {
+      console.error("Error starting backup:", error);
+      res.status(500).json({ message: "فشل في بدء النسخ الاحتياطي" });
+    }
+  });
+
+  app.post("/api/restore/start", requireRole(["مدير"]), async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const { backupPath } = req.body;
+      
+      if (!backupPath) {
+        return res.status(400).json({ message: "مسار النسخة الاحتياطية مطلوب" });
+      }
+      
+      const job = await startRestore(userId, backupPath);
+      
+      auditLogger({
+        userId,
+        entityType: "BACKUP",
+        entityId: job.id.toString(),
+        actionType: "CREATE",
+        details: { action: "START_RESTORE", backupPath },
+      });
+      
+      res.json(job);
+    } catch (error) {
+      console.error("Error starting restore:", error);
+      res.status(500).json({ message: "فشل في بدء الاستعادة" });
+    }
+  });
+
+  app.get("/api/backup/download/:id", requireRole(["مدير"]), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "معرف غير صالح" });
+      }
+      
+      const job = await getBackupJob(id);
+      if (!job || job.jobType !== "backup" || job.status !== "completed" || !job.outputPath) {
+        return res.status(404).json({ message: "النسخة الاحتياطية غير متوفرة" });
+      }
+      
+      const objectStorage = new ObjectStorageService();
+      const objectPath = job.outputPath.replace("/objects/", "");
+      const buffer = await objectStorage.downloadObjectToBuffer(objectPath);
+      
+      if (!buffer) {
+        return res.status(404).json({ message: "ملف النسخة الاحتياطية غير موجود" });
+      }
+      
+      const filename = `backup-${job.id}-${new Date(job.createdAt).toISOString().split("T")[0]}.zip`;
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error) {
+      console.error("Error downloading backup:", error);
+      res.status(500).json({ message: "فشل في تحميل النسخة الاحتياطية" });
     }
   });
 }
