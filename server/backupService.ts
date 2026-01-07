@@ -1,0 +1,296 @@
+import { exec } from "child_process";
+import { promisify } from "util";
+import archiver from "archiver";
+import AdmZip from "adm-zip";
+import { PassThrough } from "stream";
+import { eq, desc } from "drizzle-orm";
+import { db } from "./db";
+import { backupJobs, type BackupJob, type InsertBackupJob } from "@shared/schema";
+import { ObjectStorageService } from "./replit_integrations/object_storage/objectStorage";
+
+const execAsync = promisify(exec);
+
+const PG_DUMP_PATH = "/nix/store/r8ivqqhsp8v042nhw5sap9kz2g6ar4v1-postgresql-16.9/bin/pg_dump";
+const PSQL_PATH = "/nix/store/r8ivqqhsp8v042nhw5sap9kz6ar4v1-postgresql-16.9/bin/psql";
+
+const objectStorage = new ObjectStorageService();
+
+interface BackupManifest {
+  version: string;
+  createdAt: string;
+  databaseStats: {
+    tables: number;
+    size: string;
+  };
+  mediaFiles: {
+    count: number;
+    totalSize: number;
+  };
+  files: string[];
+}
+
+async function updateJobProgress(jobId: number, progress: number): Promise<void> {
+  await db.update(backupJobs).set({ progress }).where(eq(backupJobs.id, jobId));
+}
+
+async function updateJobStatus(
+  jobId: number,
+  status: string,
+  extras: Partial<{ outputPath: string; fileSize: number; error: string; manifest: unknown; completedAt: Date }>
+): Promise<void> {
+  await db.update(backupJobs).set({ status, ...extras }).where(eq(backupJobs.id, jobId));
+}
+
+async function createBackupJob(userId: string, jobType: "backup" | "restore"): Promise<BackupJob> {
+  const [job] = await db
+    .insert(backupJobs)
+    .values({
+      jobType,
+      status: "running",
+      progress: 0,
+      createdByUserId: userId,
+    } as InsertBackupJob)
+    .returning();
+  return job;
+}
+
+async function runPgDump(): Promise<string> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL environment variable is not set");
+  }
+  const { stdout } = await execAsync(`${PG_DUMP_PATH} "${databaseUrl}" --format=plain --no-owner --no-acl`);
+  return stdout;
+}
+
+async function runPsqlRestore(sqlContent: string): Promise<void> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL environment variable is not set");
+  }
+  const escapedSql = sqlContent.replace(/'/g, "'\\''");
+  await execAsync(`echo '${escapedSql}' | ${PSQL_PATH} "${databaseUrl}"`);
+}
+
+async function getDatabaseStats(): Promise<{ tables: number; size: string }> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    return { tables: 0, size: "0 bytes" };
+  }
+  try {
+    const { stdout: tableCountResult } = await execAsync(
+      `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'"`
+    );
+    const { stdout: sizeResult } = await execAsync(
+      `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT pg_size_pretty(pg_database_size(current_database()))"`
+    );
+    return {
+      tables: parseInt(tableCountResult.trim(), 10) || 0,
+      size: sizeResult.trim() || "0 bytes",
+    };
+  } catch {
+    return { tables: 0, size: "0 bytes" };
+  }
+}
+
+export async function startBackup(userId: string): Promise<BackupJob> {
+  const job = await createBackupJob(userId, "backup");
+
+  (async () => {
+    try {
+      await updateJobProgress(job.id, 5);
+
+      const sqlDump = await runPgDump();
+      await updateJobProgress(job.id, 25);
+
+      const databaseStats = await getDatabaseStats();
+      await updateJobProgress(job.id, 30);
+
+      let mediaObjects: Array<{ path: string; size: number; contentType: string }> = [];
+      try {
+        mediaObjects = await objectStorage.listAllObjects();
+      } catch (err) {
+        console.warn("Could not list media objects:", err);
+      }
+      await updateJobProgress(job.id, 35);
+
+      const mediaBuffers: Map<string, { buffer: Buffer; contentType: string }> = new Map();
+      const totalMedia = mediaObjects.length;
+      let downloadedCount = 0;
+
+      for (const obj of mediaObjects) {
+        try {
+          const buffer = await objectStorage.downloadObjectToBuffer(`/${obj.path}`);
+          mediaBuffers.set(obj.path, { buffer, contentType: obj.contentType });
+        } catch (err) {
+          console.warn(`Could not download ${obj.path}:`, err);
+        }
+        downloadedCount++;
+        const downloadProgress = 35 + Math.floor((downloadedCount / Math.max(totalMedia, 1)) * 30);
+        await updateJobProgress(job.id, downloadProgress);
+      }
+
+      const manifest: BackupManifest = {
+        version: "1.0.0",
+        createdAt: new Date().toISOString(),
+        databaseStats,
+        mediaFiles: {
+          count: mediaBuffers.size,
+          totalSize: Array.from(mediaBuffers.values()).reduce((sum, m) => sum + m.buffer.length, 0),
+        },
+        files: ["database.sql", "manifest.json", ...Array.from(mediaBuffers.keys()).map((p) => `media/${p}`)],
+      };
+
+      await updateJobProgress(job.id, 70);
+
+      const zipBuffer = await new Promise<Buffer>((resolve, reject) => {
+        const passthrough = new PassThrough();
+        const chunks: Buffer[] = [];
+
+        passthrough.on("data", (chunk) => chunks.push(chunk));
+        passthrough.on("end", () => resolve(Buffer.concat(chunks)));
+        passthrough.on("error", reject);
+
+        const archive = archiver("zip", { zlib: { level: 9 } });
+        archive.on("error", reject);
+        archive.pipe(passthrough);
+
+        archive.append(sqlDump, { name: "database.sql" });
+        archive.append(JSON.stringify(manifest, null, 2), { name: "manifest.json" });
+
+        Array.from(mediaBuffers.entries()).forEach(([path, { buffer }]) => {
+          archive.append(buffer, { name: `media/${path}` });
+        });
+
+        archive.finalize();
+      });
+
+      await updateJobProgress(job.id, 85);
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const { bucketName } = objectStorage.getBucketAndPrefix();
+      const backupPath = `/${bucketName}/backups/${timestamp}.zip`;
+
+      await objectStorage.uploadObjectFromBuffer(backupPath, zipBuffer, "application/zip");
+
+      await updateJobProgress(job.id, 95);
+
+      await updateJobStatus(job.id, "completed", {
+        outputPath: backupPath,
+        fileSize: zipBuffer.length,
+        manifest: manifest as unknown,
+        completedAt: new Date(),
+      });
+
+      await updateJobProgress(job.id, 100);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error("Backup failed:", errorMessage);
+      await updateJobStatus(job.id, "failed", {
+        error: errorMessage,
+        completedAt: new Date(),
+      });
+    }
+  })();
+
+  return job;
+}
+
+export async function startRestore(userId: string, backupPath: string): Promise<BackupJob> {
+  const job = await createBackupJob(userId, "restore");
+
+  (async () => {
+    try {
+      await updateJobProgress(job.id, 5);
+
+      const zipBuffer = await objectStorage.downloadObjectToBuffer(backupPath);
+      await updateJobProgress(job.id, 20);
+
+      const zip = new AdmZip(zipBuffer);
+      const zipEntries = zip.getEntries();
+
+      const manifestEntry = zipEntries.find((e) => e.entryName === "manifest.json");
+      if (!manifestEntry) {
+        throw new Error("Invalid backup: manifest.json not found");
+      }
+
+      const manifest: BackupManifest = JSON.parse(manifestEntry.getData().toString("utf-8"));
+      await updateJobProgress(job.id, 25);
+
+      const databaseEntry = zipEntries.find((e) => e.entryName === "database.sql");
+      if (!databaseEntry) {
+        throw new Error("Invalid backup: database.sql not found");
+      }
+
+      const sqlContent = databaseEntry.getData().toString("utf-8");
+      await runPsqlRestore(sqlContent);
+      await updateJobProgress(job.id, 50);
+
+      const mediaEntries = zipEntries.filter((e) => e.entryName.startsWith("media/") && !e.isDirectory);
+      const totalMedia = mediaEntries.length;
+      let restoredCount = 0;
+
+      const { bucketName, prefix } = objectStorage.getBucketAndPrefix();
+
+      for (const entry of mediaEntries) {
+        try {
+          const relativePath = entry.entryName.replace(/^media\//, "");
+          const buffer = entry.getData();
+          const uploadPath = `/${bucketName}/${prefix}/${relativePath}`;
+          const contentType = getContentType(relativePath);
+          await objectStorage.uploadObjectFromBuffer(uploadPath, buffer, contentType);
+        } catch (err) {
+          console.warn(`Could not restore ${entry.entryName}:`, err);
+        }
+        restoredCount++;
+        const restoreProgress = 50 + Math.floor((restoredCount / Math.max(totalMedia, 1)) * 45);
+        await updateJobProgress(job.id, restoreProgress);
+      }
+
+      await updateJobStatus(job.id, "completed", {
+        manifest: manifest as unknown,
+        completedAt: new Date(),
+      });
+
+      await updateJobProgress(job.id, 100);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error("Restore failed:", errorMessage);
+      await updateJobStatus(job.id, "failed", {
+        error: errorMessage,
+        completedAt: new Date(),
+      });
+    }
+  })();
+
+  return job;
+}
+
+export async function getBackupJobs(): Promise<BackupJob[]> {
+  return db.select().from(backupJobs).orderBy(desc(backupJobs.createdAt));
+}
+
+export async function getBackupJob(id: number): Promise<BackupJob | undefined> {
+  const [job] = await db.select().from(backupJobs).where(eq(backupJobs.id, id));
+  return job;
+}
+
+function getContentType(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    pdf: "application/pdf",
+    json: "application/json",
+    txt: "text/plain",
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+  };
+  return mimeTypes[ext || ""] || "application/octet-stream";
+}
