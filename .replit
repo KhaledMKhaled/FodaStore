@@ -8,7 +8,7 @@ packages = ["postgresql_16"]
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["bash", "-c", "npm install && npm run db:push && npm run build"]
+build = ["sh", "-c", "npm install && npm run db:push && npm run build"]
 run = ["npm", "run", "start"]
 
 [[ports]]
