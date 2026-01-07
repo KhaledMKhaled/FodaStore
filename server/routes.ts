@@ -1866,11 +1866,14 @@ export async function registerRoutes(
     const attachmentUrl = payment.attachmentUrl;
     const disposition = options.inline ? "inline" : "attachment";
     const filename = payment.attachmentOriginalName || "attachment";
+    console.log(`[Attachment] Serving payment ${paymentId}, path: ${attachmentUrl}`);
 
     // Check if attachment is in Object Storage (persistent)
     if (attachmentUrl.startsWith("/objects/")) {
       try {
+        console.log(`[Attachment] Fetching from Object Storage: ${attachmentUrl}`);
         const objectFile = await objectStorageService.getObjectEntityFile(attachmentUrl);
+        console.log(`[Attachment] File found: ${objectFile.name}`);
         res.setHeader("Content-Type", payment.attachmentMimeType || "application/octet-stream");
         res.setHeader("Content-Disposition", `${disposition}; filename="${filename}"`);
         return await objectStorageService.downloadObject(objectFile, res);
