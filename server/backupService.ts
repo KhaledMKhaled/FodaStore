@@ -11,7 +11,7 @@ import { ObjectStorageService } from "./replit_integrations/object_storage/objec
 const execAsync = promisify(exec);
 
 const PG_DUMP_PATH = "/nix/store/r8ivqqhsp8v042nhw5sap9kz2g6ar4v1-postgresql-16.9/bin/pg_dump";
-const PSQL_PATH = "/nix/store/r8ivqqhsp8v042nhw5sap9kz6ar4v1-postgresql-16.9/bin/psql";
+const PSQL_PATH = "/nix/store/r8ivqqhsp8v042nhw5sap9kz2g6ar4v1-postgresql-16.9/bin/psql";
 
 const objectStorage = new ObjectStorageService();
 
