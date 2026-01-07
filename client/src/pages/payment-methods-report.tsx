@@ -35,7 +35,7 @@ interface PaymentMethodData {
 
 const methodIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   "نقدي": Banknote,
-  "فودافون كاش": Smartphone,
+  "محفظة الكترونية": Smartphone,
   "إنستاباي": Smartphone,
   "تحويل بنكي": Building2,
   "نواقص": CircleDollarSign,
@@ -46,7 +46,7 @@ const methodIcons: Record<string, React.ComponentType<{ className?: string }>> =
 
 const methodColors: Record<string, string> = {
   "نقدي": "hsl(var(--chart-1))",
-  "فودافون كاش": "hsl(var(--chart-2))",
+  "محفظة الكترونية": "hsl(var(--chart-2))",
   "إنستاباي": "hsl(var(--chart-3))",
   "تحويل بنكي": "hsl(var(--chart-4))",
   "نواقص": "hsl(var(--destructive))",

@@ -86,7 +86,7 @@ const costComponents = [
 const paymentMethods = [
   { value: "all", label: "الكل" },
   { value: "نقدي", label: "نقدي" },
-  { value: "فودافون كاش", label: "فودافون كاش" },
+  { value: "محفظة الكترونية", label: "محفظة الكترونية" },
   { value: "إنستاباي", label: "إنستاباي" },
   { value: "تحويل بنكي", label: "تحويل بنكي" },
   { value: "نواقص", label: "نواقص" },
