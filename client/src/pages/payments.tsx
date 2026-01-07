@@ -912,6 +912,9 @@ export default function Payments() {
       }
     }
 
+    // Only send autoAllocate if it's enabled AND eligible
+    const shouldAutoAllocate = autoAllocate && canAutoAllocate;
+
     const payload = buildPaymentFormData({
       selectedShipmentId,
       partyType,
@@ -926,7 +929,7 @@ export default function Payments() {
       cashReceiverName: data.cashReceiverName || "",
       referenceNumber: data.referenceNumber || "",
       note: data.note || "",
-      autoAllocate,
+      autoAllocate: shouldAutoAllocate,
       attachmentUrl: attachmentInfo?.attachmentUrl || null,
       attachmentOriginalName: attachmentInfo?.attachmentOriginalName || null,
       attachmentMimeType: attachmentInfo?.attachmentMimeType || null,
