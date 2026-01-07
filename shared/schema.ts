@@ -242,6 +242,21 @@ export const inventoryMovements = pgTable("inventory_movements", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Backup Jobs table (وظائف النسخ الاحتياطي)
+export const backupJobs = pgTable("backup_jobs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  jobType: varchar("job_type", { length: 20 }).notNull(), // 'backup' | 'restore'
+  status: varchar("status", { length: 20 }).notNull().default("pending"), // 'pending' | 'running' | 'completed' | 'failed'
+  progress: integer("progress").default(0), // 0-100
+  outputPath: varchar("output_path", { length: 500 }),
+  fileSize: integer("file_size"),
+  error: text("error"),
+  manifest: jsonb("manifest"),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
 // Audit Logs table (سجل التغييرات)
 export const auditLogs = pgTable("audit_logs", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -386,6 +401,13 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   }),
 }));
 
+export const backupJobsRelations = relations(backupJobs, ({ one }) => ({
+  createdBy: one(users, {
+    fields: [backupJobs.createdByUserId],
+    references: [users.id],
+  }),
+}));
+
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users).omit({ createdAt: true, updatedAt: true });
 export const insertSupplierSchema = createInsertSchema(suppliers).omit({ createdAt: true, updatedAt: true });
@@ -404,6 +426,7 @@ export const insertShipmentPaymentSchema = createInsertSchema(shipmentPayments).
 export const insertPaymentAllocationSchema = createInsertSchema(paymentAllocations).omit({ createdAt: true });
 export const insertInventoryMovementSchema = createInsertSchema(inventoryMovements).omit({ createdAt: true });
 export const insertAuditLogSchema = createInsertSchema(auditLogs);
+export const insertBackupJobSchema = createInsertSchema(backupJobs).omit({ createdAt: true });
 
 // Types
 export type UpsertUser = typeof users.$inferInsert;
@@ -434,3 +457,5 @@ export type InsertInventoryMovement = z.infer<typeof insertInventoryMovementSche
 export type InventoryMovement = typeof inventoryMovements.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertBackupJob = z.infer<typeof insertBackupJobSchema>;
+export type BackupJob = typeof backupJobs.$inferSelect;
