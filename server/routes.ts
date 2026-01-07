@@ -104,6 +104,9 @@ async function buildPartyPaymentSummary(
       return sum + parseAmountOrZero(item.totalPurchaseCostRmb);
     }, 0);
 
+    // Use shipment's exchange rate as fallback for EGP payments without their own rate
+    const shipmentRate = parseAmountOrZero(shipment.purchaseRmbToEgpRate || "7");
+
     const supplierDirectPaidRmb = payments.reduce((sum, payment) => {
       if (
         payment.partyType !== "supplier" ||
@@ -117,8 +120,11 @@ async function buildPartyPaymentSummary(
         return sum + parseAmountOrZero(payment.amountOriginal);
       }
 
-      if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
-        const rate = parseAmountOrZero(payment.exchangeRateToEgp);
+      if (payment.paymentCurrency === "EGP") {
+        // Use payment's own rate, or fallback to shipment's rate
+        const rate = payment.exchangeRateToEgp 
+          ? parseAmountOrZero(payment.exchangeRateToEgp) 
+          : shipmentRate;
         if (rate > 0) {
           return sum + parseAmountOrZero(payment.amountEgp) / rate;
         }
@@ -157,6 +163,9 @@ async function buildPartyPaymentSummary(
 
     totalAllowed = componentTotals[component] ?? 0;
 
+    // Use shipment's exchange rate as fallback for EGP payments without their own rate
+    const shippingShipmentRate = parseAmountOrZero(shipment.purchaseRmbToEgpRate || "7");
+
     paidSoFar = payments.reduce((sum, payment) => {
       if (
         payment.partyType !== "shipping_company" ||
@@ -170,8 +179,11 @@ async function buildPartyPaymentSummary(
         if (payment.paymentCurrency === "RMB") {
           return sum + parseAmountOrZero(payment.amountOriginal);
         }
-        if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
-          const rate = parseAmountOrZero(payment.exchangeRateToEgp);
+        if (payment.paymentCurrency === "EGP") {
+          // Use payment's own rate, or fallback to shipment's rate
+          const rate = payment.exchangeRateToEgp 
+            ? parseAmountOrZero(payment.exchangeRateToEgp) 
+            : shippingShipmentRate;
           if (rate > 0) {
             return sum + parseAmountOrZero(payment.amountEgp) / rate;
           }
@@ -489,13 +501,19 @@ export function createPaymentHandler(deps: CreatePaymentHandlerDeps): RequestHan
           });
         }
 
+        // Get shipment for fallback rate when paying EGP for RMB component
+        const shipmentForRate = await deps.storage.getShipment(parsedShipmentId);
+        const fallbackRate = parseAmountOrZero(shipmentForRate?.purchaseRmbToEgpRate || "7");
+
         const amountInComponentCurrency =
           summary.currency === "RMB"
             ? paymentCurrency === "RMB"
               ? originalAmount
-              : normalizedAmounts.exchangeRateToEgp
-                ? normalizedAmounts.amountEgp / normalizedAmounts.exchangeRateToEgp
-                : 0
+              : (() => {
+                  // For EGP payment to RMB component, use payment's rate or shipment's rate
+                  const rate = normalizedAmounts.exchangeRateToEgp || fallbackRate;
+                  return rate > 0 ? normalizedAmounts.amountEgp / rate : 0;
+                })()
             : normalizedAmounts.amountEgp;
 
         if (amountInComponentCurrency > summary.remainingBefore + 0.0001) {
@@ -1270,6 +1288,9 @@ export async function registerRoutes(
       // Calculate paid amounts per component
       // For RMB components: sum by amountOriginal (in RMB) when payment is RMB
       // For EGP components: sum by amountEgp when payment is in EGP
+      // Use shipment's exchange rate as fallback for EGP payments without their own rate
+      const summaryShipmentRate = parseAmountOrZero(shipment.purchaseRmbToEgpRate || "7");
+      
       payments?.forEach(payment => {
         const costComp = payment.costComponent;
         if (!paidByComponent[costComp]) {
@@ -1284,10 +1305,15 @@ export async function registerRoutes(
         if (costComp === "تكلفة البضاعة" || costComp === "الشحن" || costComp === "العمولة") {
           if (payment.paymentCurrency === "RMB") {
             paidByComponentRmb[costComp] += parseAmountOrZero(payment.amountOriginal);
-          } else if (payment.paymentCurrency === "EGP" && payment.exchangeRateToEgp) {
-            // Convert EGP back to RMB
-            const rmbAmount = parseAmountOrZero(payment.amountEgp) / parseAmountOrZero(payment.exchangeRateToEgp);
-            paidByComponentRmb[costComp] += rmbAmount;
+          } else if (payment.paymentCurrency === "EGP") {
+            // Convert EGP back to RMB using payment's rate or shipment's rate as fallback
+            const rate = payment.exchangeRateToEgp 
+              ? parseAmountOrZero(payment.exchangeRateToEgp) 
+              : summaryShipmentRate;
+            if (rate > 0) {
+              const rmbAmount = parseAmountOrZero(payment.amountEgp) / rate;
+              paidByComponentRmb[costComp] += rmbAmount;
+            }
           }
         }
       });
