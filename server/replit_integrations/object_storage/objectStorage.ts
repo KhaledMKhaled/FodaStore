@@ -237,6 +237,53 @@ export class ObjectStorageService {
       requestedPermission: requestedPermission ?? ObjectPermission.READ,
     });
   }
+
+  // Helper method to get the bucket name and prefix from PRIVATE_OBJECT_DIR.
+  getBucketAndPrefix(): { bucketName: string; prefix: string } {
+    const privateDir = this.getPrivateObjectDir();
+    const { bucketName, objectName } = parseObjectPath(privateDir);
+    return { bucketName, prefix: objectName };
+  }
+
+  // List all objects in the private object directory.
+  async listAllObjects(prefix?: string): Promise<Array<{ path: string; size: number; contentType: string }>> {
+    const { bucketName, prefix: basePrefix } = this.getBucketAndPrefix();
+    const bucket = objectStorageClient.bucket(bucketName);
+    const fullPrefix = prefix ? `${basePrefix}/${prefix}` : basePrefix;
+
+    const [files] = await bucket.getFiles({ prefix: fullPrefix });
+    return files.map((file) => ({
+      path: file.name,
+      size: Number(file.metadata.size || 0),
+      contentType: file.metadata.contentType || "application/octet-stream",
+    }));
+  }
+
+  // Download an object and return its contents as a Buffer.
+  async downloadObjectToBuffer(objectPath: string): Promise<Buffer> {
+    const { bucketName, objectName } = parseObjectPath(objectPath);
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    const [exists] = await file.exists();
+    if (!exists) {
+      throw new ObjectNotFoundError();
+    }
+    const [buffer] = await file.download();
+    return buffer;
+  }
+
+  // Upload a buffer as an object to the specified path.
+  async uploadObjectFromBuffer(
+    objectPath: string,
+    buffer: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    const { bucketName, objectName } = parseObjectPath(objectPath);
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    await file.save(buffer, {
+      contentType,
+      resumable: false,
+    });
+  }
 }
 
 function parseObjectPath(path: string): {
