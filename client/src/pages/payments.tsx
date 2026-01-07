@@ -2172,35 +2172,97 @@ export default function Payments() {
                                 <TableRow key={`${shipment.id}-details`}>
                                   <TableCell colSpan={8} className="bg-muted/30 p-4">
                                     {shipmentPayments.length > 0 ? (
-                                      <div className="grid gap-3">
-                                        {shipmentPayments.map((payment) => (
+                                      <div className="grid gap-2">
+                                        {shipmentPayments.map((payment) => {
+                                          const supplierName = payment.partyType === "supplier" && payment.partyId 
+                                            ? suppliers?.find(s => s.id === payment.partyId)?.name 
+                                            : null;
+                                          const shippingCompanyName = payment.partyType === "shipping_company" && payment.partyId 
+                                            ? shippingCompanies?.find(c => c.id === payment.partyId)?.name 
+                                            : null;
+                                          const hasPartyInfo = supplierName || shippingCompanyName || payment.cashReceiverName;
+                                          
+                                          return (
                                           <div
                                             key={payment.id}
-                                            className="border rounded-md bg-background text-sm"
+                                            className="border rounded-md bg-background text-sm p-2"
                                             data-testid={`payment-card-${payment.id}`}
                                           >
-                                            {/* Header with amount and actions */}
-                                            <div className="flex items-center justify-between gap-4 p-3 border-b bg-muted/20">
-                                              <div className="flex items-center gap-3">
-                                                <div className="flex items-center gap-2 text-lg font-bold">
-                                                  <span className="text-muted-foreground text-sm">
+                                            <div className="flex items-start justify-between gap-2">
+                                              {/* Main content */}
+                                              <div className="flex-1 min-w-0">
+                                                {/* First row: Amount, Method, Component, Date */}
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                  <span className="font-bold font-mono text-base">
                                                     {payment.paymentCurrency === "RMB" ? "¥" : "ج.م"}
-                                                  </span>
-                                                  <span className="font-mono">
                                                     {payment.paymentCurrency === "RMB" 
                                                       ? formatCurrency(payment.amountOriginal)
                                                       : formatCurrency(payment.amountEgp)
                                                     }
                                                   </span>
+                                                  {payment.paymentCurrency === "RMB" && (
+                                                    <span className="text-xs text-muted-foreground">
+                                                      (ج.م {formatCurrency(payment.amountEgp)})
+                                                    </span>
+                                                  )}
+                                                  <Badge variant="secondary" className="text-xs">
+                                                    {payment.paymentMethod}
+                                                  </Badge>
+                                                  <Badge variant="outline" className="text-xs">
+                                                    {payment.costComponent}
+                                                  </Badge>
+                                                  <span className="text-xs text-muted-foreground">
+                                                    {new Date(payment.paymentDate).toLocaleDateString("ar-EG", {
+                                                      month: "short",
+                                                      day: "numeric"
+                                                    })}
+                                                  </span>
                                                 </div>
-                                                <Badge variant="secondary">
-                                                  {payment.paymentMethod}
-                                                </Badge>
-                                                <Badge variant="outline">
-                                                  {payment.costComponent}
-                                                </Badge>
+                                                
+                                                {/* Second row: Party/Recipient info (only if exists) */}
+                                                {(hasPartyInfo || payment.referenceNumber) && (
+                                                  <div className="flex items-center gap-3 mt-1 text-xs flex-wrap">
+                                                    {supplierName && (
+                                                      <span className="flex items-center gap-1">
+                                                        <Building2 className="w-3 h-3 text-muted-foreground" />
+                                                        <span className="text-muted-foreground">المورد:</span>
+                                                        <span className="font-medium">{supplierName}</span>
+                                                      </span>
+                                                    )}
+                                                    {shippingCompanyName && (
+                                                      <span className="flex items-center gap-1">
+                                                        <Building2 className="w-3 h-3 text-muted-foreground" />
+                                                        <span className="text-muted-foreground">الشحن:</span>
+                                                        <span className="font-medium">{shippingCompanyName}</span>
+                                                      </span>
+                                                    )}
+                                                    {payment.cashReceiverName && (
+                                                      <span className="flex items-center gap-1">
+                                                        <User className="w-3 h-3 text-muted-foreground" />
+                                                        <span className="text-muted-foreground">المستلم:</span>
+                                                        <span className="font-medium">{payment.cashReceiverName}</span>
+                                                      </span>
+                                                    )}
+                                                    {payment.referenceNumber && (
+                                                      <span className="flex items-center gap-1">
+                                                        <Hash className="w-3 h-3 text-muted-foreground" />
+                                                        <span className="text-muted-foreground">المرجع:</span>
+                                                        <span className="font-mono font-medium">{payment.referenceNumber}</span>
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                )}
+                                                
+                                                {/* Third row: Notes (only if exists) */}
+                                                {payment.note && (
+                                                  <div className="mt-1 text-xs text-muted-foreground bg-muted/20 rounded px-2 py-1">
+                                                    {payment.note}
+                                                  </div>
+                                                )}
                                               </div>
-                                              <div className="flex items-center gap-2">
+                                              
+                                              {/* Actions */}
+                                              <div className="flex items-center gap-1 flex-shrink-0">
                                                 {payment.attachmentUrl && (
                                                   <PaymentAttachmentIcon
                                                     paymentId={payment.id}
@@ -2215,11 +2277,12 @@ export default function Payments() {
                                                       <Button
                                                         variant="ghost"
                                                         size="icon"
+                                                        className="h-7 w-7"
                                                         onClick={() => setPaymentToDelete(payment.id)}
                                                         disabled={deleteMutation.isPending}
                                                         data-testid={`button-delete-expanded-payment-${payment.id}`}
                                                       >
-                                                        <Trash2 className="w-4 h-4 text-destructive" />
+                                                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
                                                       </Button>
                                                     </AlertDialogTrigger>
                                                     <AlertDialogContent>
@@ -2243,85 +2306,8 @@ export default function Payments() {
                                                 )}
                                               </div>
                                             </div>
-
-                                            {/* Details grid */}
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-3">
-                                              {/* Date */}
-                                              <div className="space-y-1">
-                                                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                                                  <Calendar className="w-3 h-3" />
-                                                  التاريخ
-                                                </div>
-                                                <div className="text-sm font-medium">
-                                                  {new Date(payment.paymentDate).toLocaleDateString("ar-EG", {
-                                                    year: "numeric",
-                                                    month: "short",
-                                                    day: "numeric"
-                                                  })}
-                                                </div>
-                                              </div>
-
-                                              {/* Recipient/Party */}
-                                              <div className="space-y-1">
-                                                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                                                  <User className="w-3 h-3" />
-                                                  {payment.partyType === "supplier" ? "المورد" : 
-                                                   payment.partyType === "shipping_company" ? "شركة الشحن" : 
-                                                   payment.paymentMethod === "نقدي" ? "مستلم الكاش" : "المستفيد"}
-                                                </div>
-                                                <div className="text-sm font-medium">
-                                                  {payment.partyType === "supplier" && payment.partyId ? (
-                                                    suppliers?.find(s => s.id === payment.partyId)?.name || "مورد"
-                                                  ) : payment.partyType === "shipping_company" && payment.partyId ? (
-                                                    shippingCompanies?.find(c => c.id === payment.partyId)?.name || "شركة شحن"
-                                                  ) : payment.cashReceiverName ? (
-                                                    payment.cashReceiverName
-                                                  ) : (
-                                                    <span className="text-muted-foreground">-</span>
-                                                  )}
-                                                </div>
-                                              </div>
-
-                                              {/* Reference Number (if exists) */}
-                                              {payment.referenceNumber && (
-                                                <div className="space-y-1">
-                                                  <div className="text-xs text-muted-foreground flex items-center gap-1">
-                                                    <Hash className="w-3 h-3" />
-                                                    الرقم المرجعي
-                                                  </div>
-                                                  <div className="text-sm font-mono font-medium">
-                                                    {payment.referenceNumber}
-                                                  </div>
-                                                </div>
-                                              )}
-
-                                              {/* EGP Equivalent (if RMB) */}
-                                              {payment.paymentCurrency === "RMB" && (
-                                                <div className="space-y-1">
-                                                  <div className="text-xs text-muted-foreground">
-                                                    المعادل بالجنيه
-                                                  </div>
-                                                  <div className="text-sm font-medium text-muted-foreground">
-                                                    ج.م {formatCurrency(payment.amountEgp)}
-                                                  </div>
-                                                </div>
-                                              )}
-                                            </div>
-
-                                            {/* Notes section (if exists) */}
-                                            {payment.note && (
-                                              <div className="px-3 pb-3">
-                                                <div className="bg-muted/30 rounded-md p-2">
-                                                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                                                    <FileText className="w-3 h-3" />
-                                                    ملاحظات
-                                                  </div>
-                                                  <div className="text-sm">{payment.note}</div>
-                                                </div>
-                                              </div>
-                                            )}
                                           </div>
-                                        ))}
+                                        )})}
                                       </div>
                                     ) : (
                                       <div className="text-sm text-muted-foreground text-center py-2">
