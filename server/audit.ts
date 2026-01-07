@@ -7,7 +7,8 @@ export type AuditEntityType =
   | "PAYMENT"
   | "EXCHANGE_RATE"
   | "USER"
-  | "SHIPPING_COMPANY";
+  | "SHIPPING_COMPANY"
+  | "BACKUP";
 
 interface AuditEvent {
   userId?: string | null;

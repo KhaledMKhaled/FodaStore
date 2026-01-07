@@ -30,6 +30,7 @@ const MovementReportPage = lazy(() => import("@/pages/movement-report"));
 const PaymentMethodsReportPage = lazy(
   () => import("@/pages/payment-methods-report"),
 );
+const BackupPage = lazy(() => import("@/pages/backup"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 function AuthenticatedRouter() {
@@ -53,6 +54,7 @@ function AuthenticatedRouter() {
         <Route path="/shipping-company-balances" component={ShippingCompanyBalancesPage} />
         <Route path="/movement-report" component={MovementReportPage} />
         <Route path="/payment-methods-report" component={PaymentMethodsReportPage} />
+        <Route path="/backup" component={BackupPage} />
         <Route component={NotFound} />
       </Switch>
     </Suspense>

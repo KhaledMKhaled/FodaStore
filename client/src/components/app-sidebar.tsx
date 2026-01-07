@@ -12,6 +12,7 @@ import {
   Banknote,
   Tag,
   Truck,
+  Database,
 } from "lucide-react";
 import {
   Sidebar,
@@ -127,6 +128,12 @@ const adminItems = [
     url: "/users",
     icon: Shield,
     tooltip: "إدارة حسابات المستخدمين والصلاحيات",
+  },
+  {
+    title: "النسخ الاحتياطي",
+    url: "/backup",
+    icon: Database,
+    tooltip: "إنشاء واستعادة النسخ الاحتياطية",
   },
 ];
 
