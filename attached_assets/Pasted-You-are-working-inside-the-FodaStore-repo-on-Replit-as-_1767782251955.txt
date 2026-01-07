@@ -1,0 +1,256 @@
+You are working inside the FodaStore repo on Replit as a senior backend engineer + security engineer + QA.
+
+TASK: Implement a FULL “System Backup / Restore” feature that:
+- Creates ONE external downloadable file (ZIP) containing:
+  1) Full Postgres database backup (schema + data)
+  2) All uploaded media from Object Storage (item images etc.)
+  3) manifest.json + checksums
+- Restores the entire system from the uploaded ZIP file, returning the app to the exact previous state.
+- Includes an end-to-end verification step that PROVES backup/restore works (data and media restored) with real evidence (counts + sample records + sample images).
+
+IMPORTANT:
+- The user wants manual external backup + manual restore (upload file), entirely from within the app UI (no need to go to Neon console).
+- Object storage type is unknown to the user, but the repo ALREADY has working upload code. You must REUSE the existing storage client/SDK/patterns in the codebase to list/download/upload objects.
+- Images are small; performance constraints are moderate but do not ignore safety.
+- This MUST be production-safe: Admin-only, secure, auditable, with guardrails.
+
+============================================================
+0) HARD REQUIREMENTS
+============================================================
+
+A) Security & Access
+- Only root/admin can access Backup/Restore UI and APIs.
+- Never expose DB credentials or storage keys to the frontend.
+- Add audit logs for:
+  - backup_started, backup_completed, backup_failed
+  - restore_started, restore_completed, restore_failed
+  - include user_id and details (timestamps, file sizes, counts).
+
+B) One File Bundle
+The backup output must be a single file:
+- foda-backup-YYYY-MM-DD_HH-mm.zip
+Containing:
+- db.dump  (preferred format: pg_dump custom format)
+- media/<object-storage-keys...> (preserve keys/paths)
+- manifest.json
+- checksums.txt
+
+C) Reliable Restore
+Restore must:
+- Put the system into “maintenance mode” (block write operations) during restore.
+- Validate the uploaded ZIP integrity (checksums).
+- Restore DB fully.
+- Restore media objects fully.
+- Exit maintenance mode only if restore completes successfully.
+
+D) Verification: must prove correctness (NOT theoretical)
+After implementation you MUST run a real verification flow:
+1) Seed or create demo data (shipments, items, payments, images).
+2) Create a backup ZIP from the UI.
+3) Mutate the system (delete or modify records + delete at least one media object).
+4) Restore from the ZIP using the UI.
+5) Verify:
+   - DB counts match pre-backup counts
+   - key sample records match exactly (e.g., one shipment with items and payments)
+   - sample images are accessible again (HTTP 200) and match expected keys
+   - app workflows still work after restore (open shipment, view item images, view payments).
+
+Provide evidence:
+- pre/post counts for critical tables
+- list of 5 sample record IDs and matching fields
+- list of 5 sample media keys and their restored status (200 OK)
+
+============================================================
+1) DISCOVERY (MANDATORY)
+============================================================
+
+1.1 Identify DB tooling availability
+- Check if pg_dump and pg_restore are available in the Replit environment.
+- If not available:
+  - Install/enable them in the Replit environment in the simplest repo-consistent way
+  - OR implement a fallback approach using Neon branch restore API ONLY IF pg_dump truly cannot be used.
+  - However the primary requirement is an external portable ZIP file; do not replace with Neon snapshots unless unavoidable.
+
+1.2 Identify existing object storage integration
+Search the repo for existing storage upload code:
+- keywords: s3, S3Client, @aws-sdk/client-s3, supabase.storage, bucket, cloudinary, upload, object storage
+You MUST:
+- reuse the same storage client patterns
+- find how object keys/URLs are generated and stored in DB (shipment items image field)
+- implement list/download/upload using the same credentials and config style (env vars)
+
+============================================================
+2) DESIGN (MANDATORY)
+============================================================
+
+2.1 New Admin UI Page (Arabic RTL)
+Add a page under admin/settings:
+- Title: "النسخ الاحتياطي والاسترجاع"
+Section A: Backup
+- Button: "إنشاء نسخة احتياطية"
+- Shows status: idle / running / completed / failed
+- Shows download link when completed: "تحميل ملف النسخة الاحتياطية"
+- Shows metadata: createdAt, fileSize, counts summary
+
+Section B: Restore
+- File upload input (accept .zip only)
+- Button: "استرجاع النسخة"
+- Strong confirm dialog:
+  - Requires typing: RESTORE
+  - Requires re-enter password (if feasible) OR at minimum requires a second confirm step
+- Shows status: idle / running / completed / failed
+- Shows restore report (counts and sample checks)
+
+2.2 Background jobs (no request timeouts)
+Backup and restore must run as server-side jobs:
+- Use a job table in DB:
+  backup_jobs(id, type, status, progress, createdBy, createdAt, completedAt, outputPath, error)
+- Or use an existing job/queue system if repo already has one.
+- Provide polling endpoint to read job status.
+
+2.3 Storage of generated ZIP
+- Store generated ZIP on server disk temporarily (safe path) and allow download via authenticated endpoint
+- Automatically delete old zip files after N hours/days (configurable) to avoid disk bloat
+
+============================================================
+3) IMPLEMENTATION DETAILS (MANDATORY)
+============================================================
+
+3.1 Backup Flow
+When admin clicks “إنشاء نسخة احتياطية”:
+A) DB Backup
+- Run: pg_dump (schema + data) into db.dump (custom format preferred)
+- Ensure consistent snapshot:
+  - If possible, use one transaction/snapshot options appropriate for Postgres
+- Record db.dump size
+
+B) Media Backup (Object Storage)
+- Determine the media scope:
+  - Prefer backing up ONLY objects referenced by DB (shipment item image keys/urls) to keep it tight
+  - OR if bucket is small, allow backing up a specific prefix used by this app (e.g., uploads/items)
+- Produce a list of object keys to fetch
+- Download objects and write to local temp dir preserving key paths under media/
+- For each file, compute SHA256
+- Write checksums.txt
+
+C) manifest.json
+Include:
+- createdAt
+- app version/commit if available
+- db dump format and size
+- list of tables counts (at least: shipments, shipment_items, payments, inventory_movements, suppliers, exchange_rates, audit_logs)
+- media objects count + total size
+- storage prefix/key strategy description
+
+D) ZIP everything into one file
+- foda-backup-....zip
+
+E) Mark job completed and provide download endpoint
+
+3.2 Restore Flow
+When admin uploads ZIP and confirms:
+A) Enter maintenance mode
+- Block writes (shipments/payments/suppliers/exchange rates/inventory updates)
+- Only allow admin to see restore progress
+
+B) Validate ZIP structure
+- Must contain db.dump, manifest.json, checksums.txt, media/
+- Validate checksums for all files present
+
+C) Restore DB
+- Use pg_restore to restore FULL DB
+- If in-place restore is used:
+  - Ensure you safely drop/recreate schema
+  - Ensure extensions required (e.g., pgcrypto) exist
+- Prefer safer approach if possible:
+  - Restore into a new schema then swap
+  - Or transactional pattern where feasible
+
+D) Restore media
+- Upload each media file to object storage with the SAME key paths as in media/<key>
+- After upload, verify by a HEAD/GET call or SDK metadata call
+- Ensure permissions/public access align with how the app serves images today
+
+E) Exit maintenance mode
+Only after both DB and media restore succeed.
+
+3.3 Error handling
+- No generic “حدث خطأ”
+- Show clear Arabic messages for admins
+- Log full details server-side
+- Ensure partial failures are detectable and reported
+
+============================================================
+4) TESTING & VERIFICATION (MANDATORY, MUST RUN)
+============================================================
+
+4.1 Automated tests (minimum)
+- Add a server-side test that:
+  - Creates a small sample dataset
+  - Runs a “backup build” function in test mode (can skip actual pg_dump if not possible in tests, but must test ZIP structure + manifest + checksums logic)
+- Add a second test for restore validation that:
+  - Validates ZIP structure and checksum failure behavior
+
+4.2 End-to-End Verification (MUST EXECUTE FOR REAL)
+You MUST perform the full flow in the running app:
+
+Step 1: Create demo data
+- Create at least 2 shipments with >=3 suppliers each
+- Add at least 5 items with images across shipments
+- Add at least 3 payments
+
+Record PRE-backup evidence:
+- counts of key tables:
+  shipments, shipment_items, payments, inventory_movements, suppliers, exchange_rates, audit_logs
+- pick 5 sample records and print their IDs + key fields
+- pick 5 sample media keys and confirm they load (200 OK)
+
+Step 2: Run Backup from UI
+- wait until completed
+- download ZIP and confirm it contains required files
+- print ZIP size and manifest summary
+
+Step 3: Mutate the system (to prove restore works)
+- Delete or modify:
+  - delete one shipment OR delete several items
+  - delete at least one payment
+- Delete at least one image object from object storage (use SDK) OR change its key reference
+- Confirm in UI that data/images are missing/broken (evidence)
+
+Step 4: Run Restore from UI with the downloaded ZIP
+- confirm restore completes
+- exit maintenance mode
+
+Step 5: Verify POST-restore evidence
+- counts match exactly the PRE-backup counts
+- the 5 sample records match their key fields
+- the 5 sample media keys load again (200 OK)
+- open shipments and confirm item images display
+- confirm payments ledger contains the deleted payment again
+
+Output a FINAL PASS/FAIL checklist (NO “not run”):
+- Backup created ZIP: __
+- ZIP contains db.dump/media/manifest/checksums: __
+- Restore completed: __
+- DB counts match: __
+- Sample records match: __
+- Media objects restored & accessible: __
+- No regressions in core workflows: __
+
+============================================================
+5) DELIVERABLES
+============================================================
+
+When done, provide:
+- key files changed
+- new routes/APIs
+- how to run backup/restore
+- what env vars are needed (without exposing secrets)
+- evidence log (pre/post counts + sample IDs + sample media checks)
+- final checklist PASS/FAIL
+
+BEGIN NOW:
+1) Discover existing upload/storage implementation and DB image fields.
+2) Implement backup job first (db.dump + media + zip + download).
+3) Implement restore job (maintenance + validate + restore DB + restore media).
+4) Execute the end-to-end verification flow with real data and provide evidence.
