@@ -729,32 +729,17 @@ export async function registerRoutes(
     }
   });
 
-  // Finalize payment attachment upload - set ACL and return final path
+  // Finalize payment attachment upload - same approach as item images
   app.post("/api/upload/payment-attachment/finalize", isAuthenticated, async (req, res) => {
     try {
       const { objectPath, originalName } = req.body;
-      console.log("[Upload] Payment Attachment Finalize - objectPath:", objectPath, "originalName:", originalName);
+      console.log("[Upload] Payment Attachment Finalize - objectPath:", objectPath);
       
       if (!objectPath) {
         return res.status(400).json({ message: "مسار الملف مطلوب" });
       }
 
-      // First verify the file exists in Object Storage before setting ACL
-      try {
-        const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
-        console.log("[Upload] Payment Attachment File verified - name:", objectFile.name);
-      } catch (verifyError: any) {
-        console.error("[Upload] Payment Attachment File not found in storage:", verifyError);
-        if (verifyError?.name === "ObjectNotFoundError") {
-          return res.status(404).json({ 
-            message: "الملف غير موجود في التخزين. تأكد من رفع الملف أولاً.",
-            code: "FILE_NOT_UPLOADED"
-          });
-        }
-        throw verifyError;
-      }
-
-      // Set public visibility for payment attachments
+      // Set public visibility for payment attachments (same as item images)
       const normalizedPath = await objectStorageService.trySetObjectEntityAclPolicy(
         objectPath,
         { owner: "system", visibility: "public" }
@@ -767,10 +752,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[Upload] Error finalizing payment attachment:", error?.message || error);
-      res.status(500).json({ 
-        message: "خطأ في حفظ المرفق",
-        details: process.env.NODE_ENV === "development" ? error?.message : undefined
-      });
+      res.status(500).json({ message: "خطأ في حفظ المرفق" });
     }
   });
 

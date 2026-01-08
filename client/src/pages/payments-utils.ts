@@ -104,6 +104,7 @@ export const buildPaymentFormData = (input: PaymentPayloadInput): FormData => {
 };
 
 // Upload attachment to Object Storage and return the URL and metadata
+// Uses the same approach as item images in shipment-wizard.tsx
 export async function uploadPaymentAttachment(file: File): Promise<{ attachmentUrl: string; attachmentOriginalName: string; attachmentMimeType: string; attachmentSize: number }> {
   // Step 1: Request presigned URL from backend
   const urlResponse = await fetch("/api/upload/payment-attachment/request-url", {
@@ -135,25 +136,16 @@ export async function uploadPaymentAttachment(file: File): Promise<{ attachmentU
     throw new Error("فشل رفع المرفق");
   }
 
-  // Step 3: Finalize upload (set ACL and get final path)
+  // Step 3: Finalize upload (set ACL and get final path) - same as item images
   const finalizeResponse = await fetch("/api/upload/payment-attachment/finalize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({
-      objectPath,
-      originalName: file.name,
-      mimeType: file.type || "image/jpeg",
-      size: file.size,
-    }),
+    body: JSON.stringify({ objectPath, originalName: file.name }),
   });
 
   if (!finalizeResponse.ok) {
     const finalizeError = await finalizeResponse.json().catch(() => ({}));
-    // If file was not found in storage, the upload to GCS may have failed
-    if (finalizeError.code === "FILE_NOT_UPLOADED") {
-      throw new Error("فشل رفع الصورة إلى التخزين. يرجى المحاولة مرة أخرى.");
-    }
     throw new Error(finalizeError.message || "فشل حفظ المرفق");
   }
 
