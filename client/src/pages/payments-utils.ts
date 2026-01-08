@@ -149,7 +149,12 @@ export async function uploadPaymentAttachment(file: File): Promise<{ attachmentU
   });
 
   if (!finalizeResponse.ok) {
-    throw new Error("فشل حفظ المرفق");
+    const finalizeError = await finalizeResponse.json().catch(() => ({}));
+    // If file was not found in storage, the upload to GCS may have failed
+    if (finalizeError.code === "FILE_NOT_UPLOADED") {
+      throw new Error("فشل رفع الصورة إلى التخزين. يرجى المحاولة مرة أخرى.");
+    }
+    throw new Error(finalizeError.message || "فشل حفظ المرفق");
   }
 
   const result = await finalizeResponse.json();

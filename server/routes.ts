@@ -739,6 +739,21 @@ export async function registerRoutes(
         return res.status(400).json({ message: "مسار الملف مطلوب" });
       }
 
+      // First verify the file exists in Object Storage before setting ACL
+      try {
+        const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
+        console.log("[Upload] Payment Attachment File verified - name:", objectFile.name);
+      } catch (verifyError: any) {
+        console.error("[Upload] Payment Attachment File not found in storage:", verifyError);
+        if (verifyError?.name === "ObjectNotFoundError") {
+          return res.status(404).json({ 
+            message: "الملف غير موجود في التخزين. تأكد من رفع الملف أولاً.",
+            code: "FILE_NOT_UPLOADED"
+          });
+        }
+        throw verifyError;
+      }
+
       // Set public visibility for payment attachments
       const normalizedPath = await objectStorageService.trySetObjectEntityAclPolicy(
         objectPath,
@@ -750,9 +765,12 @@ export async function registerRoutes(
         attachmentUrl: normalizedPath,
         attachmentOriginalName: originalName || null
       });
-    } catch (error) {
-      console.error("[Upload] Error finalizing payment attachment:", error);
-      res.status(500).json({ message: "خطأ في حفظ المرفق" });
+    } catch (error: any) {
+      console.error("[Upload] Error finalizing payment attachment:", error?.message || error);
+      res.status(500).json({ 
+        message: "خطأ في حفظ المرفق",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
     }
   });
 
@@ -1866,19 +1884,31 @@ export async function registerRoutes(
     const attachmentUrl = payment.attachmentUrl;
     const disposition = options.inline ? "inline" : "attachment";
     const filename = payment.attachmentOriginalName || "attachment";
-    console.log(`[Attachment] Serving payment ${paymentId}, path: ${attachmentUrl}`);
+    console.log(`[Attachment] Serving payment ${paymentId}, path: ${attachmentUrl}, mimeType: ${payment.attachmentMimeType}`);
 
     // Check if attachment is in Object Storage (persistent)
     if (attachmentUrl.startsWith("/objects/")) {
       try {
         console.log(`[Attachment] Fetching from Object Storage: ${attachmentUrl}`);
         const objectFile = await objectStorageService.getObjectEntityFile(attachmentUrl);
-        console.log(`[Attachment] File found: ${objectFile.name}`);
-        res.setHeader("Content-Type", payment.attachmentMimeType || "application/octet-stream");
+        const [metadata] = await objectFile.getMetadata();
+        console.log(`[Attachment] File found: ${objectFile.name}, size: ${metadata.size}, contentType: ${metadata.contentType}`);
+        
+        if (!metadata.size || Number(metadata.size) === 0) {
+          console.error(`[Attachment] File has zero size: ${attachmentUrl}`);
+          return res.status(404).json({
+            error: {
+              code: "PAYMENT_ATTACHMENT_EMPTY",
+              message: "الملف المرفق فارغ.",
+            },
+          });
+        }
+        
+        res.setHeader("Content-Type", payment.attachmentMimeType || metadata.contentType || "application/octet-stream");
         res.setHeader("Content-Disposition", `${disposition}; filename="${filename}"`);
         return await objectStorageService.downloadObject(objectFile, res);
       } catch (error: any) {
-        console.error("Error serving payment attachment from Object Storage:", error);
+        console.error("Error serving payment attachment from Object Storage:", error?.message || error);
         if (error?.name === "ObjectNotFoundError") {
           return res.status(404).json({
             error: {
