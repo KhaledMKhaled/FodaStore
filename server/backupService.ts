@@ -63,7 +63,9 @@ async function runPgDump(): Promise<string> {
     `${PG_DUMP_PATH} "${databaseUrl}" --format=plain --no-owner --no-acl ` +
     `--exclude-schema=_system ` +
     `--exclude-table='replit_*' ` +
-    `--exclude-table='public.replit_*'`
+    `--exclude-table='public.replit_*' ` +
+    `--exclude-table='sessions' ` +
+    `--exclude-table='public.sessions'`
   );
   return stdout;
 }
@@ -73,7 +75,7 @@ function preprocessSqlForRestore(sqlContent: string): string {
   const filteredLines: string[] = [];
   let skipMode: "none" | "until_semicolon" | "until_copy_end" = "none";
   
-  // Patterns for system/internal objects to skip
+  // Patterns for system/internal objects to skip (also sessions to preserve user login during restore)
   const systemPatterns = [
     /^CREATE SCHEMA\s+.*_system/i,
     /^ALTER SCHEMA\s+.*_system/i,
@@ -86,6 +88,16 @@ function preprocessSqlForRestore(sqlContent: string): string {
     /^SELECT pg_catalog\.setval\('.*replit_/i,
     /^COPY\s+.*_system\./i,
     /^COPY\s+.*replit_/i,
+    // Preserve sessions table and related sequences to keep users logged in during restore
+    /^CREATE TABLE\s+(public\.)?"?sessions"?/i,
+    /^ALTER TABLE\s+(ONLY\s+)?(public\.)?"?sessions"?/i,
+    /^COPY\s+(public\.)?"?sessions"?/i,
+    /^DROP TABLE\s+.*"?sessions"?/i,
+    /^TRUNCATE\s+.*"?sessions"?/i,
+    /^CREATE SEQUENCE\s+(public\.)?sessions/i,
+    /^ALTER SEQUENCE\s+(public\.)?sessions/i,
+    /^DROP SEQUENCE\s+.*sessions/i,
+    /^SELECT pg_catalog\.setval\('(public\.)?sessions/i,
   ];
   
   for (const line of lines) {
@@ -146,25 +158,25 @@ async function clearDatabaseTables(): Promise<void> {
     throw new Error("DATABASE_URL environment variable is not set");
   }
   
-  // Get all tables in public schema, excluding Replit internal tables
+  // Get all tables in public schema, excluding Replit internal tables and sessions (to preserve user login)
   const { stdout: tablesOutput } = await execAsync(
-    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE 'replit_%'"`
+    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE 'replit_%' AND tablename != 'sessions'"`
   );
   
   const tables = tablesOutput
     .split("\n")
     .map((t) => t.trim())
-    .filter((t) => t.length > 0);
+    .filter((t) => t.length > 0 && t !== "sessions");
   
-  // Get all sequences in public schema, excluding Replit internal sequences
+  // Get all sequences in public schema, excluding Replit internal sequences and sessions-related sequences
   const { stdout: seqOutput } = await execAsync(
-    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' AND sequencename NOT LIKE 'replit_%'"`
+    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' AND sequencename NOT LIKE 'replit_%' AND sequencename NOT LIKE 'sessions%'"`
   );
   
   const sequences = seqOutput
     .split("\n")
     .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .filter((s) => s.length > 0 && !s.startsWith("sessions"));
   
   if (tables.length === 0 && sequences.length === 0) {
     return;
