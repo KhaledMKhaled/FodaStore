@@ -114,11 +114,66 @@ function preprocessSqlForRestore(sqlContent: string): string {
   return filteredLines.join("\n");
 }
 
+async function clearDatabaseTables(): Promise<void> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL environment variable is not set");
+  }
+  
+  // Get all tables in public schema, excluding Replit internal tables
+  const { stdout: tablesOutput } = await execAsync(
+    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE 'replit_%'"`
+  );
+  
+  const tables = tablesOutput
+    .split("\n")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  
+  if (tables.length === 0) {
+    return;
+  }
+  
+  // Drop all tables with CASCADE to handle foreign keys
+  const dropStatements = tables.map((t) => `DROP TABLE IF EXISTS public."${t}" CASCADE;`).join("\n");
+  
+  return new Promise((resolve, reject) => {
+    const psql = spawn(PSQL_PATH, [databaseUrl], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    
+    let stderr = "";
+    
+    psql.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+    
+    psql.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        console.warn(`Drop tables warning: ${stderr}`);
+        resolve(); // Don't fail on drop errors
+      }
+    });
+    
+    psql.on("error", (err) => {
+      reject(err);
+    });
+    
+    psql.stdin.write(dropStatements);
+    psql.stdin.end();
+  });
+}
+
 async function runPsqlRestore(sqlContent: string): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error("DATABASE_URL environment variable is not set");
   }
+  
+  // Clear existing tables first
+  await clearDatabaseTables();
   
   const processedSql = preprocessSqlForRestore(sqlContent);
   
