@@ -226,8 +226,37 @@ export default function BackupPage() {
     }
   };
 
-  const handleDownload = (jobId: number) => {
-    window.open(`/api/backup/download/${jobId}`, "_blank");
+  const handleDownload = async (jobId: number) => {
+    try {
+      const response = await fetch(`/api/backup/download/${jobId}`, {
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "فشل في تحميل النسخة الاحتياطية");
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
+      link.download = filenameMatch ? filenameMatch[1] : `backup-${jobId}.zip`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Download error:", error);
+      toast({ 
+        title: error instanceof Error ? error.message : "فشل في تحميل النسخة الاحتياطية", 
+        variant: "destructive" 
+      });
+    }
   };
 
   const handleRestoreClick = (job: BackupJob) => {
