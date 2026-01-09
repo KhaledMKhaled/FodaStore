@@ -155,10 +155,12 @@ export default function BackupPage() {
 
   const startRestoreMutation = useMutation({
     mutationFn: async (backupPath: string) => {
+      console.log("[restore] Starting restore with path:", backupPath);
       const res = await apiRequest("POST", "/api/restore/start", { backupPath });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log("[restore] Restore job started:", data);
       toast({ title: "تم بدء الاستعادة بنجاح" });
       queryClient.invalidateQueries({ queryKey: ["/api/backup/jobs"] });
       setIsRestoreDialogOpen(false);
@@ -189,6 +191,7 @@ export default function BackupPage() {
       return res.json();
     },
     onSuccess: (data) => {
+      console.log("[upload] Upload successful:", data);
       toast({ title: "تم رفع النسخة الاحتياطية بنجاح" });
       setUploadedBackupPath(data.backupPath);
       setIsUploadRestoreDialogOpen(true);

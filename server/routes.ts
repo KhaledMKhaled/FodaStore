@@ -2378,11 +2378,14 @@ export async function registerRoutes(
       const userId = req.user!.id;
       const { backupPath } = req.body;
       
+      console.log("[restore/start] Received restore request:", { backupPath, userId });
+      
       if (!backupPath) {
         return res.status(400).json({ message: "مسار النسخة الاحتياطية مطلوب" });
       }
       
       const job = await startRestore(userId, backupPath);
+      console.log("[restore/start] Restore job created:", job.id);
       
       auditLogger({
         userId,
@@ -2458,9 +2461,12 @@ export async function registerRoutes(
         details: { action: "UPLOAD_BACKUP", filename: file.originalname, size: file.size },
       });
       
+      console.log("[backup/upload] Upload successful:", { backupPath, fileName: file.originalname, fileSize: file.size });
       res.json({ 
         success: true, 
         backupPath,
+        fileName: file.originalname,
+        fileSize: file.size,
         message: "تم رفع النسخة الاحتياطية بنجاح" 
       });
     } catch (error) {
