@@ -98,6 +98,16 @@ function preprocessSqlForRestore(sqlContent: string): string {
     /^ALTER SEQUENCE\s+(public\.)?sessions/i,
     /^DROP SEQUENCE\s+.*sessions/i,
     /^SELECT pg_catalog\.setval\('(public\.)?sessions/i,
+    // Preserve backup_jobs table and related sequences to keep job tracking during restore
+    /^CREATE TABLE\s+(public\.)?"?backup_jobs"?/i,
+    /^ALTER TABLE\s+(ONLY\s+)?(public\.)?"?backup_jobs"?/i,
+    /^COPY\s+(public\.)?"?backup_jobs"?/i,
+    /^DROP TABLE\s+.*"?backup_jobs"?/i,
+    /^TRUNCATE\s+.*"?backup_jobs"?/i,
+    /^CREATE SEQUENCE\s+(public\.)?backup_jobs/i,
+    /^ALTER SEQUENCE\s+(public\.)?backup_jobs/i,
+    /^DROP SEQUENCE\s+.*backup_jobs/i,
+    /^SELECT pg_catalog\.setval\('(public\.)?backup_jobs/i,
   ];
   
   for (const line of lines) {
@@ -158,25 +168,25 @@ async function clearDatabaseTables(): Promise<void> {
     throw new Error("DATABASE_URL environment variable is not set");
   }
   
-  // Get all tables in public schema, excluding Replit internal tables and sessions (to preserve user login)
+  // Get all tables in public schema, excluding Replit internal tables, sessions (to preserve user login), and backup_jobs (to preserve job tracking)
   const { stdout: tablesOutput } = await execAsync(
-    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE 'replit_%' AND tablename != 'sessions'"`
+    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE 'replit_%' AND tablename NOT IN ('sessions', 'backup_jobs')"`
   );
   
   const tables = tablesOutput
     .split("\n")
     .map((t) => t.trim())
-    .filter((t) => t.length > 0 && t !== "sessions");
+    .filter((t) => t.length > 0 && t !== "sessions" && t !== "backup_jobs");
   
-  // Get all sequences in public schema, excluding Replit internal sequences and sessions-related sequences
+  // Get all sequences in public schema, excluding Replit internal sequences, sessions-related sequences, and backup_jobs sequences
   const { stdout: seqOutput } = await execAsync(
-    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' AND sequencename NOT LIKE 'replit_%' AND sequencename NOT LIKE 'sessions%'"`
+    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' AND sequencename NOT LIKE 'replit_%' AND sequencename NOT LIKE 'sessions%' AND sequencename NOT LIKE 'backup_jobs%'"`
   );
   
   const sequences = seqOutput
     .split("\n")
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith("sessions"));
+    .filter((s) => s.length > 0 && !s.startsWith("sessions") && !s.startsWith("backup_jobs"));
   
   if (tables.length === 0 && sequences.length === 0) {
     return;
