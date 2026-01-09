@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import archiver from "archiver";
 import AdmZip from "adm-zip";
@@ -68,8 +68,33 @@ async function runPsqlRestore(sqlContent: string): Promise<void> {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL environment variable is not set");
   }
-  const escapedSql = sqlContent.replace(/'/g, "'\\''");
-  await execAsync(`echo '${escapedSql}' | ${PSQL_PATH} "${databaseUrl}"`);
+  
+  return new Promise((resolve, reject) => {
+    const psql = spawn(PSQL_PATH, [databaseUrl, "-v", "ON_ERROR_STOP=1", "--single-transaction"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    
+    let stderr = "";
+    
+    psql.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+    
+    psql.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`psql exited with code ${code}: ${stderr}`));
+      }
+    });
+    
+    psql.on("error", (err) => {
+      reject(err);
+    });
+    
+    psql.stdin.write(sqlContent);
+    psql.stdin.end();
+  });
 }
 
 async function getDatabaseStats(): Promise<{ tables: number; size: string }> {
@@ -230,14 +255,14 @@ export async function startRestore(userId: string, backupPath: string): Promise<
       const totalMedia = mediaEntries.length;
       let restoredCount = 0;
 
-      const { bucketName, prefix } = objectStorage.getBucketAndPrefix();
+      const { bucketName } = objectStorage.getBucketAndPrefix();
 
       for (const entry of mediaEntries) {
         try {
-          const relativePath = entry.entryName.replace(/^media\//, "");
+          const objectPath = entry.entryName.replace(/^media\//, "");
           const buffer = entry.getData();
-          const uploadPath = `/${bucketName}/${prefix}/${relativePath}`;
-          const contentType = getContentType(relativePath);
+          const uploadPath = `/${bucketName}/${objectPath}`;
+          const contentType = getContentType(objectPath);
           await objectStorage.uploadObjectFromBuffer(uploadPath, buffer, contentType);
         } catch (err) {
           console.warn(`Could not restore ${entry.entryName}:`, err);
