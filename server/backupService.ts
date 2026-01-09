@@ -88,7 +88,7 @@ function preprocessSqlForRestore(sqlContent: string): string {
     /^SELECT pg_catalog\.setval\('.*replit_/i,
     /^COPY\s+.*_system\./i,
     /^COPY\s+.*replit_/i,
-    // Preserve sessions table and related sequences to keep users logged in during restore
+    // Preserve sessions table, indexes, and related sequences to keep users logged in during restore
     /^CREATE TABLE\s+(public\.)?"?sessions"?/i,
     /^ALTER TABLE\s+(ONLY\s+)?(public\.)?"?sessions"?/i,
     /^COPY\s+(public\.)?"?sessions"?/i,
@@ -98,7 +98,10 @@ function preprocessSqlForRestore(sqlContent: string): string {
     /^ALTER SEQUENCE\s+(public\.)?sessions/i,
     /^DROP SEQUENCE\s+.*sessions/i,
     /^SELECT pg_catalog\.setval\('(public\.)?sessions/i,
-    // Preserve backup_jobs table and related sequences to keep job tracking during restore
+    /^CREATE\s+(UNIQUE\s+)?INDEX\s+.*session/i,  // Matches IDX_session_expire and similar
+    /^DROP\s+INDEX\s+.*session/i,
+    /^ALTER\s+INDEX\s+.*session/i,
+    // Preserve backup_jobs table, indexes, and related sequences to keep job tracking during restore
     /^CREATE TABLE\s+(public\.)?"?backup_jobs"?/i,
     /^ALTER TABLE\s+(ONLY\s+)?(public\.)?"?backup_jobs"?/i,
     /^COPY\s+(public\.)?"?backup_jobs"?/i,
@@ -108,6 +111,9 @@ function preprocessSqlForRestore(sqlContent: string): string {
     /^ALTER SEQUENCE\s+(public\.)?backup_jobs/i,
     /^DROP SEQUENCE\s+.*backup_jobs/i,
     /^SELECT pg_catalog\.setval\('(public\.)?backup_jobs/i,
+    /^CREATE\s+(UNIQUE\s+)?INDEX\s+.*backup_jobs/i,
+    /^DROP\s+INDEX\s+.*backup_jobs/i,
+    /^ALTER\s+INDEX\s+.*backup_jobs/i,
   ];
   
   for (const line of lines) {
