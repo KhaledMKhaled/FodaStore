@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Database,
@@ -10,6 +10,7 @@ import {
   XCircle,
   Clock,
   RefreshCw,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -109,8 +110,12 @@ function getJobTypeBadge(jobType: string) {
 export default function BackupPage() {
   const [isBackupDialogOpen, setIsBackupDialogOpen] = useState(false);
   const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
+  const [isUploadRestoreDialogOpen, setIsUploadRestoreDialogOpen] = useState(false);
   const [selectedBackupPath, setSelectedBackupPath] = useState<string | null>(null);
   const [selectedBackupId, setSelectedBackupId] = useState<number | null>(null);
+  const [uploadedBackupPath, setUploadedBackupPath] = useState<string | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const { data: jobs, isLoading } = useQuery<BackupJob[]>({
@@ -157,13 +162,66 @@ export default function BackupPage() {
       toast({ title: "تم بدء الاستعادة بنجاح" });
       queryClient.invalidateQueries({ queryKey: ["/api/backup/jobs"] });
       setIsRestoreDialogOpen(false);
+      setIsUploadRestoreDialogOpen(false);
       setSelectedBackupPath(null);
       setSelectedBackupId(null);
+      setUploadedBackupPath(null);
+      setUploadedFileName(null);
     },
     onError: () => {
       toast({ title: "حدث خطأ أثناء بدء الاستعادة", variant: "destructive" });
     },
   });
+
+  const uploadBackupMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/backup/upload", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || "فشل في رفع الملف");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: "تم رفع النسخة الاحتياطية بنجاح" });
+      setUploadedBackupPath(data.backupPath);
+      setIsUploadRestoreDialogOpen(true);
+    },
+    onError: (error: Error) => {
+      toast({ title: error.message || "حدث خطأ أثناء رفع النسخة الاحتياطية", variant: "destructive" });
+    },
+  });
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (!file.name.endsWith(".zip")) {
+        toast({ title: "يجب أن يكون الملف بصيغة ZIP", variant: "destructive" });
+        return;
+      }
+      setUploadedFileName(file.name);
+      uploadBackupMutation.mutate(file);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleConfirmUploadRestore = () => {
+    if (uploadedBackupPath) {
+      startRestoreMutation.mutate(uploadedBackupPath);
+    }
+  };
 
   const handleDownload = (jobId: number) => {
     window.open(`/api/backup/download/${jobId}`, "_blank");
@@ -191,18 +249,41 @@ export default function BackupPage() {
             إنشاء نسخ احتياطية واستعادة البيانات
           </p>
         </div>
-        <Button
-          onClick={() => setIsBackupDialogOpen(true)}
-          disabled={startBackupMutation.isPending}
-          data-testid="button-create-backup"
-        >
-          {startBackupMutation.isPending ? (
-            <Loader2 className="w-4 h-4 ml-2 animate-spin" />
-          ) : (
-            <Plus className="w-4 h-4 ml-2" />
-          )}
-          إنشاء نسخة احتياطية جديدة
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileSelect}
+            accept=".zip"
+            className="hidden"
+            data-testid="input-upload-backup"
+          />
+          <Button
+            variant="outline"
+            onClick={handleUploadClick}
+            disabled={uploadBackupMutation.isPending}
+            data-testid="button-upload-backup"
+          >
+            {uploadBackupMutation.isPending ? (
+              <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4 ml-2" />
+            )}
+            رفع نسخة احتياطية
+          </Button>
+          <Button
+            onClick={() => setIsBackupDialogOpen(true)}
+            disabled={startBackupMutation.isPending}
+            data-testid="button-create-backup"
+          >
+            {startBackupMutation.isPending ? (
+              <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+            ) : (
+              <Plus className="w-4 h-4 ml-2" />
+            )}
+            إنشاء نسخة احتياطية جديدة
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -408,6 +489,43 @@ export default function BackupPage() {
               disabled={startRestoreMutation.isPending}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               data-testid="button-confirm-restore"
+            >
+              {startRestoreMutation.isPending ? (
+                <Loader2 className="w-4 h-4 ml-2 animate-spin" />
+              ) : (
+                <RotateCcw className="w-4 h-4 ml-2" />
+              )}
+              استعادة النسخة
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={isUploadRestoreDialogOpen} onOpenChange={setIsUploadRestoreDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد استعادة النسخة الاحتياطية المرفوعة</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="text-destructive font-semibold">تحذير:</span> سيتم استبدال جميع البيانات الحالية
+              بالبيانات من الملف "{uploadedFileName}".
+              هذه العملية لا يمكن التراجع عنها. هل أنت متأكد؟
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel 
+              disabled={startRestoreMutation.isPending}
+              onClick={() => {
+                setUploadedBackupPath(null);
+                setUploadedFileName(null);
+              }}
+            >
+              إلغاء
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmUploadRestore}
+              disabled={startRestoreMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-upload-restore"
             >
               {startRestoreMutation.isPending ? (
                 <Loader2 className="w-4 h-4 ml-2 animate-spin" />

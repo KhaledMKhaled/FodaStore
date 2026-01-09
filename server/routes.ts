@@ -265,6 +265,18 @@ const handlePaymentAttachmentUpload: RequestHandler = (req, res, next) => {
   });
 };
 
+const uploadBackupFile = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 500 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.originalname.endsWith(".zip")) {
+      cb(null, true);
+    } else {
+      cb(new Error("يجب أن يكون الملف بصيغة ZIP"));
+    }
+  },
+});
+
 type RouteDependencies = {
   storage?: IStorage;
   auditLogger?: typeof logAuditEvent;
@@ -2415,6 +2427,45 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error downloading backup:", error);
       res.status(500).json({ message: "فشل في تحميل النسخة الاحتياطية" });
+    }
+  });
+
+  app.post("/api/backup/upload", requireRole(["مدير"]), uploadBackupFile.single("file"), async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const file = req.file;
+      
+      if (!file) {
+        return res.status(400).json({ message: "الملف مطلوب" });
+      }
+      
+      if (!file.originalname.endsWith(".zip")) {
+        return res.status(400).json({ message: "يجب أن يكون الملف بصيغة ZIP" });
+      }
+      
+      const objectStorage = new ObjectStorageService();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const { bucketName } = objectStorage.getBucketAndPrefix();
+      const backupPath = `/${bucketName}/backups/uploaded-${timestamp}.zip`;
+      
+      await objectStorage.uploadObjectFromBuffer(backupPath, file.buffer, "application/zip");
+      
+      auditLogger({
+        userId,
+        entityType: "BACKUP",
+        entityId: "upload",
+        actionType: "CREATE",
+        details: { action: "UPLOAD_BACKUP", filename: file.originalname, size: file.size },
+      });
+      
+      res.json({ 
+        success: true, 
+        backupPath,
+        message: "تم رفع النسخة الاحتياطية بنجاح" 
+      });
+    } catch (error) {
+      console.error("Error uploading backup:", error);
+      res.status(500).json({ message: "فشل في رفع النسخة الاحتياطية" });
     }
   });
 }

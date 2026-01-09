@@ -42,6 +42,10 @@ The application is built as a full-stack web application with a clear separation
 - Apply to All feature in Customs step for quick data entry.
 
 ## Recent Changes
+- **January 2026**: Added backup file upload and restore from external storage
+  - Users can now upload a previously downloaded backup ZIP file
+  - The uploaded backup is stored in Object Storage and can be restored
+  - Confirmation dialog warns users before restoring from uploaded file
 - **January 2026**: Added three new payment methods: نواقص (Shortages), AliPay, WeChat
   - Updated payments page, movement report, and payment methods report
   - AliPay and WeChat use reference number field (like other non-cash methods)
