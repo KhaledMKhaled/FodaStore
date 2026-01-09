@@ -68,6 +68,18 @@ function preprocessSqlForRestore(sqlContent: string): string {
   const filteredLines: string[] = [];
   let skipUntilSemicolon = false;
   
+  const systemPatterns = [
+    /CREATE SCHEMA\s+["']?_system["']?/i,
+    /ALTER SCHEMA\s+["']?_system["']?/i,
+    /GRANT\s+.*\s+ON SCHEMA\s+["']?_system["']?/i,
+    /CREATE TABLE\s+.*replit_/i,
+    /ALTER TABLE\s+.*replit_/i,
+    /INSERT INTO\s+.*replit_/i,
+    /CREATE TABLE\s+["']?_system["']?\./i,
+    /ALTER TABLE\s+["']?_system["']?\./i,
+    /INSERT INTO\s+["']?_system["']?\./i,
+  ];
+  
   for (const line of lines) {
     if (skipUntilSemicolon) {
       if (line.includes(";")) {
@@ -76,24 +88,18 @@ function preprocessSqlForRestore(sqlContent: string): string {
       continue;
     }
     
-    if (line.match(/CREATE SCHEMA\s+["']?_system["']?/i)) {
-      if (!line.includes(";")) {
-        skipUntilSemicolon = true;
+    let shouldSkip = false;
+    for (const pattern of systemPatterns) {
+      if (line.match(pattern)) {
+        shouldSkip = true;
+        if (!line.includes(";")) {
+          skipUntilSemicolon = true;
+        }
+        break;
       }
-      continue;
     }
     
-    if (line.match(/ALTER SCHEMA\s+["']?_system["']?/i)) {
-      if (!line.includes(";")) {
-        skipUntilSemicolon = true;
-      }
-      continue;
-    }
-    
-    if (line.match(/GRANT\s+.*\s+ON SCHEMA\s+["']?_system["']?/i)) {
-      if (!line.includes(";")) {
-        skipUntilSemicolon = true;
-      }
+    if (shouldSkip) {
       continue;
     }
     
