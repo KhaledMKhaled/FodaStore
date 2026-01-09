@@ -63,11 +63,53 @@ async function runPgDump(): Promise<string> {
   return stdout;
 }
 
+function preprocessSqlForRestore(sqlContent: string): string {
+  const lines = sqlContent.split("\n");
+  const filteredLines: string[] = [];
+  let skipUntilSemicolon = false;
+  
+  for (const line of lines) {
+    if (skipUntilSemicolon) {
+      if (line.includes(";")) {
+        skipUntilSemicolon = false;
+      }
+      continue;
+    }
+    
+    if (line.match(/CREATE SCHEMA\s+["']?_system["']?/i)) {
+      if (!line.includes(";")) {
+        skipUntilSemicolon = true;
+      }
+      continue;
+    }
+    
+    if (line.match(/ALTER SCHEMA\s+["']?_system["']?/i)) {
+      if (!line.includes(";")) {
+        skipUntilSemicolon = true;
+      }
+      continue;
+    }
+    
+    if (line.match(/GRANT\s+.*\s+ON SCHEMA\s+["']?_system["']?/i)) {
+      if (!line.includes(";")) {
+        skipUntilSemicolon = true;
+      }
+      continue;
+    }
+    
+    filteredLines.push(line);
+  }
+  
+  return filteredLines.join("\n");
+}
+
 async function runPsqlRestore(sqlContent: string): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error("DATABASE_URL environment variable is not set");
   }
+  
+  const processedSql = preprocessSqlForRestore(sqlContent);
   
   return new Promise((resolve, reject) => {
     const psql = spawn(PSQL_PATH, [databaseUrl, "-v", "ON_ERROR_STOP=1", "--single-transaction"], {
@@ -92,7 +134,7 @@ async function runPsqlRestore(sqlContent: string): Promise<void> {
       reject(err);
     });
     
-    psql.stdin.write(sqlContent);
+    psql.stdin.write(processedSql);
     psql.stdin.end();
   });
 }
