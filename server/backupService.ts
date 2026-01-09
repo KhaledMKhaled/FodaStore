@@ -59,7 +59,12 @@ async function runPgDump(): Promise<string> {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL environment variable is not set");
   }
-  const { stdout } = await execAsync(`${PG_DUMP_PATH} "${databaseUrl}" --format=plain --no-owner --no-acl`);
+  const { stdout } = await execAsync(
+    `${PG_DUMP_PATH} "${databaseUrl}" --format=plain --no-owner --no-acl ` +
+    `--exclude-schema=_system ` +
+    `--exclude-table='replit_*' ` +
+    `--exclude-table='public.replit_*'`
+  );
   return stdout;
 }
 
@@ -69,15 +74,15 @@ function preprocessSqlForRestore(sqlContent: string): string {
   let skipUntilSemicolon = false;
   
   const systemPatterns = [
-    /CREATE SCHEMA\s+["']?_system["']?/i,
-    /ALTER SCHEMA\s+["']?_system["']?/i,
-    /GRANT\s+.*\s+ON SCHEMA\s+["']?_system["']?/i,
-    /CREATE TABLE\s+.*replit_/i,
-    /ALTER TABLE\s+.*replit_/i,
-    /INSERT INTO\s+.*replit_/i,
-    /CREATE TABLE\s+["']?_system["']?\./i,
-    /ALTER TABLE\s+["']?_system["']?\./i,
-    /INSERT INTO\s+["']?_system["']?\./i,
+    /CREATE SCHEMA\s+.*_system/i,
+    /ALTER SCHEMA\s+.*_system/i,
+    /GRANT\s+.*_system/i,
+    /SET\s+.*_system/i,
+    /_system\./i,
+    /replit_/i,
+    /CREATE SEQUENCE\s+.*replit/i,
+    /ALTER SEQUENCE\s+.*replit/i,
+    /SELECT pg_catalog\.setval\(.*replit/i,
   ];
   
   for (const line of lines) {
