@@ -71,40 +71,66 @@ async function runPgDump(): Promise<string> {
 function preprocessSqlForRestore(sqlContent: string): string {
   const lines = sqlContent.split("\n");
   const filteredLines: string[] = [];
-  let skipUntilSemicolon = false;
+  let skipMode: "none" | "until_semicolon" | "until_copy_end" = "none";
   
+  // Patterns for system/internal objects to skip
   const systemPatterns = [
-    /CREATE SCHEMA\s+.*_system/i,
-    /ALTER SCHEMA\s+.*_system/i,
-    /GRANT\s+.*_system/i,
-    /SET\s+.*_system/i,
-    /_system\./i,
-    /replit_/i,
-    /CREATE SEQUENCE\s+.*replit/i,
-    /ALTER SEQUENCE\s+.*replit/i,
-    /SELECT pg_catalog\.setval\(.*replit/i,
+    /^CREATE SCHEMA\s+.*_system/i,
+    /^ALTER SCHEMA\s+.*_system/i,
+    /^GRANT\s+.*ON SCHEMA\s+.*_system/i,
+    /_system\.\w+/i,  // References to _system schema objects
+    /^CREATE TABLE\s+.*replit_/i,
+    /^CREATE SEQUENCE\s+.*replit_/i,
+    /^ALTER TABLE\s+.*replit_/i,
+    /^ALTER SEQUENCE\s+.*replit_/i,
+    /^SELECT pg_catalog\.setval\('.*replit_/i,
+    /^COPY\s+.*_system\./i,
+    /^COPY\s+.*replit_/i,
   ];
   
   for (const line of lines) {
-    if (skipUntilSemicolon) {
-      if (line.includes(";")) {
-        skipUntilSemicolon = false;
+    const trimmedLine = line.trim();
+    
+    // Handle skip modes
+    if (skipMode === "until_copy_end") {
+      // COPY blocks end with \. on its own line
+      if (trimmedLine === "\\.") {
+        skipMode = "none";
       }
       continue;
     }
     
+    if (skipMode === "until_semicolon") {
+      if (trimmedLine.endsWith(";")) {
+        skipMode = "none";
+      }
+      continue;
+    }
+    
+    // Check if this line should be skipped
     let shouldSkip = false;
     for (const pattern of systemPatterns) {
-      if (line.match(pattern)) {
+      if (trimmedLine.match(pattern)) {
         shouldSkip = true;
-        if (!line.includes(";")) {
-          skipUntilSemicolon = true;
+        
+        // Determine how to skip multi-line statements
+        if (trimmedLine.match(/^COPY\s+/i)) {
+          // COPY statements end with \. not semicolon
+          skipMode = "until_copy_end";
+        } else if (!trimmedLine.endsWith(";")) {
+          skipMode = "until_semicolon";
         }
         break;
       }
     }
     
     if (shouldSkip) {
+      continue;
+    }
+    
+    // Skip comment lines that reference system objects (optional cleanup)
+    if (trimmedLine.startsWith("--") && 
+        (trimmedLine.includes("_system") || trimmedLine.includes("replit_"))) {
       continue;
     }
     
@@ -130,12 +156,25 @@ async function clearDatabaseTables(): Promise<void> {
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
   
-  if (tables.length === 0) {
+  // Get all sequences in public schema, excluding Replit internal sequences
+  const { stdout: seqOutput } = await execAsync(
+    `${PSQL_PATH} "${databaseUrl}" -t -c "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' AND sequencename NOT LIKE 'replit_%'"`
+  );
+  
+  const sequences = seqOutput
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  
+  if (tables.length === 0 && sequences.length === 0) {
     return;
   }
   
-  // Drop all tables with CASCADE to handle foreign keys
-  const dropStatements = tables.map((t) => `DROP TABLE IF EXISTS public."${t}" CASCADE;`).join("\n");
+  // Drop all tables and sequences with CASCADE
+  const dropStatements = [
+    ...tables.map((t) => `DROP TABLE IF EXISTS public."${t}" CASCADE;`),
+    ...sequences.map((s) => `DROP SEQUENCE IF EXISTS public."${s}" CASCADE;`),
+  ].join("\n");
   
   return new Promise((resolve, reject) => {
     const psql = spawn(PSQL_PATH, [databaseUrl], {
@@ -152,7 +191,7 @@ async function clearDatabaseTables(): Promise<void> {
       if (code === 0) {
         resolve();
       } else {
-        console.warn(`Drop tables warning: ${stderr}`);
+        console.warn(`Drop tables/sequences warning: ${stderr}`);
         resolve(); // Don't fail on drop errors
       }
     });
@@ -178,6 +217,7 @@ async function runPsqlRestore(sqlContent: string): Promise<void> {
   const processedSql = preprocessSqlForRestore(sqlContent);
   
   return new Promise((resolve, reject) => {
+    // Use --single-transaction for atomicity and ON_ERROR_STOP for strict error handling
     const psql = spawn(PSQL_PATH, [databaseUrl, "-v", "ON_ERROR_STOP=1", "--single-transaction"], {
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -188,11 +228,19 @@ async function runPsqlRestore(sqlContent: string): Promise<void> {
       stderr += data.toString();
     });
     
-    psql.on("close", (code) => {
+    psql.on("close", async (code) => {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`psql exited with code ${code}: ${stderr}`));
+        // Restore failed - recreate empty schema so app can still run
+        console.error(`Restore failed with code ${code}: ${stderr}`);
+        try {
+          await execAsync(`cd /home/runner/workspace && npm run db:push --force`);
+          console.log("Recreated database schema after failed restore");
+        } catch (e) {
+          console.error("Failed to recreate schema:", e);
+        }
+        reject(new Error(`Restore failed: ${stderr.slice(0, 500)}`));
       }
     });
     
