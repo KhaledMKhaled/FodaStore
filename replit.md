@@ -42,6 +42,10 @@ The application is built as a full-stack web application with a clear separation
 - Apply to All feature in Customs step for quick data entry.
 
 ## Recent Changes
+- **March 2026**: Fixed deployment failure - db:push was timing out during build phase
+  - Created `script/db-push.ts` with retry logic (3 attempts, 5s delay, 60s timeout)
+  - Deployment build command now uses retry script instead of raw `npm run db:push`
+  - Added connection pool timeout config in `server/db.ts` (10s connect, 30s idle, max 20)
 - **January 2026**: Added backup file upload and restore from external storage
   - Users can now upload a previously downloaded backup ZIP file
   - The uploaded backup is stored in Object Storage and can be restored
