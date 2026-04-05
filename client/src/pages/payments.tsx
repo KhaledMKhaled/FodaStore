@@ -1300,7 +1300,7 @@ export default function Payments() {
     setCurrentPagePayments(1);
   };
 
-  const filteredShipments = activeShipments?.filter((s) => {
+  const filteredShipments = shipments?.filter((s) => {
     if (search && !s.shipmentName.toLowerCase().includes(search.toLowerCase()) && 
         !s.shipmentCode.toLowerCase().includes(search.toLowerCase())) {
       return false;
@@ -2040,6 +2040,7 @@ export default function Payments() {
                     <SelectItem value="في انتظار الشحن">في انتظار الشحن</SelectItem>
                     <SelectItem value="جاهزة للاستلام">جاهزة للاستلام</SelectItem>
                     <SelectItem value="مستلمة بنجاح">مستلمة بنجاح</SelectItem>
+                    <SelectItem value="مؤرشفة">مؤرشفة</SelectItem>
                   </SelectContent>
                 </Select>
                 <Input
@@ -2418,6 +2419,7 @@ export default function Payments() {
                     <SelectItem value="في انتظار الشحن">في انتظار الشحن</SelectItem>
                     <SelectItem value="جاهزة للاستلام">جاهزة للاستلام</SelectItem>
                     <SelectItem value="مستلمة بنجاح">مستلمة بنجاح</SelectItem>
+                    <SelectItem value="مؤرشفة">مؤرشفة</SelectItem>
                   </SelectContent>
                 </Select>
                 <Input
