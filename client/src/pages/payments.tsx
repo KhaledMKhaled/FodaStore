@@ -1305,7 +1305,10 @@ export default function Payments() {
         !s.shipmentCode.toLowerCase().includes(search.toLowerCase())) {
       return false;
     }
-    if (statusFilter && statusFilter !== "all" && s.status !== statusFilter) {
+    if (statusFilter === "all" && s.status === "مؤرشفة") {
+      return false;
+    }
+    if (statusFilter !== "all" && s.status !== statusFilter) {
       return false;
     }
     if (dateFrom) {
@@ -1332,7 +1335,10 @@ export default function Payments() {
         !shipment.shipmentCode.toLowerCase().includes(search.toLowerCase())) {
       return false;
     }
-    if (statusFilter && statusFilter !== "all" && shipment && shipment.status !== statusFilter) {
+    if (statusFilter === "all" && shipment && shipment.status === "مؤرشفة") {
+      return false;
+    }
+    if (statusFilter !== "all" && shipment && shipment.status !== statusFilter) {
       return false;
     }
     if (dateFrom) {
